@@ -1536,6 +1536,11 @@
 			"label": "v3-h46",
 			"type": "shell",
 			"command": "(git init -b main && git add -A && git --no-pager status --short | awk '{print $2}' | sed 's|/.*||' | sort | uniq -c && git commit -q -F - <<'EOF'\nSelenite v3.0.0-rc.3\n\nInfinite nested raylib grids that hold any file, with embedded Ruby\n(Magnus), profiles, 3D view, partitioned_array export/import, music\nplayer, plugins, stacks, per-grid inventories, a raylib-style game API,\nper-grid folders and per-grid assets/ copies of added files.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\nEOF\ngit --no-pager log --stat --oneline | tail -5; git --no-pager status --short | wc -l; git count-objects -vH | grep size-pack) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h47",
+			"type": "shell",
+			"command": "(git --no-pager log -1 --format='%H %an <%ae>%n%B'; git count-objects -vH) > /tmp/g.txt 2>&1"
 		}
 	]
 }
