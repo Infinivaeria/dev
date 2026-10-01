@@ -1,0 +1,13 @@
+/target/
+/tmp/
+/ext/selenite/target/
+/lib/selenite/*.so
+/lib/selenite/*.bundle
+/Gemfile.lock
+*.gem
+/selenite.json
+/dist/
+/test-artifacts/
+/partitioned_array/
+/bin/raygrid.json
+*.tar.gz

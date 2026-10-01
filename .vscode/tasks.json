@@ -1,0 +1,1541 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "run-tests",
+			"type": "shell",
+			"command": "cargo test --features scripting"
+		},
+		{
+			"label": "selenite-check",
+			"type": "shell",
+			"command": "cargo fmt --all -- --check && cargo check --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-format-check",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo check --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-format-check-2",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo check --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-check-3",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo check --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-tests",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo test --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "selenite-tests-2",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo test --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "selenite-release-package",
+			"type": "shell",
+			"command": "cargo fmt --all -- --check && cargo test --features scripting && ./package.sh",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-portable-smoke",
+			"type": "shell",
+			"command": "SCRIPT_FILE=\"${TMPDIR:-/tmp}/selenite-portable-smoke.rb\"; GRID_FILE=\"${TMPDIR:-/tmp}/selenite-portable-smoke.json\"; printf '%s\\n' \"grid_set_file(4, 5, 'portable.mp3')\" > \"$SCRIPT_FILE\"; ./dist/run.sh --script \"$SCRIPT_FILE\" \"$GRID_FILE\"; grep -q 'portable.mp3' \"$GRID_FILE\"; rm -f \"$SCRIPT_FILE\" \"$GRID_FILE\"",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "clone-partitioned-array",
+			"type": "shell",
+			"command": "git config --global --get-all credential.helper; echo '---'; GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone --recursive https://github.com/Infinivaeria/partitioned_array.git /home/aylon-ayrlon/dev/partitioned_array && ls /home/aylon-ayrlon/dev/partitioned_array/lib",
+			"problemMatcher": []
+		},
+		{
+			"label": "probe-partitioned-array",
+			"type": "shell",
+			"command": "cd partitioned_array && grep -nE '^\\s*require|^\\s*def (initialize|add|get|set|delete|allocate|save_everything_to_files!|load_everything_from_files!|\\[\\])\\b' lib/partitioned_array.rb lib/managed_partitioned_array.rb | head -60; echo ---; D=$(mktemp -d); ruby -e 'require_relative \"lib/managed_partitioned_array\"; a = ManagedPartitionedArray.new(dynamically_allocates: true, endless_add: true, db_size: 10, partition_amount_and_offset: 5, db_path: ARGV[0], db_name: \"t\"); a.allocate; a.add { |h| h[\"col\"] = 1; h[\"path\"] = \"x.png\" }; a.save_everything_to_files!; b = ManagedPartitionedArray.new(dynamically_allocates: true, endless_add: true, db_size: 10, partition_amount_and_offset: 5, db_path: ARGV[0], db_name: \"t\"); b.load_everything_from_files!; p b.get(0); p b.latest_id rescue p $!' \"$D\"; find \"$D\" | head; rm -rf \"$D\"",
+			"problemMatcher": []
+		},
+		{
+			"label": "probe-partitioned-array-2",
+			"type": "shell",
+			"command": "cd partitioned_array && export RBENV_VERSION=4.0.7; D=$(mktemp -d); ruby -e 'require_relative \"lib/managed_partitioned_array\"; mk = -> { ManagedPartitionedArray.new(dynamically_allocates: true, endless_add: true, db_size: 10, partition_amount_and_offset: 5, db_path: ARGV[0], db_name: \"t\") }; a = mk.(); a.allocate; 12.times { |i| a.add { |h| h[\"col\"] = i; h[\"path\"] = \"x#{i}.png\" } }; a.save_everything_to_files!; b = mk.(); b.load_everything_from_files!; p b.get(0); p b.get(11); p b.latest_id; b.set(0) { |h| h[\"col\"] = 99 }; p b.get(0); b.delete(1); p b.get(1)' \"$D\"; echo exit=$?; find \"$D\" | head -20; rm -rf \"$D\"",
+			"problemMatcher": []
+		},
+		{
+			"label": "mkdir-ruby",
+			"type": "shell",
+			"command": "mkdir -p src/ruby",
+			"problemMatcher": []
+		},
+		{
+			"label": "probe-bridge",
+			"type": "shell",
+			"command": "export RBENV_VERSION=4.0.7; D=$(mktemp -d); ruby -I partitioned_array/lib -e '$cells = (0...40).map { |i| [i, -i, i.even? ? \"image\" : \"grid\", i.even? ? \"f#{i}.png\" : nil] }; def grid_list = $cells; $set = []; def grid_set_file(c,r,p) = ($set << [c,r,p]; true); def grid_new_grid(c,r) = ($set << [c,r,:g]; true); load \"src/ruby/partitioned_array_bridge.rb\"; p grid_pa_available; p grid_pa_export(ARGV[0]); $cells = $cells.first(3); p grid_pa_export(ARGV[0]); p grid_pa_records(ARGV[0]); p grid_pa_import(ARGV[0]); p $set' \"$D\"; echo exit=$?; ls -R \"$D\" | head -20; rm -rf \"$D\"",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-pa-validate",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo check && cargo test --features scripting 2>&1 | tail -30 && ./package.sh 2>&1 | tail -8 && ls dist/partitioned_array/lib | head -3",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "selenite-pa-debug",
+			"type": "shell",
+			"command": "cargo test --features scripting scripting 2>&1 | tail -15",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "selenite-pa-test2",
+			"type": "shell",
+			"command": "cargo fmt --all && cargo check 2>&1 | grep -E '^(warning|error)' ; cargo test --features scripting 2>&1 | tail -8",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "selenite-pa-portable-smoke",
+			"type": "shell",
+			"command": "./package.sh 2>&1 | tail -3; T=$(mktemp -d); printf '%s\\n' \"grid_set_file(1, 2, 'song.mp3')\" \"grid_new_grid(3, 4)\" \"n = grid_pa_export('$T/pa')\" \"grid_remove(1, 2); grid_remove(3, 4)\" \"[n, grid_pa_import('$T/pa'), grid_list.sort, $LOAD_PATH.first]\" > \"$T/s.rb\"; cd \"$T\" && /home/aylon-ayrlon/dev/dist/run.sh --script s.rb g.json; echo exit=$?; rm -rf \"$T\"",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-mkdir",
+			"type": "shell",
+			"command": "mkdir -p /tmp/selenite-pa-smoke",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-pa-smoke2",
+			"type": "shell",
+			"command": "cd /tmp/selenite-pa-smoke && /home/aylon-ayrlon/dev/dist/run.sh --script s.rb g.json; echo exit=$?; ls pa; cd / && rm -rf /tmp/selenite-pa-smoke",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-grep-text",
+			"type": "shell",
+			"command": "grep -nE 'draw_text|measure_text|font_size|FONT|TOOLBAR_|BUTTON_|fn draw_|zoom|const ' src/main.rs src/inventory.rs | head -150; wc -l src/main.rs src/inventory.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-grep-layout",
+			"type": "shell",
+			"command": "grep -nE 'TOOLBAR_HEIGHT|BUTTON_HEIGHT|MARGIN|fn viewport|set_window_|init\\(\\)|\\.size\\(|resizable|confirm_dialog_rects|draw_text|measure_text|layout_toolbar' src/main.rs src/inventory.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-font-probe",
+			"type": "shell",
+			"command": "ls /usr/share/fonts/truetype/*/ 2>/dev/null | head -40; grep -E '^raylib|^name = \"raylib' -A1 Cargo.lock | head; grep -n 'fn load_font_from_memory' -A8 ~/.cargo/registry/src/*/raylib-5*/src/core/text.rs | head -20",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-font-api",
+			"type": "shell",
+			"command": "F=$(ls -d ~/.cargo/registry/src/*/raylib-6.0.0)/src/core; grep -n 'pub fn load_font_from_memory\\|pub fn load_font_ex\\|pub fn draw_text_ex\\|pub fn measure_text_ex\\|pub fn set_texture_filter\\|fn texture(&self)\\|pub fn gen_texture_mipmaps' -A10 $F/text.rs $F/drawing.rs $F/texture.rs | grep -v '///' | head -90; ls /usr/share/doc/fonts-dejavu-core/ 2>/dev/null",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-font-setup",
+			"type": "shell",
+			"command": "mkdir -p assets/fonts && cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf assets/fonts/ && cp /usr/share/doc/fonts-dejavu-core/copyright assets/fonts/LICENSE-DejaVu.txt && ls -la assets/fonts && head -5 assets/fonts/LICENSE-DejaVu.txt; R=$(ls -d ~/.cargo/registry/src/*/raylib-sys-6.0.0); grep -rn 'pub fn LoadFontFromMemory\\|pub fn MeasureTextEx\\|pub fn DrawTextEx\\|pub fn GenTextureMipmaps\\|pub fn SetTextureFilter\\|TEXTURE_FILTER_TRILINEAR\\|pub fn GetFontDefault' -A8 $(find target -name 'bindings.rs' -path '*raylib-sys*' | head -1) | grep -v '^\\s*$' | head -70; grep -n 'Bundling partitioned' -B2 -A20 package.sh",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-grep2",
+			"type": "shell",
+			"command": "grep -nE 'struct ToolbarButton|layout_toolbar_buttons|toolbar_action_at|InventoryApp|fn spawn_mode|fn main|run_image_viewer|fn point_in_rect|pub\\(crate\\) const|^const|ImageViewer\\(' src/main.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-ui-check",
+			"type": "shell",
+			"command": "grep -n '#\\[cfg(test)\\]' -A6 src/main.rs | head; cargo fmt --all && cargo check --features scripting 2>&1 | grep -E '^(warning|error)' -A12 | head -120",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-ui-test",
+			"type": "shell",
+			"command": "cat >> src/main.rs << 'EOF'\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn toolbar_wraps_onto_new_rows_when_narrow() {\n        let widths = [100.0, 100.0, 100.0];\n        let (rects, height) = wrap_toolbar_items(&widths, 1000.0, 40.0, 10.0, 5.0);\n        assert!(rects.iter().all(|rect| rect.y == 10.0));\n        assert_eq!(height, 60.0);\n\n        let (rects, height) = wrap_toolbar_items(&widths, 240.0, 40.0, 10.0, 5.0);\n        assert_eq!(rects[0].y, 10.0);\n        assert_eq!(rects[1].y, 10.0);\n        assert_eq!(rects[2].y, 55.0);\n        assert_eq!(rects[2].x, 10.0);\n        assert_eq!(height, 105.0);\n\n        let (rects, height) = wrap_toolbar_items(&[500.0], 100.0, 40.0, 10.0, 5.0);\n        assert_eq!(rects[0].y, 10.0);\n        assert_eq!(height, 60.0);\n        assert_eq!(wrap_toolbar_items(&[], 100.0, 40.0, 10.0, 5.0).1, 0.0);\n    }\n}\nEOF\ncargo fmt --all && cargo check 2>&1 | grep -E '^(warning|error)' -A8; cargo test --features scripting 2>&1 | tail -25",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shot-tools",
+			"type": "shell",
+			"command": "echo DISPLAY=$DISPLAY WAYLAND=$WAYLAND_DISPLAY; for t in xdotool import scrot xwd gnome-screenshot grim convert wmctrl; do printf '%s: ' $t; command -v $t || echo no; done",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shot-prep",
+			"type": "shell",
+			"command": "mkdir -p /tmp/selenite-ui-shot && grep -n 'StartupMode::\\|args' src/main.rs | head -30",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shots",
+			"type": "shell",
+			"command": "cargo build --features scripting 2>&1 | tail -2 && cd /tmp/selenite-ui-shot && B=/home/aylon-ayrlon/dev/target/debug/selenite && $B --script setup.rb selenite.json && SELENITE_SHOT=s_default.png timeout 20 $B; SELENITE_SIZE=520x600 SELENITE_SHOT=s_narrow.png timeout 20 $B; SELENITE_SIZE=1600x1000 SELENITE_ZOOM=3.2 SELENITE_SHOT=s_zoom.png timeout 20 $B; SELENITE_ZOOM=0.55 SELENITE_SHOT=s_out.png timeout 20 $B; ls -la /home/aylon-ayrlon/dev/target/debug/*.png /tmp/selenite-ui-shot/*.png 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shots-log",
+			"type": "shell",
+			"command": "grep -nE 'png|Error|error|panick|SCREENSHOT|FONT|grid_list|\\[\\[' /tmp/1790835306194-copilot-tool-output-d8ba5c81469a4fa4b42515be4fd2b167.txt | grep -v 'Executing task' | head -30",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shots2",
+			"type": "shell",
+			"command": "cargo build --features scripting 2>&1 | grep -E '^(warning|error)' -A6; cd /tmp/selenite-ui-shot && B=/home/aylon-ayrlon/dev/target/debug/selenite && SELENITE_SHOT=s_default.png timeout 20 $B >/dev/null 2>&1; SELENITE_CONSOLE=1 SELENITE_SHOT=s_console.png timeout 20 $B >/dev/null 2>&1; SELENITE_SIZE=1400x900 SELENITE_DIALOG=1 SELENITE_SHOT=s_dialog.png timeout 20 $B >/dev/null 2>&1; ls *.png",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-shot-inv",
+			"type": "shell",
+			"command": "cargo build --features scripting 2>&1 | grep -E '^(warning|error)' -A6; cd /tmp/selenite-ui-shot && SELENITE_SHOT=s_inv.png timeout 20 /home/aylon-ayrlon/dev/target/debug/selenite --inventory selenite.json >/dev/null 2>&1; ls s_inv.png",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-readme-grep",
+			"type": "shell",
+			"command": "grep -nE '^#|Ctrl|Backtick|Scroll|License|LICENSE' README.md | head -50; grep -n 'LICENSE\\|licenses' package.sh",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-final",
+			"type": "shell",
+			"command": "rm -rf /tmp/selenite-ui-shot /tmp/1790834898955-copilot-tool-output-*.txt /tmp/1790835306194-copilot-tool-output-*.txt; grep -rn 'TEMP-SCREENSHOT\\|SELENITE_SHOT' src || echo 'no temp hooks'; cargo fmt --all --check && echo fmt-ok; cargo check 2>&1 | grep -E '^(warning|error)'; cargo check --features scripting 2>&1 | grep -E '^(warning|error)'; cargo test --features scripting 2>&1 | grep 'test result'; ./package.sh 2>&1 | tail -2; ls dist/licenses; T=$(mktemp -d); cd $T && timeout 4 /home/aylon-ayrlon/dev/dist/run.sh 2>&1 | grep -E 'FONT: Data|panick|rror'; echo launch-exit=$? ; cd / && rm -rf $T",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-survey",
+			"type": "shell",
+			"command": "cat Cargo.toml; wc -l src/*.rs src/ruby/*.rb package.sh README.md; grep -rn -i 'selenite' --include='*' -l . 2>/dev/null | grep -v '^./target\\|^./dist\\|^./partitioned_array\\|\\.git/' | head -30",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-survey2",
+			"type": "shell",
+			"command": "grep -nE '^\\s*pub (fn|enum|struct|const)|^(pub )?(struct|enum|impl|const)' src/persistence.rs; cat .gitignore; cat .vscode/tasks.json | head -40; ls ~/.cargo/registry/src/*/ | grep -E '^(dirs|directories|tempfile)-' | head",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-rename-probe",
+			"type": "shell",
+			"command": "ls -d ext lib Gemfile* *.gemspec 2>/dev/null; head -3 LICENSE; grep -rn -i selenite LICENSE .gitignore | head; ls; ls ~/.cargo/registry/src/*/ | grep -E '^dirs-[0-9]' | head -3",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-rename",
+			"type": "shell",
+			"command": "files=$(grep -rlI -i selenite --exclude-dir=tmp --exclude-dir=target --exclude-dir=dist --exclude-dir=partitioned_array --exclude-dir=test-artifacts --exclude='*.tar.gz' . ); echo \"$files\"; sed -i -e 's/SELENITE/SELENITE/g' -e 's/Selenite/Selenite/g' -e 's/Selenite/Selenite/g' -e 's/selenite/selenite/g' $files; echo ---; grep -rnI -i 'selenite\\|ray grid' --exclude-dir=tmp --exclude-dir=target --exclude-dir=dist --exclude-dir=partitioned_array --exclude-dir=test-artifacts . | head; ls bin src src/ruby",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-test-1",
+			"type": "shell",
+			"command": "cargo test --features scripting 2>&1 | tail -15",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-inv-grep",
+			"type": "shell",
+			"command": "grep -n 'load_texture_via_image_crate\\|spawn_mode\\|open_with_system\\|textures\\|json_path\\|fn \\|crate::' src/inventory.rs; wc -l src/*.rs; cat src/ruby/partitioned_array_bridge.rb | head -40",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-api-probe",
+			"type": "shell",
+			"command": "grep -n 'pub fn\\|pub enum\\|pub struct\\|fn label\\|^impl\\|^pub' src/persistence.rs; sed -n 170,250p src/inventory.rs; ls ~/.cargo/registry/src/*/ | grep -E '^(arboard|image|magnus|raylib)-[0-9]'; grep -rn 'pub fn file_list' ~/.cargo/registry/src/*/arboard-3.6.1/src/lib.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-pers-tests",
+			"type": "shell",
+			"command": "grep -n 'mod tests\\|#\\[test\\]\\|^use\\|^    use' src/persistence.rs | head -20; tail -5 src/persistence.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-rl-api",
+			"type": "shell",
+			"command": "cd ~/.cargo/registry/src/*/raylib-6.0.0/src; grep -rn 'fn gen_texture_mipmaps\\|fn set_texture_filter\\|fn set_window_title\\|fn get_clipboard_text\\|fn update_texture\\b\\|fn is_key_pressed_repeat\\|fn get_frame_time\\|fn set_exit_key' . | head; grep -n 'pub fn no_limits\\|pub fn limits\\|pub fn into_dimensions\\|pub fn with_guessed_format' ~/.cargo/registry/src/*/image-0.25.10/src/io/*.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-magnus-api",
+			"type": "shell",
+			"command": "cd ~/.cargo/registry/src/*/magnus-0.9.1/src; grep -rn 'fn define_module\\b\\|fn define_class\\b\\|fn undef_default_alloc_func\\|fn const_set\\|fn define_singleton_method\\|fn ary_new\\b\\|fn class_object\\|fn define_module_function\\|fn to_symbol\\|fn sym_new\\|fn exception_arg_error' . | head -20",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-mv-scripting",
+			"type": "shell",
+			"command": "mv src/scripting.rs /tmp/selenite-scripting.rs.bak && echo moved",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-camera-api",
+			"type": "shell",
+			"command": "grep -n 'pub fn\\|pub struct\\|^impl\\|offset\\|zoom:' src/camera.rs | head -40",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-ui-sigs",
+			"type": "shell",
+			"command": "grep -n 'pub fn' src/ui.rs; grep -n 'fn begin_scissor_mode' -A3 ~/.cargo/registry/src/*/raylib-6.0.0/src/core/drawing.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-find-old",
+			"type": "shell",
+			"command": "grep -n 'fn paste_clipboard\\|fn asset_directory\\|fn download_url\\|fn run_ruby_file\\|fn partitioned_array_dir\\|fn partitioned_array_transfer\\|fn create_grid_at_selection' src/main.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-del-old",
+			"type": "shell",
+			"command": "sed -n '1155p;1156p;1242p;1243p' src/main.rs && sed -i '1156,1242d' src/main.rs && sed -n '1150,1162p' src/main.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-sigs",
+			"type": "shell",
+			"command": "grep -n 'pub fn\\|pub enum\\|pub struct\\|derive\\|^    [A-Z][a-zA-Z]*[ ({,]' src/profiles.rs src/scripting.rs src/panels.rs src/imaging.rs src/download.rs src/help.rs | grep -v '^.*://' > /tmp/sel-sigs.txt; wc -l /tmp/sel-sigs.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-find-refs",
+			"type": "shell",
+			"command": "grep -n 'textures\\|load_texture_via_image_crate\\|preload_visible\\|fn draw\\|fn toolbar_layout\\|fn parse_mode\\|^fn \\|fn refresh\\|fn save\\|fn enter_grid\\|fn exit_grid\\|fn visible_\\|fn viewport\\|extension_for_content_type\\|fn expand_home\\|PasteItem\\|HookValue\\|fn run_image_viewer\\|fn run_script_file' src/main.rs src/inventory.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-splice-cli",
+			"type": "shell",
+			"command": "python3 - <<'EOF'\nsrc=open('src/main.rs').read()\nstart=src.index('fn run() -> Result<(), String> {\\n    let args')\nend=src.index('fn load_or_new_root(')\nsrc=src[:start]+open('/tmp/selenite-cli-block.rs').read()+src[end:]\nopen('src/main.rs','w').write(src)\nprint('ok')\nEOF\ngrep -n 'fn load_texture_via_image_crate' -A 30 src/main.rs | head -40; grep -n 'fn draw_console' -A 64 src/main.rs; grep -n 'fn spawn_mode' -A 20 src/main.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-font-check",
+			"type": "shell",
+			"command": "grep -n 'codepoint\\|0x2\\|load_font_from_memory\\|chars' src/ui.rs | head -30; grep -n 'save' src/main.rs | grep -n 'Save =>' ; sed -n 1,120p src/inventory.rs > /tmp/inv-head.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-check-scripting",
+			"type": "shell",
+			"command": "cargo check --features scripting --tests 2>&1 | tee /tmp/sel-check.txt | grep -E '^(error|warning)' | sort | uniq -c | head -60; grep -c '^error' /tmp/sel-check.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-tiled-fields",
+			"type": "shell",
+			"command": "grep -n '\\.width\\|\\.height\\|pub width\\|pub height' src/imaging.rs | head",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-check-both",
+			"type": "shell",
+			"command": "cargo fmt && cargo check --features scripting --tests 2>&1 | grep -E '^(error|warning)' -A 6 | head -60; echo ---NOFEAT---; cargo check --tests 2>&1 | grep -E '^(error|warning)' -A 6 | head -80",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-test",
+			"type": "shell",
+			"command": "cargo check 2>&1 | grep -E '^(error|warning)' -A 6 | head -40; echo ---FEAT---; cargo check --features scripting 2>&1 | grep -E '^(error|warning)' -A 6 | head -40; echo ---TEST---; cargo test --features scripting 2>&1 | tail -60 > /tmp/sel-test.txt; grep -E 'test result|FAILED|panicked|failed' /tmp/sel-test.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-dead",
+			"type": "shell",
+			"command": "grep -n 'pub fn move_cell\\|pub fn clear\\|pub fn insert_image' src/persistence.rs; grep -n 'pub fn eval_file(' -B2 src/scripting.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-main-tests",
+			"type": "shell",
+			"command": "grep -n 'cfg(test)\\|mod tests' src/main.rs; tail -5 src/main.rs",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-test2",
+			"type": "shell",
+			"command": "cargo fmt && cargo check 2>&1 | grep -E '^(error|warning)' -A 6 | head -30; echo ---FEAT---; cargo test --features scripting 2>&1 | tail -60 > /tmp/sel-test.txt; grep -E '^(error|warning)|test result|FAILED|panicked' -A4 /tmp/sel-test.txt | head -40",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-smoke",
+			"type": "shell",
+			"command": "rm -rf /tmp/sel-home && export SELENITE_HOME=/tmp/sel-home && cargo run -q --features scripting -- --script /tmp/selenite-smoke.rb --profile alpha; echo EXIT=$?; ./target/debug/selenite --list-profiles; ls -R /tmp/sel-home | head -20; cat /tmp/sel-home/profiles/alpha/selenite.json | head -c 600; echo; ./target/debug/selenite --help | head -5; ./target/debug/selenite --bogus; echo EXIT=$?",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-smoke2",
+			"type": "shell",
+			"command": "cargo fmt && rm -rf /tmp/sel-home && export SELENITE_HOME=/tmp/sel-home && cargo run -q --features scripting -- --script /tmp/selenite-smoke.rb --profile alpha; echo EXIT=$?; grep -m2 File /tmp/sel-home/profiles/alpha/selenite.json; printf 'puts 1\\nraise \"boom\"\\n' > /tmp/sel-err.rb; ./target/debug/selenite --script /tmp/sel-err.rb --grid /tmp/sel-g.json; echo EXIT=$?; ./target/debug/selenite --help | sed -n 3,12p",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-gui-smoke",
+			"type": "shell",
+			"command": "export SELENITE_HOME=/tmp/sel-home; echo \"DISPLAY=$DISPLAY WAYLAND=$WAYLAND_DISPLAY\"; printf 'Selenite.on(:activate) { |c,r,k,p| puts \"act #{k}\" }\\nputs \"init ran for #{Selenite.profile}\"\\n' > /tmp/sel-home/profiles/alpha/init.rb; python3 -c \"import struct,zlib\nw,h=9000,2500\nraw=b''.join(b'\\x00'+bytes([(x*7)%256 for x in range(w)])*1 for y in range(h))\nraw=b''.join(b'\\x00'+bytes(((x+y)%256 for x in range(w))) for y in range(0,h))\ndef ch(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d))\nopen('/tmp/sel-big.png','wb').write(b'\\x89PNG\\r\\n\\x1a\\n'+ch(b'IHDR',struct.pack('>IIBBBBB',w,h,8,0,0,0,0))+ch(b'IDAT',zlib.compress(raw,1))+ch(b'IEND',b''))\" && ls -la /tmp/sel-big.png; timeout 6 ./target/debug/selenite --profile alpha > /tmp/sel-gui.log 2>&1; echo GUI_EXIT=$?; grep -iE 'panic|error|init ran' /tmp/sel-gui.log | head; timeout 6 ./target/debug/selenite --image /tmp/sel-big.png > /tmp/sel-view.log 2>&1; echo VIEW_EXIT=$?; grep -iE 'panic|error|Texture' /tmp/sel-view.log | tail -5",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-gui-logs",
+			"type": "shell",
+			"command": "echo ---GUI---; grep -iE 'panic|error|init ran|WARNING' /tmp/sel-gui.log | head; tail -3 /tmp/sel-gui.log; echo ---VIEW---; grep -iE 'panic|error|WARNING|TEXTURE: \\[ID' /tmp/sel-view.log | tail -6",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-viewer-smoke",
+			"type": "shell",
+			"command": "timeout 8 ./target/debug/selenite --image /tmp/sel-big.png > /tmp/sel-view.log 2>&1; echo VIEW_EXIT=$?; grep -iE 'panic|error|WARNING|TEXTURE: \\[ID' /tmp/sel-view.log | tail -8",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-readme-outline",
+			"type": "shell",
+			"command": "grep -n '^#\\|raygrid\\|selenite.json' README.md | head -60; wc -l README.md; grep -n 'tar\\|selenite\\|features' package.sh | head -20",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-ruby-api",
+			"type": "shell",
+			"command": "grep -n 'define_method\\|define_singleton_method\\|define_module_function' src/scripting.rs | sed 's/^ *//' | cut -c1-110; grep -n 'fn rb_grid_move\\|fn rb_grid_swap\\|fn rb_grid_fill\\|fn move_\\|fn swap\\|fn fill' -A3 src/scripting.rs | head -30",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-readme-check",
+			"type": "shell",
+			"command": "SELENITE_HOME=/tmp/sel-home ./target/debug/selenite --script /tmp/selenite-readme.rb --profile beta; echo EXIT=$?",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-package",
+			"type": "shell",
+			"command": "./package.sh > /tmp/sel-pkg.log 2>&1; echo PKG_EXIT=$?; tail -5 /tmp/sel-pkg.log; ls -la selenite-portable.tar.gz; rm -rf /tmp/sel-port && mkdir /tmp/sel-port && tar -xzf selenite-portable.tar.gz -C /tmp/sel-port && ls /tmp/sel-port && SELENITE_HOME=/tmp/sel-port/data /tmp/sel-port/run.sh --script /tmp/selenite-smoke.rb --profile portable; echo PORT_EXIT=$?",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-cleanup-tmp",
+			"type": "shell",
+			"command": "rm -rf /tmp/sel-home /tmp/sel-port /tmp/sel-big.png /tmp/sel-*.log /tmp/sel-*.txt /tmp/sel-err.rb /tmp/sel-g.json /tmp/selenite-*.rb /tmp/selenite-cli-block.rs /tmp/selenite-scripting.rs.bak /tmp/inv-head.txt; ls /tmp | grep -E '^sel|inv-head' || echo CLEAN",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-map",
+			"type": "shell",
+			"command": "cd src && wc -l *.rs && grep -nE 'fn draw|enum ToolAction|struct App|fn run|Camera2D|^mod |fn handle_|KEY_F1|KEY_HOME|fn toolbar|\"Help\"|\"Home\"|=> self\\.' main.rs | head -150 > /tmp/sel-map.txt; cat camera.rs | head -80 >> /tmp/sel-map.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-api",
+			"type": "shell",
+			"command": "R=$(ls -d ~/.cargo/registry/src/*/raylib-6.0.0 | head -1); S=$(ls -d ~/.cargo/registry/src/*/raylib-sys-6.0.0 | head -1); { echo $R; grep -rnE 'fn (begin_mode3D|draw_cube|draw_cube_wires|draw_plane|draw_line_3D|draw_line3D|get_screen_to_world_ray|get_mouse_ray|get_world_to_screen|draw_grid|draw_billboard_pro|draw_triangle3D|draw_cylinder)\\b|fn perspective' $R/src | head -40; grep -rnE 'pub fn (rlBegin|rlSetTexture|rlTexCoord2f|rlVertex3f|rlColor4ub|rlEnd|rlNormal3f)\\b' $S/../ $(find ~/dev/target -name 'bindings.rs' -path '*raylib-sys*' | head -1) 2>/dev/null | head; grep -n 'rlgl\\|pub use' $R/src/ffi.rs $R/src/lib.rs 2>/dev/null | head; grep -n 'raylib\\|\\[features' ~/dev/Cargo.toml; grep -nE 'fn (viewport|request_visible_thumbnails|enter_grid|exit_grid|reset_view)' ~/dev/src/main.rs; } > /tmp/sel-api.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-api2",
+			"type": "shell",
+			"command": "{ grep -nE 'enum CellKind' -A 14 src/persistence.rs; grep -nE 'fn (occupied|kind_at|file_at|image_at|cells|entries|grid_at)\\b' src/persistence.rs; grep -nE 'AppRequest|Goto|\"goto\"' src/scripting.rs | head -30; grep -nE 'goto|def ' src/ruby/selenite_prelude.rb | head -40; grep -nE '^use|^const|^static' src/main.rs; grep -nE 'Home|F1|PA_' src/help.rs | head; grep -n 'pub fn' src/ui.rs; } > /tmp/sel-api2.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-check3d",
+			"type": "shell",
+			"command": "{ cargo check --features scripting --all-targets 2>&1 | grep -E '^(warning|error)' -A 12 | head -150; echo ===; cargo check 2>&1 | grep -E '^(warning|error)' -A 8 | head -40; echo DONE; } > /tmp/sel-check.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-cam",
+			"type": "shell",
+			"command": "grep -n 'Camera::new()' src/main.rs > /tmp/sel-cam.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-readme",
+			"type": "shell",
+			"command": "grep -nE 'goto|Home|F1|Controls|^## |^### |view|camera' README.md > /tmp/sel-readme.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-test3d",
+			"type": "shell",
+			"command": "{ cargo fmt --all && cargo test --features scripting 2>&1 | grep -E 'test result|FAILED|panicked|error' ; cargo check 2>&1 | grep -E '^(warning|error)'; which import xwd scrot xdotool convert magick gnome-screenshot; ls /usr/share/icons/hicolor/256x256/apps/*.png 2>/dev/null | head -3; echo DONE; } > /tmp/sel-test.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-shot-prep",
+			"type": "shell",
+			"command": "{ rm -rf /tmp/sel3d && mkdir -p /tmp/sel3d; cargo build --features scripting 2>&1 | grep -E '^(warning|error)' -A 6; SELENITE_HOME=/tmp/sel3d ./target/debug/selenite --list-profiles; P=$(find /tmp/sel3d -maxdepth 3 -type d -name default | head -1); echo P=$P; ls -R /tmp/sel3d | head; } > /tmp/sel-shot.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-shot-run",
+			"type": "shell",
+			"command": "{ echo 'puts 1' > /tmp/sel3d/noop.rb; SELENITE_HOME=/tmp/sel3d ./target/debug/selenite --script /tmp/sel3d/noop.rb --profile demo; cp /tmp/sel3d-init.rb /tmp/sel3d/profiles/demo/init.rb; ls /tmp/sel3d/profiles/demo; SELENITE_SHOT=/tmp/sel3d/shot.png SELENITE_HOME=/tmp/sel3d timeout 20 ./target/debug/selenite --profile demo 2>&1 | grep -iE 'panic|error|screenshot|warn' ; echo EXIT=$?; ls -la /tmp/sel3d/shot.png; } > /tmp/sel-shot.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-shot-run2",
+			"type": "shell",
+			"command": "{ SELENITE_SHOT=sel3d-shot.png SELENITE_HOME=/tmp/sel3d timeout 20 ./target/debug/selenite --profile demo 2>&1 | grep -iE 'panic|error|screenshot|warn|ruby' ; mv sel3d-shot.png /tmp/sel3d/shot.png; ls -la /tmp/sel3d/shot.png; } > /tmp/sel-shot.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-final3d",
+			"type": "shell",
+			"command": "{ grep -rn 'TEMP-SCREENSHOT\\|SELENITE_SHOT' src || echo 'no temp hooks'; cargo fmt --all --check && echo fmt-ok; cargo check 2>&1 | grep -E '^(warning|error)'; cargo test --features scripting 2>&1 | grep 'test result'; ./package.sh 2>&1 | tail -2; ls -la selenite-portable.tar.gz; rm -rf /tmp/sel3d /tmp/sel3d-init.rb /tmp/sel-*.txt /tmp/sel-pkg.log; echo CLEAN; } > /tmp/selenite-final.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-rm-final",
+			"type": "shell",
+			"command": "rm -f /tmp/selenite-final.txt /tmp/selenite-readme.rb; echo ok",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-api3",
+			"type": "shell",
+			"command": "{ grep -nE 'pub fn|impl |pub struct|derive' src/persistence.rs; grep -nE 'fn [a-z_]+\\(' src/main.rs | awk -F'fn ' '{print $1 substr($2,1,60)}'; grep -nE 'pub fn' src/panels.rs src/profiles.rs src/ui.rs; } > /tmp/sel-api3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-check-r1",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && cargo check --features scripting --all-targets --message-format short > /tmp/sel-c1.txt 2>&1; echo done >> /tmp/sel-c1.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r1",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE '^const |minimap_open|fn handle_3d_input|^fn point_in_rect|fn kind_color|fn draw_scene_3d|fn draw\\(|depth_text|ToolbarAction::(Undo|Redo|Find|View3d)|fn toolbar_layout' src/main.rs > /tmp/sel-g1.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-check-r2",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && cargo check --features scripting --all-targets --message-format short 2>&1 | grep -E '^(src|error|warning)' > /tmp/sel-c2.txt; echo done >> /tmp/sel-c2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r2",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'SELECTION_COLOR|draw_square_outline|draw_scene_3d|STATUS|status_seen|depth_label|depth_text' src/main.rs > /tmp/sel-g2.txt 2>&1; grep -n 'pub fn' src/view3d.rs >> /tmp/sel-g2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r3",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'codepoint|load_font|GLYPH|chars|pub fn' src/ui.rs > /tmp/sel-g3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r4",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'AppRequest|View3d|Orbit|fn app_|define_module_function|struct AppState|pub struct|state\\(' src/scripting.rs > /tmp/sel-g4.txt 2>&1; grep -nE 'AppRequest::|fn apply_script_request|fn script_state|AppState' src/main.rs >> /tmp/sel-g4.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r5",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'ScriptContext|\\.depth = |profiles = Some|fn sel_depth|fn sel_selected' src/main.rs src/scripting.rs > /tmp/sel-g5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r6",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'orbit|view_3d|back' src/ruby/selenite_prelude.rb > /tmp/sel-g6.txt 2>&1; grep -nE 'VIEW_3D_TIP|\"F3\"|3D View|Ctrl\\+|\\(\"' src/help.rs | head -80 >> /tmp/sel-g6.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-test-r3",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && cargo fmt && (cargo check --all-targets --message-format short 2>&1 | grep -E '^(src|error|warning)'; echo '--- scripting'; cargo test --features scripting 2>&1 | grep -E '^(src|error|warning)|test result|FAILED|panicked|failed') > /tmp/sel-c3.txt 2>&1; echo done >> /tmp/sel-c3.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r7",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'fn for_cell|^mod tests|#\\[cfg\\(test\\)\\]' src/main.rs > /tmp/sel-g7.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-shot-r1",
+			"type": "shell",
+			"command": "bash /tmp/selshot-run.sh > /tmp/sel-shot.txt 2>&1; echo done >> /tmp/sel-shot.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r8",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE '^fn main|\\.run\\(|process::exit|ScriptEngine::new|fn new\\(|embed|Cleanup|init\\(\\)' src/main.rs src/scripting.rs > /tmp/sel-g8.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-shot-r2",
+			"type": "shell",
+			"command": "bash /tmp/selshot-run.sh 2>&1 | grep -vE '^INFO' > /tmp/sel-shot2.txt; echo done >> /tmp/sel-shot2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-iso-r1",
+			"type": "shell",
+			"command": "bash /tmp/selshot-iso.sh > /tmp/sel-iso.txt 2>&1; echo done >> /tmp/sel-iso.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-gdb-r1",
+			"type": "shell",
+			"command": "bash /tmp/selshot-gdb.sh > /tmp/sel-gdb.txt 2>&1; echo done >> /tmp/sel-gdb.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r9",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'Texture2D|pub fn clear|pub struct|impl Drop' src/*.rs > /tmp/sel-g9.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r10",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'enum Mode|ImageViewer\\(|TiledImage|ThumbnailCache|raylib::init|fn run' src/main.rs src/inventory.rs > /tmp/sel-g10.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-nested-r1",
+			"type": "shell",
+			"command": "bash /tmp/selshot-nested.sh > /tmp/sel-nested.txt 2>&1; echo done >> /tmp/sel-nested.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r11",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE '^#|3D|view3d.rs|orbit|Ctrl\\+V|cargo test|tests' README.md > /tmp/sel-g11.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r12",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -rnE 'undone|cannot be undo|can.t undo' src/ > /tmp/sel-g12.txt; echo end >> /tmp/sel-g12.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-final-r1",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && cargo fmt && (cargo check --all-targets --message-format short 2>&1 | grep -E '^(src|error|warning)'; echo '--- clippy'; cargo clippy --features scripting --all-targets --message-format short 2>&1 | grep -E '^(src|error)' | head -30; echo '--- test'; cargo test --features scripting 2>&1 | grep -E '^(error|warning)|test result|FAILED|panicked'; echo '--- package'; ./package.sh 2>&1 | tail -6) > /tmp/sel-final.txt 2>&1; echo done >> /tmp/sel-final.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-grep-r13",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE 'rust-version|edition' Cargo.toml > /tmp/sel-g13.txt; grep -h '^rust-version' ~/.cargo/registry/src/*/{magnus-0.9.1,reqwest-0.13.5,image-0.25.10,raylib-6.0.0,arboard-3.6.1}/Cargo.toml >> /tmp/sel-g13.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-final-r2",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -rn '1\\.75' README.md package.sh > /tmp/sel-msrv.txt; cargo fmt && (cargo check --all-targets --message-format short 2>&1 | grep -E '^(src|error|warning)'; echo '--- clippy-new'; cargo clippy --features scripting --all-targets --message-format short 2>&1 | grep -E '^src/(main|history|search)' ; echo '--- test'; cargo test --features scripting 2>&1 | grep -E '^(error|warning)|test result|FAILED|panicked'; echo '--- package'; ./package.sh 2>&1 | tail -2) >> /tmp/sel-msrv.txt 2>&1; echo done >> /tmp/sel-msrv.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "sel-cleanup-r1",
+			"type": "shell",
+			"command": "rm -rf /tmp/selshot /tmp/selshot-*.sh /tmp/sel-*.txt; ls /tmp | grep -c sel || true",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-survey-1",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && (wc -l src/*.rs src/ruby/*.rb package.sh Cargo.toml; ls -la; ls examples dist 2>&1 | head -30; grep -nE 'fn |^static|^pub' src/scripting.rs | head -120) > /tmp/s1.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-survey-2",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -nE '    fn |^fn |^struct|^enum|^impl|^mod |^use ' src/main.rs > /tmp/s2.txt; grep -nE 'pub fn|pub struct' src/profiles.rs src/panels.rs src/ui.rs >> /tmp/s2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-survey-3",
+			"type": "shell",
+			"command": "R=$(ls -d ~/.cargo/registry/src/*/raylib-sys-6.0.0); (grep -nE 'SUPPORT_FILEFORMAT_(WAV|OGG|MP3|FLAC|QOA|XM|MOD)' $R/raylib/src/config.h; grep -nE 'FILEFORMAT|define|cmake|SUPPORT' $R/build.rs | head -40; grep -nE 'pub fn (InitAudioDevice|CloseAudioDevice|LoadMusicStream|UpdateMusicStream|PlayMusicStream|PauseMusicStream|ResumeMusicStream|StopMusicStream|SeekMusicStream|SetMusicVolume|GetMusicTimeLength|GetMusicTimePlayed|IsMusicStreamPlaying|UnloadMusicStream|IsMusicValid|AttachAudioStreamProcessor|DetachAudioStreamProcessor|IsAudioDeviceReady|SetMasterVolume)' -A3 $(find ~/dev/target/debug/build -path '*raylib-sys*' -name bindings.rs | head -1); grep -nE 'pub struct Music|pub struct AudioStream' -A12 $(find ~/dev/target/debug/build -path '*raylib-sys*' -name bindings.rs | head -1); grep -n 'features' -A20 $R/Cargo.toml | head -40) > /tmp/s3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-survey-4",
+			"type": "shell",
+			"command": "R=$(ls -d ~/.cargo/registry/src/*/raylib-sys-6.0.0); Q=$(ls -d ~/.cargo/registry/src/*/raylib-6.0.0); (grep -nE 'FLAC|CARGO_FEATURE|features_from_env|INCLUDE_EVERYTHING|fn .*feature' $R/build.rs | head -40; echo ---; grep -nE 'FLAC|^\\[features|default' $Q/Cargo.toml | head; echo ---; grep -n raylib /home/aylon-ayrlon/dev/Cargo.toml) > /tmp/s4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-survey-5",
+			"type": "shell",
+			"command": "R=$(ls -d ~/.cargo/registry/src/*/raylib-sys-6.0.0); (sed -n 686,700p $R/build.rs; sed -n 750,770p $R/build.rs; grep -n '^default' -A60 $R/Cargo.toml | grep -nE 'default|FILEFORMAT_(WAV|OGG|MP3|QOA|XM|MOD|FLAC)|RAUDIO|MODULE') > /tmp/s5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-keys",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/dev && grep -noE 'KEY_[A-Z0-9_]+' src/main.rs src/view3d.rs src/inventory.rs | sort -t: -k3 -u | awk -F: '{print $3}' | sort | uniq | tr '\\n' ' ' > /tmp/s6.txt; echo >> /tmp/s6.txt; grep -n 'KEY_SPACE\\|KEY_P\\b\\|KEY_L\\b\\|KEY_LEFT_BRACKET\\|KEY_COMMA\\|KEY_PERIOD\\|KEY_NINE\\|KEY_ZERO' src/*.rs >> /tmp/s6.txt; grep -n 'AudioCallback' $(find target/debug/build -path '*raylib-sys*' -name bindings.rs | head -1) >> /tmp/s6.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "s2-mkdir",
+			"type": "shell",
+			"command": "mkdir -p /home/aylon-ayrlon/dev/examples/plugins /home/aylon-ayrlon/dev/docs && ls /home/aylon-ayrlon/dev > /tmp/s7.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-menu1",
+			"type": "shell",
+			"command": "grep -n 'item.label()\\|ContextMenu {\\|MenuItem::\\|fn perform_menu_item\\|fn draw_context_menu\\|help_open\\|minimap_open\\|fn script_context\\|fn run_profile_init\\|fn with_profile\\|fn new(\\|drop(rl)\\|ToolbarAction::View3d\\|fn draw_file_badge\\|label_size\\|name_size\\|fn handle_shortcuts\\|fn update(\\|fn ensure_script_engine\\|labels' src/main.rs > /tmp/g1.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-api2",
+			"type": "shell",
+			"command": "grep -n 'pub fn\\|pub struct\\|pub enum\\|pub const\\|pub static\\|^    pub [a-z_]*:' src/music.rs src/plugins.rs src/settings.rs > /tmp/g2.txt 2>&1; grep -n 'TIP\\|pub const' src/help.rs >> /tmp/g2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-api3",
+			"type": "shell",
+			"command": "(grep -n 'pub fn' src/persistence.rs | head -60; grep -n 'HookValue' src/main.rs | head; grep -n 'pub fn base\\|pub dir\\|pub fn profile(' src/profiles.rs; grep -n 'derive' src/settings.rs src/music.rs; grep -n 'fn open_with_system\\|fn activate_cell\\|fn draw(\\|fn minimap_geometry\\|fn draw_scene_3d\\|draw_file_badge(\\|fn switch_profile\\|fn save(\\|status_bar\\|fn draw_cell' src/main.rs) > /tmp/g3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-keys4",
+			"type": "shell",
+			"command": "grep -n 'KEY_SPACE\\|KEY_L\\b\\|KEY_P\\b\\|KEY_COMMA\\|KEY_PERIOD\\|KEY_LEFT_BRACKET\\|KEY_RIGHT_BRACKET\\|KEY_NINE\\|KEY_ZERO\\|KEY_F[0-9]' src/*.rs > /tmp/g4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-tip5",
+			"type": "shell",
+			"command": "(grep -n 'fn draw_tooltip' -A 30 src/panels.rs; grep -n 'hover' src/music.rs | head -20) > /tmp/g5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-lbl6",
+			"type": "shell",
+			"command": "(grep -n 'labels.push\\|draw_file_badge\\|item.label()\\|let mut labels' src/main.rs) > /tmp/g6.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-tb7",
+			"type": "shell",
+			"command": "(grep -n 'const SEARCH_COLOR\\|ToolbarAction::View3d,\\|fn toolbar_layout\\|ContextMenu {' src/main.rs) > /tmp/g7.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-font8",
+			"type": "shell",
+			"command": "(grep -n 'codepoint\\|0x\\|chars()' src/ui.rs | head -30) > /tmp/g8.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-s1",
+			"type": "shell",
+			"command": "cargo check --all-targets --features scripting --message-format=short > /tmp/c1.txt 2>&1; echo EXIT $? >> /tmp/c1.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-both2",
+			"type": "shell",
+			"command": "(cargo fmt && cargo check --all-targets --features scripting --message-format=short && cargo check --all-targets --message-format=short) > /tmp/c2.txt 2>&1; echo EXIT $? >> /tmp/c2.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-3",
+			"type": "shell",
+			"command": "(cargo fmt && cargo check --all-targets --message-format=short && cargo check --all-targets --features scripting --message-format=short && cargo test --features scripting 2>&1 | tail -60) > /tmp/c3.txt 2>&1; echo EXIT $? >> /tmp/c3.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-hook9",
+			"type": "shell",
+			"command": "(grep -n ':save\\|has_hooks' src/scripting.rs; grep -n 'def reset!' -A 14 src/ruby/selenite_prelude.rb; grep -n 'def __remove_hook' -A 6 src/ruby/selenite_prelude.rb; grep -n 'def self.on\\|def on(' -A 8 src/ruby/selenite_prelude.rb) > /tmp/g9.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "g-lp10",
+			"type": "shell",
+			"command": "(grep -n 'reset!' src/scripting.rs src/ruby/selenite_prelude.rb; grep -n 'pub fn load_plugins' -A 40 src/scripting.rs) > /tmp/g10.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-4",
+			"type": "shell",
+			"command": "cargo test --features scripting grid_functions > /tmp/c4.txt 2>&1; echo EXIT $? >> /tmp/c4.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-5",
+			"type": "shell",
+			"command": "(for f in examples/plugins/*.rb; do echo \"=== $f\"; cat \"$f\"; done; echo; grep -n 'fn plugin_dirs' -A25 src/main.rs; grep -n 'pub fn\\|const' src/plugins.rs | head -40; echo === package; cat package.sh; ls docs; grep -n '^#' README.md) > /tmp/i5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-6",
+			"type": "shell",
+			"command": "(grep -n -i 'music\\|playlist\\|space\\|labels\\|F2\\|track\\|plugin' src/help.rs; echo ===; grep -n 'pub fn is_playable\\|PLAYABLE\\|\"mp3\"\\|ogg\\|flac\\|visual' src/music.rs | head -20; echo ===; sed -n 389,470p README.md) > /tmp/i6.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-7",
+			"type": "shell",
+			"command": "(grep -n 'pub enum Control' -A25 src/music.rs; grep -n 'Visualizer\\|visualizer\\|level' src/music.rs | head; grep -n 'fn handle_player_keys' -A40 src/main.rs | grep KEY_) > /tmp/i7.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-8",
+			"type": "shell",
+			"command": "(grep -n 'reload_plugins\\|__music_state\\|fn checksum\\|1 << 20\\|1024 \\* 1024\\|\"modified\\|\"index\\|\"count\\|\"position\\|\"length\\|\"shuffle\\|\"repeat\\|\"track\\|\"state\\|\"volume' src/scripting.rs src/ruby/selenite_prelude.rb src/music.rs | head -40) > /tmp/i8.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-9",
+			"type": "shell",
+			"command": "(grep -n 'fn run(\\|fn update_player\\|fire_plugin_timers();\\|persist_settings();\\|end_drawing\\|fn draw(' src/main.rs | head) > /tmp/i9.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-10",
+			"type": "shell",
+			"command": "(grep -n 'fn play_audio\\|fn set_labels\\|fn labels(\\|show_playlist\\|playlist_open\\|fn take_screenshot\\|plugin_panel = Some' src/main.rs src/music.rs | head -20) > /tmp/i10.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "shot-1",
+			"type": "shell",
+			"command": "(rm -rf /tmp/selshot && mkdir -p /tmp/selshot && cargo build --features scripting 2>&1 | tail -5 && export SELENITE_HOME=/tmp/selshot && ./target/debug/selenite --script /tmp/selshot_setup.rb && DISPLAY=:0 SELENITE_SHOT=/tmp/selshot timeout 60 ./target/debug/selenite; echo EXIT $?; ls -la /tmp/selshot) > /tmp/shot.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "shot-2",
+			"type": "shell",
+			"command": "(rm -rf /tmp/selshot && mkdir -p /tmp/selshot && cargo build --features scripting 2>&1 | tail -3 && export SELENITE_HOME=/tmp/selshot && ./target/debug/selenite --script /tmp/selshot_setup.rb && DISPLAY=:0 SELENITE_SHOT=1 timeout 60 ./target/debug/selenite 2>&1 | grep -i 'warn\\|error\\|screenshot'; mv shot_*.png /tmp/selshot/; ls /tmp/selshot) > /tmp/shot.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-11",
+			"type": "shell",
+			"command": "(grep -n 'draw_minimap\\|playlist_open\\|draw_player\\|fn draw_status' src/main.rs) > /tmp/i11.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-12",
+			"type": "shell",
+			"command": "(grep -n 'fn minimap_click' -A12 src/main.rs) > /tmp/i12.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "inspect-13",
+			"type": "shell",
+			"command": "(grep -n 'fn minimap_geometry' -A6 src/main.rs) > /tmp/i13.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "package-rc1",
+			"type": "shell",
+			"command": "(./package.sh 2>&1 | grep -v '^\\s*Compiling' | tail -15; ls -la *.tar.gz; ls dist dist/docs dist/examples/plugins; rm -rf /tmp/selshot /tmp/selshot_setup.rb /tmp/i*.txt /tmp/c4.txt; rm -f selenite-portable.tar.gz) > /tmp/pkg.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-ls",
+			"type": "shell",
+			"command": "(ls /home/aylon-ayrlon/dev; ls /home/aylon-ayrlon/dev/*/src; wc -l /home/aylon-ayrlon/dev/*/src/*.rs) > /tmp/x.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-ls2",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; wc -l src/*.rs src/ruby/*; ls examples examples/*; ls docs; grep -n 'pub enum\\|pub struct\\|pub fn\\|SAVE_VERSION' src/persistence.rs) > /tmp/x.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g1",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn \\|^struct\\|^enum\\|^pub enum\\|^pub struct\\|^const\\|^static' src/main.rs) > /tmp/x.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g2",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'CellContent\\|\\.remove(\\|insert_file\\|insert_image\\|swap_cells\\|move_cell\\|\\.entries()\\|file_at\\|kind_at\\|collect_all_items' src/*.rs | grep -v '^src/persistence.rs'; grep -n 'KEY_[A-Z0-9]*' -o src/main.rs | sort -t: -k2 -u | awk -F: '{print $2}' | sort -u | tr '\\n' ' ') > /tmp/x.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g3",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'grid_at\\|hit\\.\\|\\.remove(\\|selected\\b\\|fn [a-z_]*(' src/main.rs) > /tmp/g3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g4",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn\\|pub struct\\|pub enum\\|fn draw_plugin_panel\\|fn handle_plugin_panel' src/plugins.rs src/ui.rs src/panels.rs src/main.rs | grep -v '^src/main.rs:.*pub' ; wc -l src/*.rs) > /tmp/g4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g5",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn\\|pub struct\\|pub enum\\|pub const' src/persistence.rs src/grid_inventory.rs src/search.rs src/history.rs src/view3d.rs) > /tmp/g5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g6",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'self.selected\\|fn edit\\|fn enter_grid\\|fn exit_grid\\|fn undo\\|fn redo\\|fn set_status\\|fn draw_minimap\\|fn draw_status\\|fn draw_scene_3d\\|fn pick_3d\\|fn block_height\\|fn draw_file_badge\\|fn draw_nested_grid_icon\\|const SELECTION_COLOR\\|fn handle_3d_input\\|InventoryPanel\\|inventory::' src/main.rs) > /tmp/g6.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g7",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn blocks_3d\\|let raised\\|pending_delete\\|fn confirm_dialog_rects\\|fn draw_confirm\\|struct NavFrame\\|DragState {\\|ToolbarAction::OpenInventory\\|OpenInventory =>\\|fn kind_color' src/main.rs) > /tmp/g7.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-c1",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; cargo check --features scripting --message-format short 2>&1 | grep -E '^(src|error|warning)' | head -80; echo EXIT) > /tmp/c4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g8",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn\\|^fn\\|fn shift_down\\|fn ctrl_down' src/persistence.rs src/main.rs | grep -v '^src/main.rs.*    fn ' ; grep -n 'fn shift_down\\|fn ctrl_down\\|fn handle_drag\\|fn handle_left_click\\|fn handle_drop\\|fn paste_clipboard\\|fn place_items\\|fn finish_download\\|fn copy_selection\\|fn delete_selection\\|fn remove_cell\\|fn confirm_pending\\|fn handle_delete_conf\\|fn open_context_menu\\|fn perform_menu_item\\|fn info_lines\\|fn draw\\b\\|fn draw(\\|fn perform_toolbar\\|fn toolbar_layout\\|fn draw_scene_3d\\|fn edit\\|fn handle_profile_panel\\|fn draw_cell\\|fn register_click\\|fn activate_cell' src/main.rs) > /tmp/g8.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g9",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn' src/grid_inventory.rs; grep -n 'pub fn\\|pub const' src/ui.rs; grep -n '^const\\|^pub const' src/main.rs | head -60) > /tmp/g9.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g10",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn edit<' -A 30 src/main.rs; grep -n 'same_cells\\|fn record' -B2 -A12 src/history.rs | head -80) > /tmp/g10.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g11",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'profile_panel\\|pending_delete\\|OpenInventory\\|ToolbarAction::Items\\|fn emit_hook\\|fn save(\\|HookValue::Str' src/main.rs | head -80; grep -n 'pub fn draw' src/item_panel.rs) > /tmp/g11.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g12",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '    fn draw(&' -A 60 src/main.rs | head -120; grep -n 'fn draw_confirm_dialog' -A 40 src/main.rs) > /tmp/g12.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g13",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn move_selection' -A 45 src/main.rs; grep -n 'pub fn plan_move' -A 25 src/selection.rs) > /tmp/g13.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-c4",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; cargo check --features scripting --message-format short 2>&1 | grep -E '^(src|error|warning)' | head -80) > /tmp/c4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g14",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn info_lines' -A 70 src/main.rs) > /tmp/g14.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-c5",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; cargo check --features scripting --message-format short 2>&1 | grep -E '^(src|error|warning)' | head -80; grep -n 'fn content_label' -A6 src/main.rs; grep -n 'pub fn items_at' -A3 src/persistence.rs) > /tmp/c5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g15",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn draw_scene_3d' src/main.rs) > /tmp/g15.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g16",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn kind\\|pub fn same_as\\|pub fn label\\|impl CellContent' src/persistence.rs; grep -n 'is_multi\\|contains' src/selection.rs | head) > /tmp/g16.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g17",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '    pub fn' src/persistence.rs; sed -n 1,45p src/grid_inventory.rs; sed -n 130,175p src/grid_inventory.rs) > /tmp/g17.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g18",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn app_download' -A 25 src/scripting.rs; grep -n 'AppRequest::Download\\|ScriptContext::new\\|context.selected\\|selected:' src/main.rs src/scripting.rs) > /tmp/g18.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g19",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn\\|pub struct\\|pub enum' src/persistence.rs src/grid_inventory.rs src/selection.rs) > /tmp/g19.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g20",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn start_download' -A 12 src/main.rs; grep -n 'AppRequest::Select(' -A 6 src/main.rs; grep -n 'fn set_single_selection\\|fn select_all\\|selection.select_all\\|fn sync_selection' -A 8 src/main.rs) > /tmp/g20.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g21",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn for_cell' -A 45 src/main.rs) > /tmp/g21.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g22",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn delete_selected\\|fn delete_cells\\|fn fit\\|fn zoom_to\\|fn frame\\|pending_delete = \\|fn confirm_delete\\|offsets_from\\|bounds(' src/main.rs src/selection.rs src/camera.rs 2>/dev/null; ls src) > /tmp/g22.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g23",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'KeyboardKey::KEY_[A-Z0-9]\\b' src/main.rs | head -80; grep -n 'pub fn' src/camera.rs) > /tmp/g23.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g24",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'enum ItemAction' -A 20 src/item_panel.rs; grep -n 'fn parse_entry' -A 30 src/item_panel.rs; grep -n 'fn apply_item_action' -A 60 src/main.rs) > /tmp/g24.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g25",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'retain\\|offsets_from\\|set_anchor\\|fn translate' src/selection.rs) > /tmp/g25.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g26",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'KEY_B\\b\\|KEY_M\\b\\|KEY_I\\b\\|KEY_Z\\b\\|fn selected_cells\\|fn viewport\\|center_on_cell\\|fn toggle_item_panel\\|item_count\\|insert_file\\|raise_item\\|push_grid\\|fn has\\b\\|fn transfer\\|fn set_meta\\|fn rename\\|fn set(' src/*.rs | grep -v '^src/scripting.rs') > /tmp/g26.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g27",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn entries\\|pub fn stacks' src/persistence.rs; grep -n 'fn draw_info_panel\\|stack_len(' src/main.rs | head -30; sed -n 55,70p src/grid_inventory.rs; sed -n 145,175p src/grid_inventory.rs) > /tmp/g27.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g28",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn parse_mode\\|enum LaunchMode\\|LaunchMode::\\|fn usage\\|fn main\\|--script\\|--plugin\\|mod \\|fn run_script\\|pub fn \\|embed::init\\|fn register_api\\|PRELUDE\\|include_str' src/main.rs src/scripting.rs | head -120; ls examples docs; grep -n 'raylib' Cargo.toml; ls ~/.cargo/registry/src/*/ | grep -i raylib) > /tmp/g28.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g29",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn\\|pub struct' src/history.rs; grep -n 'Command::new\\|current_exe\\|fn open_with\\|fn run_ruby_cell\\|RunScript\\|MenuItem::' src/main.rs | head -60; ls ~/.cargo/registry/src/*/magnus-0.*/src/ ; grep -rn 'macro_rules! function' ~/.cargo/registry/src/*/magnus-0.*/src/method.rs | head) > /tmp/g29.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g30",
+			"type": "shell",
+			"command": "(cd ~/.cargo/registry/src/*/magnus-0.*/src; sed -n 1837,1860p method.rs; grep -n '16\\|15' method.rs | grep -i 'function' | tail -5) > /tmp/g30.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g31",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; B=$(find target/debug/build -name 'bindings.rs' -path '*raylib-sys*' | head -1); echo $B; for f in InitWindow DrawTexturePro LoadMusicStream IsTextureValid IsTextureReady GetRandomValue SetRandomSeed DrawRectangleRounded DrawPoly SetTraceLogLevel IsSoundValid IsMusicValid DrawEllipse DrawRectangleGradientV TakeScreenshot SetConfigFlags GetCharPressed SetExitKey DrawLineEx SetMasterVolume IsAudioDeviceReady GetMusicTimeLength DrawCircleV DrawTriangle DrawRectangleLinesEx BeginMode2D DrawTextureRec IsWindowReady; do grep -n \"pub fn $f(\" $B | head -1; grep -A6 \"pub fn $f(\" $B | grep -m1 ')' ; done; grep -n 'pub struct Music \\|pub struct Sound \\|pub struct Texture ' $B) > /tmp/g31.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g32",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'def \\|class \\|module \\|Cell = ' src/ruby/selenite_prelude.rb | head -150) > /tmp/g32.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g33",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'PRELUDE\\|\"save\"\\|mod scripting\\|fn register_api' src/scripting.rs src/main.rs; grep -n 'StartupMode\\|fn run_script_file\\|fn usage\\|--script' src/main.rs | head -40) > /tmp/g33.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g34",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn load_or_new_root' -A2 src/main.rs) > /tmp/g34.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g35",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; wc -l src/scripting.rs; grep -n 'fn \\|#\\[test\\]' src/scripting.rs | tail -30) > /tmp/g35.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g36",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn need_\\|--game\\|GetRandomValue\\|fn random' -A3 src/game.rs | head -60) > /tmp/g36.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g37",
+			"type": "shell",
+			"command": "mkdir -p /home/aylon-ayrlon/dev/examples/games > /tmp/g37.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g38",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn window_should_close\\|fn end_drawing\\|fn take_screenshot' -A8 src/game.rs) > /tmp/g38.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g39",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev && cargo build --features scripting 2>&1 | tail -2 && rm -rf /tmp/selgame && mkdir -p /tmp/selgame && cd /tmp/selgame && python3 -c \"import zlib,struct;w=h=32;raw=b''.join(b'\\x00'+bytes([200,40,90])*w for _ in range(h));c=lambda t,d:struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d));open('pic.png','wb').write(b'\\x89PNG\\r\\n\\x1a\\n'+c(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+c(b'IDAT',zlib.compress(raw))+c(b'IEND',b''))\" && echo \"Selenite.grid.set(-1, -1, '/tmp/selgame/pic.png'); Selenite.grid.set(2, 1, '/tmp/selgame/pic.png')\" > seed.rb && SELENITE_HOME=/tmp/selgame /home/aylon-ayrlon/dev/target/debug/selenite --script seed.rb /tmp/selgame/g.json; echo SEED $?; DISPLAY=:0 SELENITE_HOME=/tmp/selgame SELENITE_GAME_FRAMES=90 SELENITE_GAME_SCREENSHOT=pong.png timeout 60 /home/aylon-ayrlon/dev/target/debug/selenite --game /home/aylon-ayrlon/dev/examples/games/pong.rb /tmp/selgame/g.json; echo PONG $?; DISPLAY=:0 SELENITE_HOME=/tmp/selgame SELENITE_GAME_FRAMES=90 SELENITE_GAME_SCREENSHOT=collector.png timeout 60 /home/aylon-ayrlon/dev/target/debug/selenite --game /home/aylon-ayrlon/dev/examples/games/collector.rb /tmp/selgame/g.json; echo COLLECT $?; grep -o '\"inventory\".\\{0,200\\}' g.json; ls -la) > /tmp/g39.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g40",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -h 'pub fn rlDrawRenderBatchActive\\|pub fn SetTraceLogLevel' target/debug/build/raylib-sys-*/out/bindings.rs | sort -u; grep -n 'fn enable' -A4 src/game.rs) > /tmp/g40.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g41",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; f=$(find target/debug/build -name bindings.rs | head -3); echo $f; grep -h 'pub fn rlDrawRenderBatchActive\\|pub fn SetTraceLogLevel' $f | sort -u) > /tmp/g41.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g42",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'enum MenuItem' -A60 src/main.rs | head -120; grep -n 'MenuItem::RunScript\\|fn spawn_mode\\|MenuItem::OpenExternal' src/main.rs) > /tmp/g42.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g43",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub enum CellKind' -A14 src/persistence.rs; grep -n 'MenuItem::Open =>\\|MenuItem::ShowInFolder =>\\|fn run_menu_item\\|fn menu_action\\|for_cell(' src/main.rs; grep -n 'fn spawn_mode' -A30 src/main.rs) > /tmp/g43.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g44",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '^struct App' -A80 src/main.rs | grep -n 'json_path\\|root\\|grid:\\|profile\\|history\\|stack:' ; grep -n 'fn save\\|fn reload\\|fn switch_profile\\|fn load_profile\\|fn replace_root\\|fn poll_\\|fn update(\\|self.poll' src/main.rs) > /tmp/g44.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g45",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'plugin_timers: Vec::new()' src/main.rs; grep -n 'pub fn clear\\|pub fn ' src/selection.rs | head; grep -n 'for_cell(Some(CellKind::Image), 1, false).contains' -B2 -A12 src/main.rs) > /tmp/g45.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g46",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn temp_dir\\|fn scratch\\|tempdir\\|env::temp_dir' src/main.rs | head; grep -n 'selection' src/main.rs | head -5; grep -n '^mod tests\\|^    use ' src/main.rs | tail -8) > /tmp/g46.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g47",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; ls docs examples examples/*; wc -l README.md CHANGELOG.md src/help.rs; grep -n '^#' README.md; head -40 CHANGELOG.md; grep -n 'rc.1\\|2\\.0' src/help.rs Cargo.toml package.sh | head -20) > /tmp/g47.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g48",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'KEY_B\\b\\|KEY_Z\\b\\|KEY_TAB\\|KEY_A\\b\\|KEY_X\\b\\|is_shift\\|shift' src/main.rs | head -60; echo ----; grep -n 'def \\|class \\|module ' src/ruby/selenite_prelude.rb | head -150; echo ----; grep -n 'define_\\|fn ruby_' src/scripting.rs | head -150) > /tmp/g48.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g49",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -o 'define_singleton_method(\"[A-Za-z0-9_?]*\"\\|^ *\"[A-Z][A-Za-z0-9]*\" *=>\\|(\"[A-Z][A-Za-z0-9]*\", *[a-z_]*' src/game.rs | tr '\\n' ' '; echo; grep -n 'def \\|attr' src/ruby/raylib_game.rb | sed -n '1,200p'; sed -n 1,40p examples/games/collector.rb) > /tmp/g49.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g50",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '///\\|//!' src/item_panel.rs | head -60; grep -n 'fn parses_' -A30 src/item_panel.rs | head -70) > /tmp/g50.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g51",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '\"Items' src/main.rs | head; sed -n 1,20p src/ruby/selenite_prelude.rb; sed -n 470,520p src/ruby/selenite_prelude.rb; sed -n 370,470p src/ruby/selenite_prelude.rb | grep -n 'def ' ; grep -n 'Cell = \\|Struct' src/ruby/selenite_prelude.rb) > /tmp/g51.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g52",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '\"inventory\"\\|:inventory\\|Event::Inventory\\|emit.*inventory' src/*.rs src/ruby/*.rb | head) > /tmp/g52.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g53",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; sed -n 262,300p src/main.rs; grep -n 'fn cycle\\|fn raise\\|fn merge\\|fn unstack\\|fn pop\\|fn inv_add\\|fn inv_remove\\|fn push\\b\\|fn push(' -A3 src/scripting.rs | head -60; grep -n 'serde(rename\\|stack\\|inventory' src/persistence.rs | head -30; grep -n 'pub fn unstack' -A25 src/persistence.rs) > /tmp/g53.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g54",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'pub fn add\\|pub fn remove\\|pub fn has' -B4 -A12 src/grid_inventory.rs | head -80; grep -n 'stack\\|badge\\|×' src/main.rs | grep -i 'draw\\|badge\\|info' | head -20) > /tmp/g54.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g55",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '    def ' src/ruby/raylib_game.rb | head -80; echo; grep -n 'fn .*test\\|#\\[test\\]' src/main.rs | wc -l; grep -n 'fn plan_move\\|fn move_many\\|fn parse_inventory\\|pub fn ' src/selection.rs src/item_panel.rs | head -40) > /tmp/g55.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g56",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n -A1 '#\\[test\\]' src/*.rs | grep 'fn ' ; wc -l src/main.rs; grep -n 'mod tests' src/main.rs) > /tmp/g56.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g57",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n '    pub fn ' src/persistence.rs src/grid_inventory.rs; grep -n 'plan_move\\|fn apply_group\\|fn stack_selection\\|fn move_selection' src/main.rs) > /tmp/g57.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g58",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn run(\\|poll_games()\\|fn draw(\\|end_drawing\\|take_screenshot\\|item_panel_open\\|items_open\\|show_items' src/main.rs | head -30) > /tmp/g58.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g59",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'item_panel\\|Option<ItemPanel>\\|ItemPanel' src/main.rs | head -20; grep -n 'fn open_items\\|fn toggle_items' src/main.rs) > /tmp/g59.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g60",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev && cargo build --features scripting 2>&1 | grep -E 'warning|error|Finished' ; rm -rf /tmp/selshot && mkdir -p /tmp/selshot && cd /tmp/selshot && SELENITE_HOME=/tmp/selshot /home/aylon-ayrlon/dev/target/debug/selenite --script /tmp/selshot-seed.rb; echo SEED $?; DISPLAY=:0 SELENITE_HOME=/tmp/selshot SELENITE_SHOT=1 timeout 60 /home/aylon-ayrlon/dev/target/debug/selenite; echo RUN $?; ls -la /tmp/selshot) > /tmp/g60.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g61",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev && grep -c TEMP-SHOT src/main.rs; ./package.sh 2>&1 | tail -15; echo PKG $?; ls -la *.tar.gz; rm -rf /tmp/pkgtest && mkdir /tmp/pkgtest && tar -xzf selenite-3.0.0-rc.1-portable.tar.gz -C /tmp/pkgtest && ls /tmp/pkgtest /tmp/pkgtest/*; cd /tmp/pkgtest && D=$(ls -d */ 2>/dev/null | head -1); [ -f run.sh ] || cd \"$D\"; DISPLAY=:0 SELENITE_HOME=/tmp/pkgtest/data SELENITE_GAME_FRAMES=60 SELENITE_GAME_SCREENSHOT=/tmp/pkgtest/pong.png timeout 60 ./run.sh --game examples/games/pong.rb 2>&1 | grep -v '^INFO'; echo DISTGAME $?; ls -la /tmp/pkgtest/pong.png) > /tmp/g61.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g62",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n -i 'screenshot' src/game.rs src/ruby/raylib_game.rb docs/game.md) > /tmp/g62.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g63",
+			"type": "shell",
+			"command": "(head -8 /tmp/c3.txt; grep -E 'test result|EXIT|warning|error' /tmp/c3.txt; cd /home/aylon-ayrlon/dev && ./package.sh 2>&1 | tail -2; rm -rf /tmp/pkgtest && mkdir /tmp/pkgtest && tar -xzf selenite-3.0.0-rc.1-portable.tar.gz -C /tmp/pkgtest && cd /tmp/pkgtest && DISPLAY=:0 SELENITE_HOME=/tmp/pkgtest/data SELENITE_GAME_FRAMES=60 SELENITE_GAME_SCREENSHOT=/tmp/pkgtest/pong.png timeout 60 ./run.sh --game examples/games/pong.rb 2>&1 | grep -v '^INFO'; echo DISTGAME $?; ls -la /tmp/pkgtest/pong.png; cp examples/games/collector.rb /tmp/pkgtest/collector.rb; printf 'Selenite.grid[0,0] = \"/tmp/pkgtest/pong.png\"\\n' > /tmp/pkgtest/s.rb; SELENITE_HOME=/tmp/pkgtest/data ./run.sh --script /tmp/pkgtest/s.rb 2>&1 | grep -v ^INFO; ls /tmp/pkgtest/data/profiles/*/) > /tmp/g63.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-g64",
+			"type": "shell",
+			"command": "rm -rf /tmp/selgame /tmp/selshot /tmp/pkgtest /tmp/selshot-seed.rb /tmp/g5*.txt /tmp/g6*.txt /tmp/g39.txt; echo ok",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h1",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'assets_dir\\|fn open_with_system\\|xdg-open\\|fn open_external\\|downloads_dir\\|fn paste_dir\\|clipboard_dir\\|struct SavedGrid\\|pub id\\|uuid\\|OpenFolder\\|ShowInFolder\\|Reveal' src/*.rs | head -80) > /tmp/h1.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h2",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'assets\\|ASSETS\\|fn save_clipboard\\|fn import_dir\\|fn download_target\\|profile_dir\\|fn data_dir' src/main.rs src/profiles.rs src/download.rs src/scripting.rs | head -80) > /tmp/h2.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h3",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'asset_directory\\|fn snapshot\\|fn same_cells\\|fn clear\\|fn restore\\|SavedGrid {\\|Arc::new(Mutex::new(SavedGrid\\|deep_clone\\|fn duplicate\\|clone_grid' src/*.rs src/ruby/*.rb | head -60; grep -n 'class Grid\\|def assets\\|grid_handle\\|struct GridHandle\\|fn grid_value\\|define_class(\"Grid\\|\"Grid\"' src/scripting.rs src/ruby/selenite_prelude.rb | head -30) > /tmp/h3.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h4",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'struct RbGrid\\|fn sel_grid\\|fn sel_save_path\\|struct ScriptContext\\|json_path' src/scripting.rs | head -30; grep -n 'struct ScriptContext' -A30 src/scripting.rs | head -40; grep -n 'fn script_context' -A25 src/main.rs) > /tmp/h4.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h5",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'ToolbarAction::Items\\|ToolbarAction::OpenInventory\\|MenuItem::ShowInFolder\\|MenuItem::NewGrid\\|fn open_with_system\\|fn json_is_profile\\|grids_dir\\|KeyboardKey::KEY_B\\b' src/main.rs; grep -n 'fn save\\b\\|fn save(' src/main.rs) > /tmp/h5.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h6",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'fn grid_save' -A15 src/scripting.rs; grep -n 'fn with_context' -A12 src/scripting.rs; grep -n 'fn inv_len\\|fn same(' -A8 src/scripting.rs; grep -n 'assets_dir' src/ruby/*.rb docs/*.md README.md src/help.rs; sed -n 470,500p src/ruby/selenite_prelude.rb; grep -n 'fn save' -B2 -A20 src/persistence.rs | sed -n 1,60p) > /tmp/h6.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h7",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'KEY_O\\b\\|KEY_O)' src/*.rs; grep -n 'pub fn .*grid_at\\|pub fn nested\\|pub fn subgrid' src/persistence.rs; sed -n 712,730p src/main.rs; grep -n '^mod \\|^use persistence\\|persistence::{' src/main.rs) > /tmp/h7.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h8",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'KEY_O' src/main.rs; grep -n 'pub fn .*grid_at' src/persistence.rs; sed -n 712,730p src/main.rs; grep -n '^mod \\|persistence::' src/main.rs | head -20) > /tmp/h8.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h9",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'mod tests' -A8 src/persistence.rs) > /tmp/h9.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h10",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'inventory (B)\\|\"B\"\\|Items\\|selenite-assets\\|assets_dir\\|Show in folder' src/help.rs README.md CHANGELOG.md src/ruby/selenite_prelude.rb docs/*.md; head -20 CHANGELOG.md) > /tmp/h10.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h11",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; grep -n 'File List\\|Find bar\\|assets\\|save_path' src/help.rs src/ruby/selenite_prelude.rb) > /tmp/h11.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h12",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; sed -i '0,/^version = \"3.0.0-rc.1\"/s//version = \"3.0.0-rc.2\"/' Cargo.toml; sed -i 's/3\\.0\\.0-rc\\.1-portable/3.0.0-rc.2-portable/g; s/selenite-3\\.0\\.0-rc\\.1/selenite-3.0.0-rc.2/g' README.md; grep -n '^version' Cargo.toml; grep -n 'rc\\.[12]' README.md) > /tmp/h12.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h13",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/dev; tail -4 /tmp/c3.txt; ./package.sh > /tmp/pkg.txt 2>&1; echo PKG $?; tail -3 /tmp/pkg.txt; rm -rf /tmp/selfold; mkdir -p /tmp/selfold; printf 'g = Selenite.grid\\nputs Selenite.grid_folder\\nputs g.push_grid(3, 0).folder\\nputs Selenite.grids_dir\\n' > /tmp/selfold/t.rb; SELENITE_HOME=/tmp/selfold ./dist/selenite --script /tmp/selfold/t.rb; echo RUN $?; find /tmp/selfold -maxdepth 5 -type d; grep -c 'id' /tmp/selfold/profiles/default/selenite.json) > /tmp/h13.txt 2>&1",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h14",
+			"type": "shell",
+			"command": "rm -rf /tmp/selfold /tmp/h3.txt /tmp/h4.txt /tmp/h5.txt /tmp/h6.txt /tmp/h8.txt /tmp/h9.txt /tmp/h10.txt /tmp/h11.txt /tmp/h12.txt /tmp/h13.txt /tmp/pkg.txt",
+			"problemMatcher": []
+		},
+		{
+			"label": "v3-h15-gitinspect",
+			"type": "shell",
+			"command": "(git rev-parse --show-toplevel; git remote -v; git status -sb; git fetch origin main; echo '--- local only'; git --no-pager log --oneline origin/main..HEAD | head -50; echo '--- remote only'; git --no-pager log --oneline HEAD..origin/main | head -50; echo '--- base'; git merge-base HEAD origin/main; echo '--- remote changed files'; git --no-pager diff --stat HEAD...origin/main | tail -30) > /tmp/gitinspect.txt 2>&1"
+		},
+		{
+			"label": "v3-h16-gitfind",
+			"type": "shell",
+			"command": "(find /home/aylon-ayrlon -maxdepth 5 -type d -name .git -path '*miaedscore*' 2>/dev/null; for d in $(find /home/aylon-ayrlon -maxdepth 5 -type d -name .git 2>/dev/null); do r=$(dirname $d); git -C $r remote -v 2>/dev/null | grep -q miaedscore && echo FOUND $r; done) > /tmp/gitfind.txt 2>&1"
+		},
+		{
+			"label": "v3-h17-gitfind",
+			"type": "shell",
+			"command": "find /home/aylon-ayrlon -maxdepth 5 -type d -iname '*miaedscore*' > /tmp/gitfind.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h18-gitinspect",
+			"type": "shell",
+			"command": "for r in /home/aylon-ayrlon/miaedscore /home/aylon-ayrlon/miaedscore/bin; do echo \"===== $r\"; cd $r; git remote -v; git status -sb | head -20; git fetch origin main 2>&1 | tail -2; echo '--- local only'; git --no-pager log --oneline origin/main..HEAD | head -30; echo '--- remote only'; git --no-pager log --oneline HEAD..origin/main | head -30; echo '--- overlapping files'; comm -12 <(git diff --name-only $(git merge-base HEAD origin/main) HEAD | sort) <(git diff --name-only $(git merge-base HEAD origin/main) origin/main | sort) | head -30; done > /tmp/gitinspect2.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h19-gitinspect",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/miaedscore; (echo deleted: $(git status --porcelain | grep -c '^ D'); echo modified: $(git status --porcelain | grep -c '^ M'); echo untracked: $(git status --porcelain | grep -c '^??'); echo total tracked: $(git ls-files | wc -l); echo '--- ls'; ls -A | head -40; echo '--- untracked'; git status --porcelain | grep '^??' | head -20; echo '--- remote commit'; git --no-pager show --stat 7c4b061 | head -20; echo '--- branch config'; git config --get pull.rebase; git config --get pull.ff) > /tmp/gitinspect3.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h20-gitmerge",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/miaedscore; (git config pull.rebase false; git pull --no-rebase --no-edit --tags origin main; echo exit=$?; git status -sb | head -1; git --no-pager log --oneline --graph -5; echo deleted-still: $(git status --porcelain | grep -c '^ D')) > /tmp/gitmerge.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h21-gitpush",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/miaedscore; (git pull --no-rebase --no-edit --allow-unrelated-histories --tags origin main; echo merge-exit=$?; git --no-pager log --oneline --graph -4; GIT_TERMINAL_PROMPT=0 git push origin main; echo push-exit=$?; git fetch origin; git status -sb | head -1; echo deleted-still: $(git status --porcelain | grep -c '^ D')) > /tmp/gitpush.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h22-gitkeys",
+			"type": "shell",
+			"command": "cd /home/aylon-ayrlon/miaedscore; (for c in $(git rev-list HEAD); do git grep -nE 'sk-[A-Za-z0-9_-]{20,}' $c 2>/dev/null; done | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-MASKED/g' | sed -E 's/^[0-9a-f]{40}:/X:/' | sort | uniq -c; echo distinct-keys: $(for c in $(git rev-list HEAD); do git grep -ohE 'sk-[A-Za-z0-9_-]{20,}' $c 2>/dev/null; done | sort -u | wc -l); which git-filter-repo; git filter-repo --version) > /tmp/gitkeys.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h23-gitrewrite",
+			"type": "shell",
+			"command": "(set -x; rm -rf /tmp/miaed-rewrite; git clone -q --no-local /home/aylon-ayrlon/miaedscore /tmp/miaed-rewrite && cd /tmp/miaed-rewrite && FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter \"for f in lib/loggers/telegram_chat_openai.rb lib/loggers/telegram_slash_openai_bot_PCAI.rb; do [ -f \\$f ] && sed -i -E \\\"s/(['\\\\\\\"])sk-[A-Za-z0-9_-]{20,}\\\\1/ENV['OPENAI_API_KEY']/g\\\" \\$f; done; true\" -- main && echo remaining: $(for c in $(git rev-list main); do git grep -ohE 'sk-[A-Za-z0-9_-]{20,}' $c; done | wc -l) && git grep -nE 'OPENAI_API_KEY' main -- lib/loggers && git --no-pager log --oneline --graph -4 main) > /tmp/gitrewrite.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h24-gitrewrite",
+			"type": "shell",
+			"command": "(rm -rf /tmp/miaed-rewrite; git clone -q --no-local /home/aylon-ayrlon/miaedscore /tmp/miaed-rewrite && cd /tmp/miaed-rewrite && FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter \"for f in lib/loggers/telegram_chat_openai.rb lib/loggers/telegram_slash_openai_bot_PCAI.rb; do [ -f \\$f ] && sed -i -E \\\"s/(['\\\\\\\"])sk-[A-Za-z0-9_-]{20,}\\\\1/ENV['OPENAI_API_KEY']/g\\\" \\$f; done; true\" -- main ^7c4b061b901e4730456b935295323037d89feee4 2>&1 | tail -1 && echo remaining: $(for c in $(git rev-list main); do git grep -ohE 'sk-[A-Za-z0-9_-]{20,}' $c; done | wc -l) && git --no-pager log --oneline --graph -4 main && echo ancestor-check: && git merge-base --is-ancestor 7c4b061b901e4730456b935295323037d89feee4 main && echo ff-ok && echo tree-diff-vs-old: && git --no-pager diff --stat c4e0b7277a272413a17322c72276f7139af329a8 main) > /tmp/gitrewrite2.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h25-gitpush",
+			"type": "shell",
+			"command": "(cd /tmp/miaed-rewrite && GIT_TERMINAL_PROMPT=0 git push https://github.com/Infinivaeria/miaedscore_online.git main:main; echo push-exit=$?; cd /home/aylon-ayrlon/miaedscore && git fetch origin && git --no-pager log --oneline -1 origin/main && git branch -f backup/pre-secret-scrub HEAD && git reset -q --mixed origin/main && git status -sb | head -1 && echo deleted-still: $(git status --porcelain | grep -c '^ D') && echo modified: $(git status --porcelain | grep -c '^ M') && echo keys-in-main: $(for c in $(git rev-list main); do git grep -ohE 'sk-[A-Za-z0-9_-]{20,}' $c; done | wc -l)) > /tmp/gitpush2.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h26-cleanup",
+			"type": "shell",
+			"command": "rm -rf /tmp/miaed-rewrite /tmp/gitinspect*.txt /tmp/gitfind.txt /tmp/gitkeys.txt /tmp/gitmerge.txt /tmp/gitpush.txt /tmp/gitrewrite*.txt"
+		},
+		{
+			"label": "v3-h27-gitbin",
+			"type": "shell",
+			"command": "for r in /home/aylon-ayrlon/miaedscore /home/aylon-ayrlon/miaedscore/bin; do echo \"===== $r\"; cd $r; git status -sb | head -1; git config --get pull.rebase; echo local-only:; git --no-pager log --oneline origin/main..HEAD | head; echo files-in-local-commit: $(git ls-tree -r --name-only HEAD | wc -l); git ls-tree -r --name-only HEAD | head -15; echo status-count: $(git status --porcelain | wc -l); git merge-base HEAD origin/main || echo no-common-base; done > /tmp/gitbin.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h28-gitbin",
+			"type": "shell",
+			"command": "(cd /home/aylon-ayrlon/miaedscore; git ls-tree -r --name-only origin/main -- bin | head; echo ---; for f in bstrap.data run-wasm-https start-wasm-https-background.sh; do git ls-tree -r --name-only origin/main | grep -F \"$f\"; done; echo ---; cd bin; git config --show-origin --get-all pull.rebase; git --no-pager log -1 --format='%ad %an' ) > /tmp/gitbin2.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h29-gitbin",
+			"type": "shell",
+			"command": "(set -e; [ ! -e /home/aylon-ayrlon/miaedscore-bin-git-backup ]; mv /home/aylon-ayrlon/miaedscore/bin/.git /home/aylon-ayrlon/miaedscore-bin-git-backup; ls -A /home/aylon-ayrlon/miaedscore/bin; cd /home/aylon-ayrlon/miaedscore/bin; git rev-parse --show-toplevel; git pull --tags origin main; git status -sb | head -1; echo bin-changes:; git status --porcelain -- . ) > /tmp/gitbin3.txt 2>&1; echo exit=$? >> /tmp/gitbin3.txt; rm -f /tmp/gitbin.txt /tmp/gitbin2.txt"
+		},
+		{
+			"label": "v3-h30-cleanup",
+			"type": "shell",
+			"command": "rm -f /tmp/gitbin3.txt"
+		},
+		{
+			"label": "v3-h31-gitall",
+			"type": "shell",
+			"command": "(for d in $(find / -xdev -maxdepth 8 -type d -name .git 2>/dev/null; find /home /mnt /media /srv /opt /var/www -maxdepth 8 -name .git 2>/dev/null); do r=$(dirname $d); git -C $r config --get-regexp '^remote\\..*\\.url' 2>/dev/null | grep -qi miaedscore && echo \"$r\"; done | sort -u | while read r; do echo \"===== $r\"; cd \"$r\"; git status -sb 2>&1 | head -1; echo pull.rebase=$(git config --get pull.rebase); git fetch -q origin main 2>&1; echo ahead=$(git rev-list --count origin/main..HEAD) behind=$(git rev-list --count HEAD..origin/main) base=$(git merge-base HEAD origin/main 2>/dev/null || echo NONE); git --no-pager log --oneline -3; echo dirty=$(git status --porcelain | wc -l); done) > /tmp/gitall.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h32-gitfinal",
+			"type": "shell",
+			"command": "(git config --global pull.rebase false; echo global pull.rebase=$(git config --global --get pull.rebase); for r in /home/aylon-ayrlon/miaedscore /home/aylon-ayrlon/miaedscore/bin; do echo \"===== $r\"; cd $r; git rev-parse --show-toplevel; git pull --tags origin main; echo exit=$?; git status -sb | head -1; done) > /tmp/gitfinal.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h33-cleanup",
+			"type": "shell",
+			"command": "rm -f /tmp/gitall.txt /tmp/gitfinal.txt"
+		},
+		{
+			"label": "v3-h34-grep",
+			"type": "shell",
+			"command": "grep -nE 'fn asset_directory|fn folder_of|dropped|fn add_file|fn import_|CellContent::File|FileDialog|rfd::|fn place_|fn add_path|fn assign_path|fn set_cell_path|fn attach' src/*.rs > /tmp/sel-grep.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h35-grep",
+			"type": "shell",
+			"command": "(ls src; echo; grep -nE 'pub fn |pub struct|pub enum|thread::spawn' src/download*.rs; echo; grep -nE 'push_file|insert_files|set_file|fn sel_(add|put|place|drop|file)|\"(add|put|place|set)_?file|PasteItem::Path|fn poll_downloads|downloads\\.retain|fn finish_download' src/*.rs; echo; grep -nE 'fn push_file|fn push_files|fn insert_files_fanout|fn set_file' -A3 src/persistence.rs) > /tmp/sel-grep.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h36-grep",
+			"type": "shell",
+			"command": "(grep -nE 'PendingDownload|\\.download\\.(describe|fraction|url)|pending\\.download|struct Settings|pub [a-z_]+: bool' src/*.rs; echo; grep -nE 'assets_dir|asset_directory|grid_folder|\\.selenite-assets|selenite-grids' src/*.rs src/ruby/*.rb README.md CHANGELOG.md) > /tmp/sel-grep2.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h37-grep",
+			"type": "shell",
+			"command": "(grep -nE 'ToolbarAction::(Labels|Minimap)|settings\\.(labels|minimap)|\"Labels|fn toggle_labels|Downloading' src/main.rs; echo; grep -nE 'enum ToolbarAction' -A60 src/main.rs | head -80) > /tmp/sel-grep3.txt 2>&1; true"
+		},
+		{
+			"label": "v3-h38",
+			"type": "shell",
+			"command": "grep -n 'folder\\|\"push\"\\|define_method(\"push' src/scripting.rs src/ruby/selenite_prelude.rb > /tmp/x.txt 2>&1; grep -n 'assets_dir\\|grid_folder' README.md docs/*.md CHANGELOG.md >> /tmp/x.txt 2>&1"
+		},
+		{
+			"label": "v3-h39",
+			"type": "shell",
+			"command": "grep -n 'grids_root(&folder_save)\\|File.dirname(f) == Selenite.grids_dir' src/scripting.rs > /tmp/x.txt 2>&1"
+		},
+		{
+			"label": "v3-h40",
+			"type": "shell",
+			"command": "grep -n 'selenite-grids\\|Grid Folder\\|Labels: On' README.md > /tmp/x.txt 2>&1"
+		},
+		{
+			"label": "v3-h41",
+			"type": "shell",
+			"command": "(./package.sh 2>&1 | tail -8; rm -rf /tmp/selsmoke; mkdir -p /tmp/selsmoke; echo hi > /tmp/selsmoke/outside.txt; printf 'p Selenite::VERSION\\np Selenite.assets_dir\\nc = Selenite.import(0, 0, \"/tmp/selsmoke/outside.txt\")\\np c, File.read(c)\\nSelenite.save\\n' > /tmp/selsmoke/t.rb; SELENITE_HOME=/tmp/selsmoke/home dist/selenite --script /tmp/selsmoke/t.rb 2>&1; find /tmp/selsmoke/home -path '*assets*'; ls -la dist | head) > /tmp/x.txt 2>&1"
+		},
+		{
+			"label": "v3-h42",
+			"type": "shell",
+			"command": "rm -rf /tmp/selsmoke /tmp/x.txt"
+		},
+		{
+			"label": "v3-h43",
+			"type": "shell",
+			"command": "(git rev-parse --show-toplevel; git --no-pager status --short | head -50; git --no-pager status --short | wc -l; git --no-pager log --oneline -5; cat .gitignore) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h44",
+			"type": "shell",
+			"command": "(ls -la; echo ---; find . -name .git -maxdepth 4 -not -path './target/*'; echo ---; du -sh * .[a-z]* 2>/dev/null | sort -h | tail -15; echo ---; git config --global user.name; git config --global user.email; echo ---; grep -rIlE 'sk-[A-Za-z0-9]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' --exclude-dir=target --exclude-dir=dist . | head) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h45",
+			"type": "shell",
+			"command": "(cd partitioned_array && git remote -v && git --no-pager log --oneline -1 && git status --short | head; cd ..; echo ---; ls test-artifacts bin .vscode .cargo; echo ---; grep -n partitioned_array package.sh src/*.rs | head -20) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h46",
+			"type": "shell",
+			"command": "(git init -b main && git add -A && git --no-pager status --short | awk '{print $2}' | sed 's|/.*||' | sort | uniq -c && git commit -q -F - <<'EOF'\nSelenite v3.0.0-rc.3\n\nInfinite nested raylib grids that hold any file, with embedded Ruby\n(Magnus), profiles, 3D view, partitioned_array export/import, music\nplayer, plugins, stacks, per-grid inventories, a raylib-style game API,\nper-grid folders and per-grid assets/ copies of added files.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\nEOF\ngit --no-pager log --stat --oneline | tail -5; git --no-pager status --short | wc -l; git count-objects -vH | grep size-pack) > /tmp/g.txt 2>&1"
+		}
+	]
+}

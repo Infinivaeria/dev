@@ -1,0 +1,23 @@
+[package]
+name = "selenite"
+version = "3.0.0-rc.3"
+edition = "2021"
+rust-version = "1.88"
+description = "Infinite, pannable, zoomable, recursively-nestable multimedia file grid"
+license = "MIT"
+
+[[bin]]
+name = "selenite"
+path = "src/main.rs"
+
+[features]
+scripting = ["dep:magnus"]
+
+[dependencies]
+raylib = { version = "6.0", features = ["SUPPORT_IMAGE_GENERATION", "SUPPORT_FILEFORMAT_FLAC"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+image = "0.25"
+magnus = { version = "0.9", features = ["embed"], optional = true }
+arboard = "3.6.1"
+reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "rustls"] }
