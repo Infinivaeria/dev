@@ -1541,6 +1541,16 @@
 			"label": "v3-h47",
 			"type": "shell",
 			"command": "(git --no-pager log -1 --format='%H %an <%ae>%n%B'; git count-objects -vH) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h48",
+			"type": "shell",
+			"command": "(git remote add origin https://github.com/Infinivaeria/dev.git; git branch -M main dev; git push -u origin dev; echo EXIT=$?; git --no-pager branch -vv; git remote -v) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "v3-h49",
+			"type": "shell",
+			"command": "(git --no-pager log --stat --format='%h %an %ad %s' -3; git count-objects -vH | grep size) > /tmp/g.txt 2>&1"
 		}
 	]
 }
