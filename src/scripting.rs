@@ -17,10 +17,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
-use magnus::{
-    embed::Cleanup, function, method, prelude::*, value::ReprValue, Error, RHash, RModule, Ruby,
-    Value,
-};
+use magnus::{embed::Cleanup, function, method, prelude::*, Error, RHash, RModule, Ruby, Value};
 
 use crate::{
     grid_inventory::GridInventory,

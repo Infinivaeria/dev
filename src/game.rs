@@ -17,9 +17,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use magnus::{
-    function, prelude::*, value::ReprValue, Error, Integer, RArray, RModule, Ruby, Value,
-};
+use magnus::{function, prelude::*, Error, Integer, RArray, RModule, Ruby, Value};
 use raylib::ffi;
 
 static GAME_MODE: AtomicBool = AtomicBool::new(false);

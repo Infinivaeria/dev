@@ -208,6 +208,11 @@ This requires a Ruby development environment (headers + `libruby`) available
 on the system, since [`magnus`](https://crates.io/crates/magnus) embeds a Ruby
 VM directly into the process via its `embed` feature.
 
+Magnus 0.10.0 is currently unreleased on crates.io. The dependency is pinned
+to upstream Git revision `c08ca65b527e2cff2b347c46d3f8a029e17ca665` in
+`Cargo.toml`, with resolution recorded in `Cargo.lock`. Cargo needs access to
+GitHub for the initial fetch. Scripting requires Ruby 3.1 or newer.
+
 ## Run modes
 
 ### Main grid (profiles)
