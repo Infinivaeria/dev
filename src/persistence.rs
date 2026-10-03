@@ -106,10 +106,28 @@ const RUBY_EXTENSIONS: &[&str] = &[".rb", ".rake", ".gemspec"];
 /// What a single grid cell holds. Cloning is shallow: a cloned `Grid`
 /// shares the same nested grid.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum CellContent {
+pub enum CellValue {
     Image(PathBuf),
     File(PathBuf),
     Grid(Arc<Mutex<SavedGrid>>),
+}
+
+/// An item and its saved label visibility. Flattening preserves existing item JSON.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CellContent {
+    #[serde(flatten)]
+    pub content: CellValue,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    labels_hidden: bool,
+}
+
+impl From<CellValue> for CellContent {
+    fn from(content: CellValue) -> Self {
+        Self {
+            content,
+            labels_hidden: false,
+        }
+    }
 }
 
 /// Lightweight tag for a cell's content, without borrowing the content itself.
@@ -151,48 +169,50 @@ impl CellKind {
 impl CellContent {
     pub fn from_path(path: PathBuf) -> Self {
         if SavedGrid::is_image_path(&path) {
-            Self::Image(path)
+            CellValue::Image(path).into()
         } else {
-            Self::File(path)
+            CellValue::File(path).into()
         }
     }
 
     pub fn kind(&self) -> CellKind {
-        match self {
-            Self::Image(_) => CellKind::Image,
-            Self::File(path) => SavedGrid::classify_path(path),
-            Self::Grid(_) => CellKind::Grid,
+        match &self.content {
+            CellValue::Image(_) => CellKind::Image,
+            CellValue::File(path) => SavedGrid::classify_path(path),
+            CellValue::Grid(_) => CellKind::Grid,
         }
     }
 
     pub fn path(&self) -> Option<&Path> {
-        match self {
-            Self::Image(path) | Self::File(path) => Some(path.as_path()),
-            Self::Grid(_) => None,
+        match &self.content {
+            CellValue::Image(path) | CellValue::File(path) => Some(path.as_path()),
+            CellValue::Grid(_) => None,
         }
     }
 
     /// Short display name: the file name, or "nested grid (N items)".
     pub fn label(&self) -> String {
-        match self {
-            Self::Image(path) | Self::File(path) => path
+        match &self.content {
+            CellValue::Image(path) | CellValue::File(path) => path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string()),
-            Self::Grid(grid) => {
+            CellValue::Grid(grid) => {
                 let len = grid.lock().map(|grid| grid.len()).unwrap_or(0);
                 format!("nested grid ({len} cells)")
             }
         }
     }
 
-    /// Value equality for files, identity for nested grids.
+    /// Equal label visibility plus value equality for files or identity for nested grids.
     pub fn same_as(&self, other: &CellContent) -> bool {
-        match (self, other) {
-            (Self::Image(a), Self::Image(b)) | (Self::File(a), Self::File(b)) => a == b,
-            (Self::Grid(a), Self::Grid(b)) => Arc::ptr_eq(a, b),
-            _ => false,
-        }
+        self.labels_hidden == other.labels_hidden
+            && match (&self.content, &other.content) {
+                (CellValue::Image(a), CellValue::Image(b))
+                | (CellValue::File(a), CellValue::File(b)) => a == b,
+                (CellValue::Grid(a), CellValue::Grid(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
     }
 }
 
@@ -407,6 +427,18 @@ impl SavedGrid {
         self.cells.get(&(col, row)).and_then(|items| items.first())
     }
 
+    /// Whether the top item's labels are enabled (empty cells inherit the global setting).
+    pub fn labels_at(&self, col: i64, row: i64) -> bool {
+        self.top(col, row).is_none_or(|item| !item.labels_hidden)
+    }
+
+    /// Toggles only the top item; its preference follows it through moves and stacks.
+    pub fn toggle_labels_at(&mut self, col: i64, row: i64) -> Option<bool> {
+        let item = self.cells.get_mut(&(col, row))?.first_mut()?;
+        item.labels_hidden = !item.labels_hidden;
+        Some(!item.labels_hidden)
+    }
+
     pub fn kind_at(&self, col: i64, row: i64) -> Option<CellKind> {
         self.top(col, row).map(CellContent::kind)
     }
@@ -416,9 +448,9 @@ impl SavedGrid {
     }
 
     pub fn image_at(&self, col: i64, row: i64) -> Option<&Path> {
-        match self.top(col, row)? {
-            CellContent::Image(path) => Some(path.as_path()),
-            CellContent::File(_) | CellContent::Grid(_) => None,
+        match &self.top(col, row)?.content {
+            CellValue::Image(path) => Some(path.as_path()),
+            CellValue::File(_) | CellValue::Grid(_) => None,
         }
     }
 
@@ -427,19 +459,21 @@ impl SavedGrid {
     }
 
     pub fn grid_at(&self, col: i64, row: i64) -> Option<Arc<Mutex<SavedGrid>>> {
-        match self.top(col, row)? {
-            CellContent::Grid(grid) => Some(Arc::clone(grid)),
-            CellContent::Image(_) | CellContent::File(_) => None,
+        match &self.top(col, row)?.content {
+            CellValue::Grid(grid) => Some(Arc::clone(grid)),
+            CellValue::Image(_) | CellValue::File(_) => None,
         }
     }
 
     /// The grid a cell leads into: its top item if that's a grid, otherwise
     /// the highest grid buried in its stack.
     pub fn grid_in(&self, col: i64, row: i64) -> Option<Arc<Mutex<SavedGrid>>> {
-        self.items_at(col, row).iter().find_map(|item| match item {
-            CellContent::Grid(grid) => Some(Arc::clone(grid)),
-            _ => None,
-        })
+        self.items_at(col, row)
+            .iter()
+            .find_map(|item| match &item.content {
+                CellValue::Grid(grid) => Some(Arc::clone(grid)),
+                _ => None,
+            })
     }
 
     /// Every item stacked in a cell, top first (empty if unoccupied).
@@ -487,7 +521,7 @@ impl SavedGrid {
     #[cfg_attr(not(feature = "scripting"), allow(dead_code))]
     pub fn push_grid(&mut self, col: i64, row: i64) -> Arc<Mutex<SavedGrid>> {
         let grid = Arc::new(Mutex::new(SavedGrid::new()));
-        self.push_content(col, row, CellContent::Grid(Arc::clone(&grid)));
+        self.push_content(col, row, CellValue::Grid(Arc::clone(&grid)).into());
         grid
     }
 
@@ -609,7 +643,7 @@ impl SavedGrid {
             return Err(SaveError::CellOccupied { col, row });
         }
         self.cells
-            .insert((col, row), vec![CellContent::Image(path)]);
+            .insert((col, row), vec![CellValue::Image(path).into()]);
         Ok(())
     }
 
@@ -637,7 +671,10 @@ impl SavedGrid {
         for path in paths {
             let content = CellContent::from_path(path.into());
             match self.cells.get_mut(&(col, row)) {
-                Some(items) if matches!(items.first(), Some(CellContent::Grid(_))) => {}
+                Some(items)
+                    if items
+                        .first()
+                        .is_some_and(|item| item.kind() == CellKind::Grid) => {}
                 Some(items) => {
                     items[0] = content;
                     inserted += 1;
@@ -675,7 +712,7 @@ impl SavedGrid {
         }
         let grid = Arc::new(Mutex::new(SavedGrid::new()));
         self.cells
-            .insert((col, row), vec![CellContent::Grid(Arc::clone(&grid))]);
+            .insert((col, row), vec![CellValue::Grid(Arc::clone(&grid)).into()]);
         Ok(grid)
     }
 
@@ -787,7 +824,7 @@ impl SavedGrid {
         self.cells.iter().find_map(|(&cell, items)| {
             items
                 .iter()
-                .any(|content| matches!(content, CellContent::Grid(grid) if Arc::ptr_eq(grid, nested)))
+                .any(|content| matches!(&content.content, CellValue::Grid(grid) if Arc::ptr_eq(grid, nested)))
                 .then_some(cell)
         })
     }
@@ -797,8 +834,8 @@ impl SavedGrid {
         self.cells
             .values()
             .flatten()
-            .map(|content| match content {
-                CellContent::Grid(grid) => {
+            .map(|content| match &content.content {
+                CellValue::Grid(grid) => {
                     1 + grid
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -814,14 +851,14 @@ impl SavedGrid {
     pub fn rewrite_path_prefix(&mut self, old_prefix: &Path, new_prefix: &Path) -> usize {
         let mut changed = 0;
         for content in self.cells.values_mut().flatten() {
-            match content {
-                CellContent::Image(path) | CellContent::File(path) => {
+            match &mut content.content {
+                CellValue::Image(path) | CellValue::File(path) => {
                     if let Ok(rest) = path.strip_prefix(old_prefix) {
                         *path = new_prefix.join(rest);
                         changed += 1;
                     }
                 }
-                CellContent::Grid(grid) => {
+                CellValue::Grid(grid) => {
                     changed += grid
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -850,11 +887,11 @@ impl SavedGrid {
 
         for (col, row) in sorted_keys {
             for content in &self.cells[&(col, row)] {
-                match content {
-                    CellContent::Image(path) | CellContent::File(path) => {
+                match &content.content {
+                    CellValue::Image(path) | CellValue::File(path) => {
                         items.push((loc.clone(), col, row, content.kind(), Some(path.clone())));
                     }
-                    CellContent::Grid(nested) => {
+                    CellValue::Grid(nested) => {
                         let grid_name = if current_prefix.is_empty() {
                             format!("Grid ({col}, {row})")
                         } else {
@@ -875,9 +912,9 @@ impl SavedGrid {
     pub fn images(&self) -> impl Iterator<Item = (i64, i64, &Path)> {
         self.cells
             .iter()
-            .filter_map(|(&(col, row), items)| match items.first()? {
-                CellContent::Image(path) => Some((col, row, path.as_path())),
-                CellContent::File(_) | CellContent::Grid(_) => None,
+            .filter_map(|(&(col, row), items)| match &items.first()?.content {
+                CellValue::Image(path) => Some((col, row, path.as_path())),
+                CellValue::File(_) | CellValue::Grid(_) => None,
             })
     }
 
@@ -958,6 +995,63 @@ mod tests {
         let dir = PathBuf::from("test-artifacts");
         fs::create_dir_all(&dir).unwrap();
         dir.join(format!("selenite-save-{stamp}.json"))
+    }
+
+    #[test]
+    fn item_labels_follow_moves_and_individual_stack_items() {
+        let mut grid = SavedGrid::new();
+        assert_eq!(grid.toggle_labels_at(0, 0), None);
+        grid.push_file(0, 0, "same.mp4".into());
+        assert_eq!(grid.toggle_labels_at(0, 0), Some(false));
+        // Two occurrences of the same path have independent preferences.
+        grid.push_file(0, 0, "same.mp4".into());
+        assert!(grid.labels_at(0, 0));
+        grid.cycle_stack(0, 0, 1);
+        assert!(!grid.labels_at(0, 0));
+        grid.move_cell((0, 0), (4, 2)).unwrap();
+        assert!(!grid.labels_at(4, 2));
+        assert_eq!(grid.unstack(4, 2), vec![(5, 2)]);
+        assert!(!grid.labels_at(4, 2));
+        assert!(grid.labels_at(5, 2));
+        grid.swap_cells((4, 2), (5, 2));
+        assert!(grid.labels_at(4, 2));
+        assert!(!grid.labels_at(5, 2));
+        assert_eq!(grid.toggle_labels_at(5, 2), Some(true));
+    }
+
+    #[test]
+    fn item_labels_round_trip_and_old_items_default_to_visible() {
+        let mut grid: SavedGrid = serde_json::from_str(
+            r#"{"cells":[{"col":0,"row":0,"items":[{"Image":"a.png"},{"File":"b.mp3"}]}]}"#,
+        )
+        .unwrap();
+        assert!(grid.labels_at(0, 0));
+        grid.toggle_labels_at(0, 0);
+        let nested = grid.create_grid(1, 0).unwrap();
+        grid.toggle_labels_at(1, 0);
+        nested.lock().unwrap().push_file(2, 0, "c.mp4".into());
+        nested.lock().unwrap().toggle_labels_at(2, 0);
+
+        let json = serde_json::to_value(&grid).unwrap();
+        assert_eq!(json["cells"][0]["items"][0]["labels_hidden"], true);
+        assert!(json["cells"][0]["items"][1].get("labels_hidden").is_none());
+        let mut loaded: SavedGrid = serde_json::from_value(json).unwrap();
+        assert!(!loaded.labels_at(0, 0));
+        assert!(!loaded.labels_at(1, 0));
+        assert!(!loaded
+            .grid_at(1, 0)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .labels_at(2, 0));
+        loaded.cycle_stack(0, 0, 1);
+        assert!(loaded.labels_at(0, 0));
+        assert_eq!(loaded.kind_at(0, 0), Some(CellKind::Audio));
+
+        let old: SavedGrid =
+            serde_json::from_str(r#"[{"col":0,"row":0,"content":{"Image":"old.png"}}]"#).unwrap();
+        assert!(old.labels_at(0, 0));
+        assert_eq!(old.kind_at(0, 0), Some(CellKind::Image));
     }
 
     #[test]

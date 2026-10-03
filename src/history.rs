@@ -112,6 +112,21 @@ mod tests {
     }
 
     #[test]
+    fn item_labels_can_be_undone_and_redone() {
+        let root = grid();
+        lock(&root).push_file(0, 0, "song.mp3".into());
+        let mut history = History::default();
+        let before = lock(&root).snapshot();
+        lock(&root).toggle_labels_at(0, 0);
+        assert!(history.record(&root, before, "Toggle item labels"));
+        assert!(!lock(&root).labels_at(0, 0));
+        history.undo().unwrap();
+        assert!(lock(&root).labels_at(0, 0));
+        history.redo().unwrap();
+        assert!(!lock(&root).labels_at(0, 0));
+    }
+
+    #[test]
     fn undo_keeps_a_grid_folder_id_assigned_after_the_snapshot() {
         let root = grid();
         let mut history = History::default();

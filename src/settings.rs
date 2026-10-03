@@ -14,7 +14,7 @@ use crate::music::Repeat;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Coordinate labels and file names on grid cells (2D and 3D).
+    /// Coordinates, file names and type badges on grid cells (2D and 3D).
     pub labels: bool,
     pub minimap: bool,
     /// Music player volume, 0.0..=1.0.

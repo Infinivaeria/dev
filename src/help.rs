@@ -8,8 +8,10 @@ blocks you can rotate (left-drag, Q/E, PgUp/PgDn), pan (right/middle or Shift+dr
 Click selects, double-click opens, images lie on top of their tiles.";
 pub const PA_IMPORT_TIP: &str = "PA Import: loads the cells from this profile's partitioned_array \
 export back into the grid you're viewing. Cells that are already occupied are left unchanged.";
-pub const LABELS_TIP: &str = "Labels: show or hide the coordinate and file-name text on every \
-cell in 2D and 3D (L). The selected cell keeps its coordinates; type badges always stay.";
+pub const LABELS_TIP: &str = "Labels: show or hide coordinates, file names and type badges \
+(Image, Audio, Video, etc.) in 2D and 3D (L). Right-click an item to hide or show its labels \
+individually; this choice is saved. In stacks, Tab selects the next item. The selected cell \
+keeps its coordinates. Labels: Off hides all item labels without resetting individual choices.";
 pub const COPY_FILES_TIP: &str =
     "Copy In: when on, files dropped or pasted onto a grid are copied \
 into that grid's own assets/ folder in the background (any size, with progress, Esc cancels), so \
@@ -68,7 +70,7 @@ pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)", "Undo / redo."),
             ("Ctrl+F", "Find cells anywhere in the profile; matches are outlined in cyan."),
             ("I / M", "Toggle the cell info panel / the minimap (click or drag the minimap to jump)."),
-            ("L", "Toggle grid labels (coordinates and file names)."),
+            ("L", "Toggle grid labels (coordinates, file names and type badges)."),
             ("Space / P", "Music: play-pause (plays this grid's audio when idle) / show the playlist."),
             ("[ ] , . 9 0", "Music: previous / next track, seek -5 s / +5 s, volume -5% / +5%."),
             ("F2, F4-F12", "Plugin buttons that declare a key: run on the selected cell."),

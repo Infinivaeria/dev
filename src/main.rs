@@ -244,6 +244,8 @@ struct SearchState {
 enum MenuItem {
     Open,
     QueueAudio,
+    HideLabels,
+    ShowLabels,
     Info,
     CopyFile,
     CopyPath,
@@ -278,6 +280,8 @@ impl MenuItem {
         match self {
             Self::Open => "Open / Run",
             Self::QueueAudio => "Add to playlist",
+            Self::HideLabels => "Hide item labels",
+            Self::ShowLabels => "Show item labels",
             Self::Info => "Info",
             Self::CopyFile => "Copy file",
             Self::CopyPath => "Copy path",
@@ -329,7 +333,7 @@ impl MenuItem {
             items.push(Self::StackSelectionHere);
         }
         if kind.is_some() {
-            items.push(Self::Delete);
+            items.extend([Self::HideLabels, Self::Delete]);
         }
         items.push(Self::GridFolder);
         items.push(Self::Items);
@@ -359,7 +363,9 @@ impl ContextMenu {
     }
 
     fn layout(&self, screen_width: i32, screen_height: i32) -> (Rectangle, Vec<Rectangle>, f32) {
-        let scale = ui::scale(screen_width, screen_height);
+        let natural_height = 27.0 * (self.items.len() + 1) as f32 + 5.0;
+        let scale = ui::scale(screen_width, screen_height)
+            .min((screen_height as f32 - 8.0).max(1.0) / natural_height);
         let size = 17.0 * scale;
         let pad = 10.0 * scale;
         let item_height = size + pad;
@@ -564,6 +570,10 @@ impl App {
 
     fn labels(&self) -> bool {
         self.settings.labels
+    }
+
+    fn item_labels(&self, col: i64, row: i64) -> bool {
+        self.labels() && lock(&self.grid).labels_at(col, row)
     }
 
     fn set_labels(&mut self, on: bool) {
@@ -3455,10 +3465,12 @@ impl App {
         let has_nonempty_grid = {
             let grid = lock(&self.grid);
             cells.iter().any(|(col, row)| {
-                grid.items_at(*col, *row).iter().any(|item| match item {
-                    persistence::CellContent::Grid(nested) => !lock(nested).is_empty(),
-                    _ => false,
-                })
+                grid.items_at(*col, *row)
+                    .iter()
+                    .any(|item| match &item.content {
+                        persistence::CellValue::Grid(nested) => !lock(nested).is_empty(),
+                        _ => false,
+                    })
             })
         };
 
@@ -3837,6 +3849,13 @@ impl App {
             )
         };
         let mut items = MenuItem::for_cell(kind, stack_len, multi);
+        if !lock(&self.grid).labels_at(cell.0, cell.1) {
+            for item in &mut items {
+                if *item == MenuItem::HideLabels {
+                    *item = MenuItem::ShowLabels;
+                }
+            }
+        }
         if !playable {
             items.retain(|item| *item != MenuItem::QueueAudio);
         }
@@ -3844,7 +3863,9 @@ impl App {
             items.retain(|item| {
                 !matches!(
                     item,
-                    MenuItem::Paste
+                    MenuItem::HideLabels
+                        | MenuItem::ShowLabels
+                        | MenuItem::Paste
                         | MenuItem::NewGrid
                         | MenuItem::Delete
                         | MenuItem::CycleStack
@@ -3908,6 +3929,20 @@ impl App {
         let path = lock(&self.grid).file_at(col, row).map(Path::to_path_buf);
         match item {
             MenuItem::Open => self.activate_cell(col, row),
+            MenuItem::HideLabels | MenuItem::ShowLabels => self.edit("Toggle item labels", |app| {
+                if let Some(on) = lock(&app.grid).toggle_labels_at(col, row) {
+                    app.status = Some(format!(
+                        "Item labels {}{}",
+                        if on { "on" } else { "off" },
+                        if on && !app.labels() {
+                            " (enable Labels / L to display them)"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+                app.save()
+            }),
             MenuItem::Info => {
                 self.info_open = true;
                 Ok(())
@@ -4747,7 +4782,8 @@ impl App {
                         d.draw_rectangle_lines_ex(rect, 1.0, GRID_LINE);
                         self.draw_cell(&mut d, col, row, rect);
                         let label_size = ui::cell_text_size(rect.height, 0.15, 64.0);
-                        let show_label = self.labels() || self.selected == Some((col, row));
+                        let show_label =
+                            self.item_labels(col, row) || self.selected == Some((col, row));
                         if show_label && label_size >= 9.0 {
                             let inset = rect.height * 0.05;
                             let coordinates = ui::fit(
@@ -5327,6 +5363,9 @@ impl App {
         let mut labels: Vec<(f32, Vector2, f32, String, Color)> = Vec::new();
         let names = if self.labels() { cells.as_slice() } else { &[] };
         for (col, row, kind, path, under) in names {
+            if !self.item_labels(*col, *row) {
+                continue;
+            }
             let top = Vector3::new(
                 *col as f32 + 0.5,
                 block_height(*kind) + under.len() as f32 * 0.07 + 0.02,
@@ -5461,7 +5500,9 @@ impl App {
                         ui::draw_text_centered(d, "unreadable", rect, size, DANGER_HOVER_BG);
                     }
                 }
-                draw_file_badge(d, rect, kind, &path, self.labels());
+                if self.item_labels(col, row) {
+                    draw_file_badge(d, rect, kind, &path);
+                }
                 if self.player.playlist.current_path() == Some(path.as_path())
                     && self.player.state() != music::State::Stopped
                 {
@@ -6464,13 +6505,7 @@ fn block_height(kind: CellKind) -> f32 {
     }
 }
 
-fn draw_file_badge(
-    d: &mut RaylibDrawHandle<'_>,
-    rect: Rectangle,
-    kind: CellKind,
-    path: &Path,
-    show_name: bool,
-) {
+fn draw_file_badge(d: &mut RaylibDrawHandle<'_>, rect: Rectangle, kind: CellKind, path: &Path) {
     let color = kind_color(kind);
     // Every badge metric is proportional to the on-screen cell size so the
     // text follows the camera zoom.
@@ -6490,7 +6525,7 @@ fn draw_file_badge(
     }
 
     let name_size = ui::cell_text_size(rect.height, 0.16, 72.0);
-    if show_name && kind != CellKind::Image && name_size >= 9.0 {
+    if kind != CellKind::Image && name_size >= 9.0 {
         let name = path
             .file_name()
             .and_then(|name| name.to_str())

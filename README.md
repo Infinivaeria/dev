@@ -105,8 +105,13 @@ Everything else:
 - Embedded Ruby (Magnus) with a console, a `Selenite` API, event hooks and
   per-profile `init.rb` (`scripting` Cargo feature, on in packaged builds).
 - **Grid labels toggle** (**Labels: On/Off** button or **L**): hide the
-  coordinate and file-name text for a clean view in 2D and 3D. The selected
-  cell still shows its coordinates.
+  coordinates, file names and type badges (Image, Audio, Video, etc.) for a
+  clean view in 2D and 3D. Right-click an item → **Hide item labels** /
+  **Show item labels** to toggle it individually. In a stack, this affects
+  the top item; use **Tab** to reach another item. Individual choices are
+  saved, follow moves and stacking, and support undo/redo. **Labels: Off**
+  hides all item labels without resetting those choices. The selected cell
+  still shows its coordinates.
 - **Built-in music player**:
   - Formats: wav, ogg, mp3, flac, qoa, xm and mod.
   - Double-clicking an audio cell plays it and queues the rest of that grid's
@@ -366,7 +371,7 @@ Hover any button for a tooltip that explains it.
 - **Ruby** — toggle the Ruby console
 - **Home** — reset pan/zoom and the 3D camera
 - **3D View / 2D View** — switch between the flat grid and the rotatable 3D view (F3)
-- **Labels: On / Off** — show or hide cell coordinates and file names (L)
+- **Labels: On / Off** — show or hide cell coordinates, file names and type badges (L)
 - **Copy In: On / Off** — copy dropped/pasted files into the grid's `assets/` folder, or link them in place
 - **Music / Hide Music** — show or hide the music player bar
 - **Plugins (n)** — the plugin panel:
@@ -399,6 +404,8 @@ Selenite stores data in JSON using `SAVE_VERSION = 3`.
   - `Grid(Arc<Mutex<SavedGrid>>)`
 - The `inventory` holds the grid's named items (`count` + `meta`) and is
   left out when empty.
+- Items may also contain `"labels_hidden": true` to hide their labels.
+  Missing values default to visible, so existing saves retain their labels.
 - Version 2 saves (single-item cells) load unchanged and are written as
   version 3 on the next save.
 
