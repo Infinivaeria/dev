@@ -5,6 +5,10 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 const WINDOW_SAMPLES: usize = 2048;
+const BASE_WINDOW_SIZE: f32 = 900.0;
+// Render at twice the width and height, then average four samples per pixel.
+// This also smooths textures/text and avoids the driver's GLX MSAA crash.
+const SUPERSAMPLE_SCALE: u32 = 2;
 const IMAGE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "gif", "qoi", "tga"];
 
 fn image_file(dir: &Path, state: AvatarState) -> Result<Option<PathBuf>, Box<dyn Error>> {
@@ -57,7 +61,10 @@ fn load_images(
             );
             Image::gen_image_color(512, 512, state.placeholder_color())
         };
-        textures.push(rl.load_texture_from_image(thread, &image)?);
+        let mut texture = rl.load_texture_from_image(thread, &image)?;
+        texture.gen_texture_mipmaps();
+        texture.set_texture_filter(thread, TextureFilter::TEXTURE_FILTER_TRILINEAR);
+        textures.push(texture);
     }
     Ok(textures
         .try_into()
@@ -69,6 +76,34 @@ fn assets_beside_executable(executable: &Path) -> Result<PathBuf, Box<dyn Error>
         .parent()
         .ok_or("executable has no parent directory")?
         .join("assets"))
+}
+
+fn ui_scale(width: f32, height: f32) -> f32 {
+    width.max(1.0).min(height.max(1.0)) / BASE_WINDOW_SIZE
+}
+
+fn avatar_rect(width: f32, height: f32, texture_width: f32, texture_height: f32) -> Rectangle {
+    let ui = ui_scale(width, height);
+    let scale = ((width - 60.0 * ui).max(1.0) / texture_width)
+        .min((height - 150.0 * ui).max(1.0) / texture_height);
+    let (w, h) = (texture_width * scale, texture_height * scale);
+    Rectangle::new((width - w) / 2.0, (height - h) / 2.0, w, h)
+}
+
+fn scene_target(
+    rl: &mut RaylibHandle,
+    thread: &RaylibThread,
+    width: u32,
+    height: u32,
+) -> Result<RenderTexture2D, Box<dyn Error>> {
+    let target = rl.load_render_texture(thread, width, height)?;
+    if !target.is_render_texture_valid() {
+        return Err(format!("could not create {width}x{height} anti-aliasing buffer").into());
+    }
+    target
+        .texture()
+        .set_texture_filter(thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
+    Ok(target)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -86,11 +121,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .size(900, 900)
         .title("mic_freq - voice avatar")
         .resizable()
-        .msaa_4x()
         .build();
     rl.set_target_fps(60);
     rl.set_exit_key(None);
+    rl.get_font_default()
+        .texture()
+        .set_texture_filter(&thread, TextureFilter::TEXTURE_FILTER_BILINEAR);
     let mut images = load_images(&mut rl, &thread, &asset_dir)?;
+    let mut scene: Option<RenderTexture2D> = None;
     let mut voice = VoiceState::default();
     let mut samples = Vec::with_capacity(WINDOW_SAMPLES);
     let mut error: Option<String> = None;
@@ -118,41 +156,79 @@ fn main() -> Result<(), Box<dyn Error>> {
         mic.latest(WINDOW_SAMPLES, &mut samples);
         let db = voice::amplitude_to_db(voice::rms(&samples));
         let state = voice.update(db, rl.get_frame_time());
-        let (w, h) = (rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        let (width, height) = (rl.get_screen_width().max(1), rl.get_screen_height().max(1));
+        let (w, h) = (width as f32, height as f32);
+        let ui = ui_scale(w, h);
+        let (render_width, render_height) = (
+            width as u32 * SUPERSAMPLE_SCALE,
+            height as u32 * SUPERSAMPLE_SCALE,
+        );
+        if scene.as_ref().is_none_or(|target| {
+            target.texture().width() != render_width as i32
+                || target.texture().height() != render_height as i32
+        }) {
+            scene = Some(scene_target(&mut rl, &thread, render_width, render_height)?);
+        }
+        let scene = scene.as_mut().expect("scene target initialized above");
         let texture = &images[state.index()];
         let (tw, th) = (texture.width() as f32, texture.height() as f32);
-        let scale = ((w - 60.0) / tw).min((h - 150.0) / th).max(0.01);
-        let size = Vector2::new(tw * scale, th * scale);
+        let avatar = avatar_rect(w, h, tw, th);
+        {
+            let mut target = rl.begin_texture_mode(&thread, scene);
+            let mut d = target.begin_mode2D(Camera2D {
+                offset: Vector2::zero(),
+                target: Vector2::zero(),
+                rotation: 0.0,
+                zoom: SUPERSAMPLE_SCALE as f32,
+            });
+            d.clear_background(Color::new(18, 18, 24, 255));
+            d.draw_texture_pro(
+                texture,
+                Rectangle::new(0.0, 0.0, tw, th),
+                avatar,
+                Vector2::zero(),
+                0.0,
+                Color::WHITE,
+            );
+            d.draw_text(
+                &format!(
+                    "{}  |  input {db:.0} dBFS  |  gate {:.0} dB",
+                    state.label(),
+                    voice.gate_db
+                ),
+                (20.0 * ui).round() as i32,
+                (18.0 * ui).round() as i32,
+                (22.0 * ui).round().max(1.0) as i32,
+                Color::RAYWHITE,
+            );
+            d.draw_text(
+                "Up/Down: gate    R: reload images    Esc: quit",
+                (20.0 * ui).round() as i32,
+                (h - 34.0 * ui).round() as i32,
+                (18.0 * ui).round().max(1.0) as i32,
+                Color::LIGHTGRAY,
+            );
+            if let Some(message) = &error {
+                d.draw_text(
+                    message,
+                    (20.0 * ui).round() as i32,
+                    (52.0 * ui).round() as i32,
+                    (18.0 * ui).round().max(1.0) as i32,
+                    Color::RED,
+                );
+            }
+        }
         let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::new(18, 18, 24, 255));
-        d.draw_texture_ex(
-            texture,
-            Vector2::new((w - size.x) / 2.0, (h - size.y) / 2.0),
+        d.clear_background(Color::BLACK);
+        // Render textures are vertically flipped in OpenGL.
+        d.draw_texture_pro(
+            scene.texture(),
+            Rectangle::new(0.0, 0.0, render_width as f32, -(render_height as f32)),
+            Rectangle::new(0.0, 0.0, w, h),
+            Vector2::zero(),
             0.0,
-            scale,
             Color::WHITE,
         );
-        d.draw_text(
-            &format!(
-                "{}  |  input {db:.0} dBFS  |  gate {:.0} dB",
-                state.label(),
-                voice.gate_db
-            ),
-            20,
-            18,
-            22,
-            Color::RAYWHITE,
-        );
-        d.draw_text(
-            "Up/Down: gate    R: reload images    Esc: quit",
-            20,
-            h as i32 - 34,
-            18,
-            Color::LIGHTGRAY,
-        );
-        if let Some(message) = &error {
-            d.draw_text(message, 20, 52, 18, Color::RED);
-        }
     }
     Ok(())
 }
@@ -160,6 +236,31 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_scales_proportionally_when_window_grows() {
+        assert_eq!(ui_scale(900.0, 900.0), 1.0);
+        assert_eq!(ui_scale(1800.0, 1800.0), 2.0);
+        assert_eq!(ui_scale(450.0, 450.0), 0.5);
+        let normal = avatar_rect(900.0, 900.0, 512.0, 512.0);
+        let large = avatar_rect(1800.0, 1800.0, 512.0, 512.0);
+        assert_eq!(normal, Rectangle::new(75.0, 75.0, 750.0, 750.0));
+        assert_eq!(large, Rectangle::new(150.0, 150.0, 1500.0, 1500.0));
+    }
+
+    #[test]
+    fn avatar_stays_centered_and_uncropped_at_different_aspect_ratios() {
+        for (width, height) in [(4986.0, 2742.0), (700.0, 1400.0), (240.0, 180.0)] {
+            for (tw, th) in [(512.0, 512.0), (1024.0, 256.0), (256.0, 32000.0)] {
+                let rect = avatar_rect(width, height, tw, th);
+                assert!(rect.x >= 0.0 && rect.y >= 0.0);
+                assert!(rect.width <= width && rect.height <= height);
+                assert!((rect.x + rect.width / 2.0 - width / 2.0).abs() < 0.001);
+                assert!((rect.y + rect.height / 2.0 - height / 2.0).abs() < 0.001);
+                assert!((rect.width / rect.height - tw / th).abs() < 0.001);
+            }
+        }
+    }
 
     #[test]
     fn default_assets_are_beside_executable() {

@@ -18,6 +18,10 @@ PNG, JPG/JPEG, BMP, GIF (first frame), QOI and TGA are supported. Use transparen
 
 The window displays one image at a time, centered and scaled to fit without cropping. **Up/Down** adjusts the microphone noise gate by 2 dB, **R** reloads images, and **Esc** quits. The gate starts at -45 dBFS; increase it if background noise triggers the avatar or decrease it if quiet speech is ignored. Talking starts 4 dB above the gate, loud talking 24 dB above it. Smoothing and hysteresis prevent flickering on short pauses.
 
+Full-scene anti-aliasing uses 4-sample supersampling: the avatar and text render at twice the window's width and height before being smoothly downsampled. Avatar textures also use mipmaps and trilinear filtering. The render buffer follows window resizing; this avoids requesting a window MSAA mode that can fail on some GLX drivers.
+
+Text, controls, and avatar margins scale together with the window's shorter side, using the initial 900×900 window as the reference. The avatar remains centered and fits without stretching or cropping in wide and tall windows.
+
 Linux needs ALSA + X11/GL dev packages (`libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`) plus `cmake` and `clang`.
 
 See [MANUAL.md](MANUAL.md) for details. Run `cargo test` to test the voice-state logic.

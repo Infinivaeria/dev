@@ -35,6 +35,10 @@ New in 3.0:
 
 Everything else:
 
+- Full-scene 4-sample anti-aliasing for the grid (including 3D), image viewer,
+  and inventory. The scene renders at twice the framebuffer width and height
+  before downsampling, and follows window resizing and maximization. This
+  uses more GPU memory and rendering work than drawing at native resolution.
 - Infinite sparse grid of signed `(col, row)` cells, recursively nestable.
 - **Local profiles** ("accounts"): each profile is a completely separate set
   of grids, pasted/downloaded assets, partitioned_array exports and an

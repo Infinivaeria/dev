@@ -94,17 +94,22 @@ impl InventoryApp {
             .build();
         rl.set_target_fps(60);
         ui::load_font(&thread);
+        let mut renderer = crate::rendering::Renderer::default();
 
-        while !rl.window_should_close() {
-            self.update(&mut rl)?;
-            self.preload_visible_textures(&rl);
-            self.textures.pump(&mut rl, &thread);
-            self.draw(&mut rl, &thread);
-        }
+        let result = (|| {
+            while !rl.window_should_close() {
+                self.update(&mut rl)?;
+                self.preload_visible_textures(&rl);
+                self.textures.pump(&mut rl, &thread);
+                self.draw(&mut rl, &thread, &mut renderer)?;
+            }
+            Ok(())
+        })();
         // Free GPU textures before the window and GL context close.
         self.textures.clear();
+        drop(renderer);
         drop(rl);
-        Ok(())
+        result
     }
 
     fn update(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
@@ -191,13 +196,18 @@ impl InventoryApp {
         }
     }
 
-    fn draw(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) {
+    fn draw(
+        &mut self,
+        rl: &mut RaylibHandle,
+        thread: &RaylibThread,
+        renderer: &mut crate::rendering::Renderer,
+    ) -> Result<(), String> {
         let screen_width = rl.get_screen_width();
         let screen_height = rl.get_screen_height();
         let mouse = rl.get_mouse_position();
         let m = Metrics::new(screen_width, screen_height);
 
-        let mut d = rl.begin_drawing(thread);
+        let mut d = renderer.begin(rl, thread)?;
         d.clear_background(VIEWER_BACKGROUND);
 
         let start_idx = (self.scroll_offset / m.row_height).floor() as usize;
@@ -395,6 +405,7 @@ impl InventoryApp {
             );
             d.draw_rectangle_rec(bar_rect, Color::new(100, 100, 120, 180));
         }
+        Ok(())
     }
 
     fn open_inventory_item(item: &InventoryItem) -> Result<(), String> {

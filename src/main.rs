@@ -13,6 +13,7 @@ mod panels;
 mod persistence;
 mod plugins;
 mod profiles;
+mod rendering;
 #[cfg(feature = "scripting")]
 mod scripting;
 mod search;
@@ -631,8 +632,10 @@ impl App {
         // Esc closes overlays / cancels downloads instead of quitting.
         rl.set_exit_key(None);
         ui::load_font(&thread);
+        let mut renderer = rendering::Renderer::default();
         self.run_profile_init();
 
+        let mut rendered = Ok(());
         while !rl.window_should_close() {
             if let Err(error) = self.update(&mut rl) {
                 self.status = Some(format!("Error: {error}"));
@@ -650,7 +653,10 @@ impl App {
                 rl.set_window_title(&thread, &self.window_title());
                 self.title_dirty = false;
             }
-            self.draw(&mut rl, &thread);
+            rendered = self.draw(&mut rl, &thread, &mut renderer);
+            if rendered.is_err() {
+                break;
+            }
             let now = rl.get_time();
             if self.status != self.status_seen.0 {
                 self.status_seen = (self.status.clone(), now);
@@ -674,8 +680,9 @@ impl App {
         drop(self.script_engine.take());
         self.thumbnails.clear();
         self.player.shutdown();
+        drop(renderer);
         drop(rl);
-        saved
+        saved.and(rendered)
     }
 
     fn update(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
@@ -4695,7 +4702,12 @@ impl App {
         }
     }
 
-    fn draw(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) {
+    fn draw(
+        &mut self,
+        rl: &mut RaylibHandle,
+        thread: &RaylibThread,
+        renderer: &mut rendering::Renderer,
+    ) -> Result<(), String> {
         let mouse = rl.get_mouse_position();
         let viewport = self.viewport(rl);
         let visible_range = self.camera.visible_range(viewport, self.cell_size).ok();
@@ -4755,7 +4767,7 @@ impl App {
                 .collect(),
             _ => Vec::new(),
         };
-        let mut d = rl.begin_drawing(thread);
+        let mut d = renderer.begin(rl, thread)?;
         d.clear_background(BACKGROUND);
 
         if self.view_3d {
@@ -5106,6 +5118,7 @@ impl App {
         if self.help_open {
             panels::draw_help(&mut d, screen_width, screen_height, self.help_scroll, mouse);
         }
+        Ok(())
     }
 
     fn draw_scene_3d(
@@ -5925,8 +5938,25 @@ fn run_script_file(_script_path: &Path, _target: Target) -> Result<(), String> {
 
 enum ViewerImage {
     Decoding(std::sync::mpsc::Receiver<Result<image::RgbaImage, String>>),
+    Uploading(imaging::ImageUpload),
     Ready(TiledImage),
     Failed(String),
+}
+
+impl ViewerImage {
+    fn poll_decode(&mut self) {
+        let Self::Decoding(receiver) = self else {
+            return;
+        };
+        *self = match receiver.try_recv() {
+            Ok(Ok(image)) => Self::Uploading(imaging::ImageUpload::new(image)),
+            Ok(Err(error)) => Self::Failed(error),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Self::Failed("Image decoder stopped before completing".to_owned())
+            }
+        };
+    }
 }
 
 fn run_image_viewer(path: &Path) -> Result<(), String> {
@@ -5946,6 +5976,7 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
         .build();
     rl.set_target_fps(60);
     ui::load_font(&thread);
+    let mut renderer = rendering::Renderer::default();
 
     let monitor = raylib::core::window::get_current_monitor();
     let max_w = (raylib::core::window::get_monitor_width(monitor) - 80).max(320);
@@ -5991,15 +6022,21 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
             fitted = true;
         }
 
-        if let ViewerImage::Decoding(receiver) = &state {
-            if let Ok(result) = receiver.try_recv() {
-                state = match result.and_then(|image| TiledImage::upload(&mut rl, &thread, &image))
-                {
-                    Ok(tiled) => ViewerImage::Ready(tiled),
-                    Err(error) => ViewerImage::Failed(error),
-                };
+        // Upload at most one tile before returning to input and drawing.
+        // Poll afterwards so the first upload also gets a visible status frame.
+        if let ViewerImage::Uploading(upload) = &mut state {
+            match upload.advance(&mut rl, &thread) {
+                Ok(true) => {
+                    let ViewerImage::Uploading(upload) = state else {
+                        unreachable!()
+                    };
+                    state = ViewerImage::Ready(upload.tiled);
+                }
+                Ok(false) => {}
+                Err(error) => state = ViewerImage::Failed(error),
             }
         }
+        state.poll_decode();
 
         if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_MIDDLE)
             || rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT)
@@ -6051,7 +6088,7 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
         let viewport = [sw, sh];
         let scale = ui::scale(screen_width, screen_height);
 
-        let mut d = rl.begin_drawing(&thread);
+        let mut d = renderer.begin(&mut rl, &thread)?;
         d.clear_background(VIEWER_BACKGROUND);
 
         let top_left =
@@ -6065,6 +6102,25 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
                 zoom as f32,
                 screen,
             ),
+            ViewerImage::Uploading(upload) => {
+                upload.tiled.draw(
+                    &mut d,
+                    Vector2::new(top_left[0] as f32, top_left[1] as f32),
+                    zoom as f32,
+                    screen,
+                );
+                ui::draw_text_centered(
+                    &mut d,
+                    &format!(
+                        "Loading image: {}/{} tiles…",
+                        upload.tiled.tile_count(),
+                        upload.total_tiles()
+                    ),
+                    screen,
+                    22.0 * scale,
+                    VIEWER_TEXT,
+                );
+            }
             ViewerImage::Decoding(_) => {
                 let frame = Rectangle::new(
                     top_left[0] as f32,
@@ -6776,6 +6832,45 @@ fn draw_confirm_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewer_handles_decoder_disconnect_instead_of_waiting_forever() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut state = ViewerImage::Decoding(receiver);
+        state.poll_decode();
+        assert!(matches!(state, ViewerImage::Decoding(_)));
+        drop(sender);
+        state.poll_decode();
+        assert!(matches!(state, ViewerImage::Failed(_)));
+    }
+
+    #[test]
+    fn viewer_stages_split_image_before_uploading() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        // Cross a tile boundary without allocating a huge test image.
+        sender
+            .send(Ok(image::RgbaImage::new(imaging::TILE_SIZE + 1, 2)))
+            .unwrap();
+        drop(sender);
+        let mut state = ViewerImage::Decoding(receiver);
+        state.poll_decode();
+        let ViewerImage::Uploading(upload) = &state else {
+            panic!("decoded image should wait for incremental upload");
+        };
+        assert_eq!(upload.total_tiles(), 2);
+        assert_eq!(upload.tiled.tile_count(), 0);
+        state.poll_decode();
+        assert!(matches!(state, ViewerImage::Uploading(_)));
+    }
+
+    #[test]
+    fn viewer_preserves_decode_error() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(Err("invalid image".to_owned())).unwrap();
+        let mut state = ViewerImage::Decoding(receiver);
+        state.poll_decode();
+        assert!(matches!(state, ViewerImage::Failed(error) if error == "invalid image"));
+    }
 
     #[test]
     fn export_game_writes_a_runnable_folder() {

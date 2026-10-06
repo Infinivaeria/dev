@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fixed maximized windows retaining an old-sized drawing area by refreshing
+  the framebuffer viewport and projection every frame.
+- Added full-scene 4-sample supersampling to the grid, 3D view, image viewer,
+  and inventory, including correctly scaled help-panel clipping.
+- Keep grid saving and GPU cleanup on rendering-error exits.
+
 ## 3.0.0-rc.3
 
 ### Added

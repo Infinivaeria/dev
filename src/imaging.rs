@@ -210,27 +210,6 @@ pub struct TiledImage {
 }
 
 impl TiledImage {
-    pub fn upload(
-        rl: &mut RaylibHandle,
-        thread: &RaylibThread,
-        image: &RgbaImage,
-    ) -> Result<Self, String> {
-        let (width, height) = image.dimensions();
-        let mut tiles = Vec::new();
-        for (x, y, w, h) in tile_layout(width, height, TILE_SIZE) {
-            let texture = upload_region(rl, thread, image, x, y, w, h)?;
-            tiles.push((
-                Rectangle::new(x as f32, y as f32, w as f32, h as f32),
-                texture,
-            ));
-        }
-        Ok(Self {
-            width,
-            height,
-            tiles,
-        })
-    }
-
     pub fn tile_count(&self) -> usize {
         self.tiles.len()
     }
@@ -255,6 +234,50 @@ impl TiledImage {
             let source = Rectangle::new(0.0, 0.0, area.width, area.height);
             d.draw_texture_pro(texture, source, dest, Vector2::zero(), 0.0, Color::WHITE);
         }
+    }
+}
+
+/// Keeps the decoded pixels alive while uploading one tile per frame. Drawing
+/// and input handling must run between calls, even for very large images.
+pub struct ImageUpload {
+    source: RgbaImage,
+    pub tiled: TiledImage,
+    remaining: std::vec::IntoIter<(u32, u32, u32, u32)>,
+}
+
+impl ImageUpload {
+    pub fn new(source: RgbaImage) -> Self {
+        let (width, height) = source.dimensions();
+        Self {
+            source,
+            tiled: TiledImage {
+                width,
+                height,
+                tiles: Vec::new(),
+            },
+            remaining: tile_layout(width, height, TILE_SIZE).into_iter(),
+        }
+    }
+
+    pub fn total_tiles(&self) -> usize {
+        self.tiled.tile_count() + self.remaining.len()
+    }
+
+    /// Returns true when finished. Moving out `tiled` then releases the full
+    /// CPU image, leaving only the textures resident.
+    pub fn advance(
+        &mut self,
+        rl: &mut RaylibHandle,
+        thread: &RaylibThread,
+    ) -> Result<bool, String> {
+        if let Some((x, y, w, h)) = self.remaining.next() {
+            let texture = upload_region(rl, thread, &self.source, x, y, w, h)?;
+            self.tiled.tiles.push((
+                Rectangle::new(x as f32, y as f32, w as f32, h as f32),
+                texture,
+            ));
+        }
+        Ok(self.remaining.len() == 0)
     }
 }
 

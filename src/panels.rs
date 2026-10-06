@@ -553,12 +553,8 @@ pub fn draw_help(
     let line_h = size * 1.3;
     let key_w = body.width * 0.32;
     {
-        let mut clip = d.begin_scissor_mode(
-            body.x as i32,
-            body.y as i32,
-            body.width.ceil() as i32,
-            body.height.ceil() as i32,
-        );
+        let (x, y, width, height) = crate::rendering::scissor_rect(body);
+        let mut clip = d.begin_scissor_mode(x, y, width, height);
         let mut y = body.y - scroll;
         for line in &lines {
             match line {
