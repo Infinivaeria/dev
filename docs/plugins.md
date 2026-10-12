@@ -136,6 +136,14 @@ reloading never duplicates it. See [Events](#events).
 - Keep timer blocks short: the UI waits while Ruby runs.
 - A timer that raises is stopped, and the error is shown in the status bar.
 
+### `on_unload { }`
+
+Release plugin-owned resources when plugins reload, disable, or reset during
+a profile switch. Callbacks run once per plugin; a cleanup exception is reported
+and other cleanups continue. If a plugin definition fails, registered cleanup
+callbacks also run. For example, `p.on_unload { session.close }` closes a network
+session. See the [Shared Grid networking example](networking.md#shared-grids-in-the-organizer).
+
 ### `Selenite::Cell`
 
 `Struct.new(:col, :row, :kind, :path)` plus two helpers:

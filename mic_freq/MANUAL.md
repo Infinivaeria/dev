@@ -2,7 +2,8 @@
 
 ## Requirements
 
-- A working default microphone input device.
+- A default microphone input device for voice animation (the time tools also work without one).
+- A default audio output device for audible alerts; a banner always indicates completion.
 - Rust 1.88+, `cmake`, `clang`; on Linux: `libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 
 ## Avatar images
@@ -19,7 +20,11 @@ If a state has no image, a colored placeholder appears and the terminal prints a
 |-----|--------|
 | Up / Down | Raise / lower the noise gate by 2 dB |
 | R | Reload avatar images |
-| Esc | Quit |
+| F | Toggle avatar focus / dashboard |
+| A / T / S | Hide or reopen alarm / timer / stopwatch tiles |
+| Ctrl+A / Backspace | Clear / edit the focused time field |
+| Enter | Arm alarm or start timer from its focused field |
+| Esc | Quit (stops the time tools) |
 
 The default gate is -45 dBFS. A talking pose appears when microphone volume exceeds the gate by 4 dB; the loud pose appears 24 dB above it. The talking pose returns to idle below the gate, and the loud pose returns to talking below gate + 20 dB. Volume smoothing reduces frame-to-frame flicker. The current state, microphone level and gate are shown at the top of the window.
 
@@ -34,3 +39,11 @@ The image choice depends on microphone *loudness*, not the words you say or the 
 | Always talking | Raise the gate with **Up** to filter background noise. |
 | Colored placeholders | Check the asset folder and filenames, then press **R**. |
 | Reload error | Check image format and remove duplicate state images; the terminal contains the full error. |
+
+## Time tools and grid launching
+
+See the [alarm, timer, and stopwatch guide](README.md#alarm-timer-and-stopwatch) for time entry, pause/resume, laps, snooze, audio, and session lifetime. The [grid launch guide](README.md#open-or-run-a-selenite-grid-piece) explains selecting a target, enabling event launches, and locating the Selenite executable.
+
+Each time field accepts digits and colons. Click it and press Ctrl+A to replace its existing value. Errors appear near the bottom of the dashboard. Reset a configured timer before editing its duration. Alarm times refer to your computer's local timezone and the next occurrence of that time. Hiding a tile or focusing the avatar does not stop its clock.
+
+If a grid does not open, confirm that **Launch grid** is enabled for that tool, a target is selected, and Selenite is installed on PATH or supplied through `--selenite`. Ruby targets require scripting support. A `.json` target opens the grid itself; it does not automatically play individual cells inside it.

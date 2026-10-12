@@ -165,12 +165,29 @@ module Selenite
           Selenite.plugin("Name") { |p| p.button / p.menu / p.command / p.on / p.every }
           Selenite.plugins, Selenite.commands, Selenite.run(name, *args)
           Selenite.reload_plugins
-        Games  (selenite --game file.rb, or right-click a .rb cell → Run as game; see docs/game.md)
+        Games  (selenite --game file.rb|file.rbc, or right-click a Ruby cell → Run as game; see docs/game.md)
           include Raylib; InitWindow(w, h, t); BeginDrawing(); DrawText(...); EndDrawing()
           Selenite::Game.run(title: "T") { |g| g.update { |dt| }; g.draw { }; g.draw_ui { } }
           g.every(s) { }, g.axis, g.key?(KEY_X), g.texture(path), g.cell_texture(c, r), g.inventory
+        Multiplayer (see docs/networking.md)
+          game.host(port:, room:, key:), game.join(address, port:, room:, key:), game.peer
+          Selenite::Network.host / join, Network::Node / Discovery / GridRoom
+          session.on(type) { |peer, data| }, send(type, data), set(key, value), state, poll, close
+          plugin.on_unload { session.close } releases resources on plugin reset
+        Ruby bytecode (compile using the runtime you distribute; bytecode is not encryption)
+          selenite --compile file.rb [--output file.rbc] [--force]
+          Selenite::Bytecode.compile(source, output = nil, force = false)
+          Selenite::Bytecode.load(path), require(path); grid_eval_file(path)
         partitioned_array
           grid_pa_export(dir), grid_pa_import(dir), grid_pa_records(dir)
+        Game storage (see docs/game-storage.md)
+          store = g.storage("game")          game-owned handle; g.save flushes it
+          store = Selenite.grid.storage      standalone handle; call store.close
+          table = store.table("entities")    insert / [] / update / delete / where
+          table.partitions, stats, sleep!, wake!, revive!(partition), revenants
+          store.flush, snapshot(new_dir), vacuum!, close
+          Selenite::BSP.new(bounds: [x,y,w,h], depth: 4), leaf_at(x,y), query(bounds)
+          Selenite::PartitionedWorld.new(store, bsp: tree), spawn / move / stream / query
       HELP
       nil
     end
@@ -262,6 +279,7 @@ module Selenite
       @description = ""
       @version = ""
       @items = []
+      @unload_callbacks = []
     end
 
     def description(text = nil)
@@ -306,6 +324,24 @@ module Selenite
       add(:timer, "every #{seconds % 1 == 0 ? seconds.to_i : seconds}s", block, interval: seconds)
     end
 
+    def on_unload(&block)
+      raise ArgumentError, "on_unload needs a block" unless block
+      @unload_callbacks << block
+      nil
+    end
+
+    def unload!
+      callbacks = @unload_callbacks
+      @unload_callbacks = []
+      callbacks.each do |callback|
+        begin
+          callback.call
+        rescue StandardError => error
+          warn "plugin #{@name} cleanup failed: #{error.message}"
+        end
+      end
+    end
+
     def inspect
       "#<Selenite plugin #{@name} (#{@items.size} items)>"
     end
@@ -340,7 +376,12 @@ module Selenite
       def define(name, file, &block)
         raise ArgumentError, "Selenite.plugin needs a block" unless block
         plugin = PluginBuilder.new(name, file)
-        block.arity.zero? ? plugin.instance_eval(&block) : block.call(plugin)
+        begin
+          block.arity.zero? ? plugin.instance_eval(&block) : block.call(plugin)
+        rescue Exception
+          plugin.unload!
+          raise
+        end
         @list << plugin
         plugin
       end
@@ -348,6 +389,7 @@ module Selenite
       # Forget every plugin (and remove their hooks) before a reload.
       def reset!
         @list.each do |plugin|
+          plugin.unload!
           plugin.items.each do |id, kind, label, *|
             Selenite.__remove_hook(label, @actions[id]) if kind == "hook"
           end

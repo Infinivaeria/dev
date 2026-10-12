@@ -1,13 +1,38 @@
 # Selenite
 
-**Version 3.0.0-rc.2** (v3.0 release candidate). See [CHANGELOG.md](CHANGELOG.md).
+**Version 3.0.0-rc.4** (v3.0 release candidate). See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
 pannable, zoomable multimedia file grid with recursively nestable sub-grids, all packed
 into a single native executable.
 
+## Instruction manual
+
+See the [complete Selenite instruction manual](docs/manual.md) for setup, step-by-step workflows, all window controls, profiles and backups, Ruby, plugins, games, and troubleshooting. It documents the current implementation and clarifies limitations of clipboard copying and exports.
+
 ## Features
+
+New in rc.4: **selenite-game**, a dedicated Ruby-only game executable, and
+partitioned game storage with BSP worlds, revenant labels, and checkpoints.
+
+Selenite itself is still the full organizer: the dimensional (2D + 3D) nested
+grid UI with profiles, inventories, plugins, and exports. `selenite-game` is an
+additional runtime that runs Ruby games without opening the organizer.
+
+Both executables can compile `.rb` games/scripts with `--compile` and run `.rbc`
+bytecode without the original source; see [bytecode distribution](docs/game.md#compile-and-distribute-ruby-bytecode).
+Ruby games and organizer plugins also support [multiplayer networking and P2P](docs/networking.md):
+direct peers/meshes, authenticated host/join sessions, state replication,
+LAN discovery, and shared grids. A Cooperative Gems game and Shared Grid plugin
+are included.
+Run `./bootstrap-game.sh` to build a portable game runtime in `dist-game/`,
+then `./dist-game/run-game.sh` to launch the included starter game. Ruby and
+PartitionedArray are bundled. See the [packaging guide](docs/packaging.md)
+and [storage guide](docs/game-storage.md).
+
+If you want the full organizer executable (`selenite`), build the full package
+with `./package.sh` and run `./dist/run.sh`.
 
 New in 3.0:
 
@@ -259,7 +284,7 @@ series of grids.
 
 This runs a Ruby game (raylib-bindings style or `Selenite::Game`) in its own
 window, against a profile's grids or a `--grid FILE`. Inside the app,
-right-click a `.rb` cell and choose **Run as game** or **Export standalone
+right-click a `.rb` or `.rbc` cell and choose **Run as game** or **Export standalone
 game**. See [docs/game.md](docs/game.md).
 
 ### Image viewer
@@ -290,9 +315,9 @@ Controls in image viewer:
 Opens an itemized, browsable inventory list view displaying all files and
 sub-grids attached anywhere across the grid hierarchy:
 - Displays thumbnails, hierarchy path (e.g. `root / Subgrid A / ...`), grid coordinates, and item type.
-- **Mouse wheel / Up / Down / PageUp / PageDown**: scroll through the inventory list.
-- **Double click / Enter**: opens the selected file using its appropriate viewer/player.
-- **R**: reload the JSON file from disk.
+- **Mouse wheel**: scroll the list; **Up / Down** changes the selected row without automatically scrolling.
+- **Click a selected row again / Enter**: images open in the Selenite viewer; other files use their system application. Grid rows are informational.
+- **Refresh** button: reload the JSON file from disk.
 - **Escape**: close the inventory window.
 
 You can also launch this window directly from the main application using the **Inventory** button in the toolbar.
@@ -395,11 +420,9 @@ Hover any button for a tooltip that explains it.
 
 ### Inventory mode
 
-- **Refresh** — reload the JSON file from disk
-- **Find** — search the inventory's grids
-- **3D View / 2D View** — the same 3D view as the main window
-- **Labels** / **Music** — same as in the main window
-- **Back** — return to the parent grid when inside a nested grid
+The separate Inventory list has a **Refresh** button and an attached-item count.
+It does not expose the main grid's Find, 3D, labels, or music toolbar. See the
+[Inventory manual section](docs/manual.md#13-file-inventory-window) for its actual controls.
 
 ## Persistence format
 
@@ -580,9 +603,11 @@ Its `lib/` directory is added to `$LOAD_PATH`, resolved in this order:
 2. `partitioned_array/lib` next to the executable (portable bundle)
 3. `partitioned_array/lib` in the source checkout
 
-Each cell of the currently viewed grid is stored as one hash record
-(`col`, `row`, `kind`, `path`). Nested grids are recorded as empty `grid`
-containers.
+Each stack item of the currently viewed grid is stored as one hash record
+(`col`, `row`, `index`, `kind`, `path`), with index 0 at the top. Nested grids
+are recorded as empty `grid` containers; their descendants and inventories
+are not backed up. Use a [full data backup](docs/manual.md#16-saving-backups-and-moving-data)
+for complete preservation.
 
 - `grid_pa_available()` — whether the library could be loaded
 - `grid_pa_export(db_path, db_name = "selenite_cells")` — overwrite a snapshot

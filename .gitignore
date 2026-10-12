@@ -7,6 +7,8 @@
 *.gem
 /selenite.json
 /dist/
+/dist-game/
+/examples/games/game-data/
 /test-artifacts/
 /partitioned_array/
 /bin/raygrid.json

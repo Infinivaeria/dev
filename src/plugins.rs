@@ -32,6 +32,10 @@ pub const EXAMPLES: &[(&str, &str)] = &[
         include_str!("../examples/plugins/grid_tools.rb"),
     ),
     ("clock.rb", include_str!("../examples/plugins/clock.rb")),
+    (
+        "network_grid.rb",
+        include_str!("../examples/plugins/network_grid.rb"),
+    ),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

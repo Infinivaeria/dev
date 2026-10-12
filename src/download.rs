@@ -15,6 +15,22 @@ use std::{
     time::Duration,
 };
 
+fn extension_for_content_type(content_type: &str) -> &'static str {
+    match content_type.split(';').next().unwrap_or_default().trim() {
+        "image/png" => ".png",
+        "image/jpeg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        "audio/mpeg" => ".mp3",
+        "audio/ogg" => ".ogg",
+        "audio/wav" | "audio/x-wav" => ".wav",
+        "video/mp4" => ".mp4",
+        "video/webm" => ".webm",
+        "text/x-ruby" | "application/x-ruby" => ".rb",
+        _ => ".bin",
+    }
+}
+
 const CHUNK: usize = 256 * 1024;
 
 #[derive(Default)]
@@ -422,7 +438,7 @@ fn fetch(url: &str, directory: &Path, progress: &Progress) -> Result<PathBuf, St
         .or_else(|| url_file_name(url))
         .unwrap_or_else(|| format!("download-{}", crate::timestamp()));
     if Path::new(&name).extension().is_none() {
-        name.push_str(crate::extension_for_content_type(&content_type));
+        name.push_str(extension_for_content_type(&content_type));
     }
 
     let final_path = unique_path(directory, &name);

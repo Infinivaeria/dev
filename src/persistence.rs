@@ -101,7 +101,7 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 const VIDEO_EXTENSIONS: &[&str] = &[
     ".avi", ".flv", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ogv", ".webm", ".wmv",
 ];
-const RUBY_EXTENSIONS: &[&str] = &[".rb", ".rake", ".gemspec"];
+const RUBY_EXTENSIONS: &[&str] = &[".rb", ".rbc", ".rake", ".gemspec"];
 
 /// What a single grid cell holds. Cloning is shallow: a cloned `Grid`
 /// shares the same nested grid.
@@ -1117,6 +1117,10 @@ mod tests {
         );
         assert_eq!(
             SavedGrid::classify_path(Path::new("automation.RB")),
+            CellKind::RubyScript
+        );
+        assert_eq!(
+            SavedGrid::classify_path(Path::new("game.rbc")),
             CellKind::RubyScript
         );
         assert_eq!(

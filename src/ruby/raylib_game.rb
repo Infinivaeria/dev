@@ -237,6 +237,8 @@ module Selenite
       @frame = 0
       @elapsed = 0.0
       @textures = {}
+      @storages = {}
+      @networks = []
       @timers = []
       @hooks = { update: [], draw: [], draw_ui: [], close: [] }
       @quit = false
@@ -296,7 +298,36 @@ module Selenite
 
     def grid = Selenite.grid
     def inventory = Selenite.grid.inventory
-    def save = Selenite.save
+
+    def host(**options)
+      session = Network.host(**options)
+      @networks << session
+      session
+    end
+
+    def join(address, **options)
+      session = Network.join(address, **options)
+      @networks << session
+      session
+    end
+
+    def peer(**options)
+      node = Network::Node.new(**options)
+      @networks << node
+      node
+    end
+    # Named stores default to the current grid's own folder. An explicit path
+    # is useful for standalone/exported games (for example sibling game-data).
+    def storage(name = "game", path: nil, **options)
+      name = Storage.name(name)
+      path = File.expand_path(path || File.join(grid.folder, "game-storage", name))
+      @storages[path] ||= Storage::Store.new(path, **options)
+    end
+
+    def save
+      @storages.each_value(&:flush)
+      Selenite.save
+    end
 
     def run(&setup)
       flags = FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT
@@ -312,6 +343,7 @@ module Selenite
       until @quit || WindowShouldClose()
         dt = GetFrameTime()
         @elapsed += dt
+        @networks.each { |network| network.poll unless network.closed? }
         @hooks[:update].each { |hook| hook.call(dt) }
         tick_timers(dt)
         BeginDrawing()
@@ -335,9 +367,19 @@ module Selenite
           save if @autosave && Selenite.respond_to?(:save)
         end
       ensure
-        @textures.clear
-        CloseAudioDevice() if Raylib.IsAudioDeviceReady()
-        CloseWindow() if Raylib.IsWindowReady()
+        begin
+          # save above commits stores. Always release every lock, even when a
+          # user close callback or a disk write raises; never hide that error.
+          @storages.each_value { |store| store.close(save: false) }
+        ensure
+          begin
+            @networks.each(&:close)
+          ensure
+            @textures.clear
+            CloseAudioDevice() if Raylib.IsAudioDeviceReady()
+            CloseWindow() if Raylib.IsWindowReady()
+          end
+        end
       end
     end
 

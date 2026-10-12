@@ -145,7 +145,7 @@ impl ScriptContext {
         Self {
             grid,
             root,
-            save_path,
+            save_path: std::path::absolute(&save_path).unwrap_or(save_path),
             selected: None,
             selection: Vec::new(),
             depth: 0,
@@ -254,43 +254,42 @@ impl ScriptEngine {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn eval_file(&self, path: &Path) -> String {
-        match fs::read_to_string(path) {
-            Ok(code) => self.eval_named(&code, path),
-            Err(error) => format!("error reading {}: {error}", path.display()),
-        }
-    }
-
-    pub fn eval_file_captured(&self, path: &Path) -> (String, String) {
-        let Ok(ruby) = Ruby::get() else {
-            return (String::new(), "error: Ruby VM not initialized".to_owned());
-        };
-        match fs::read_to_string(path) {
-            Ok(code) => capture(&ruby, || self.eval_named(&code, path)),
-            Err(error) => (
-                String::new(),
-                format!("error reading {}: {error}", path.display()),
-            ),
-        }
-    }
-
-    /// Evaluates a script's source at top level under its real filename so
-    /// `__FILE__`, `__dir__` and backtrace line numbers are correct.
-    fn eval_named(&self, code: &str, path: &Path) -> String {
         let Ok(ruby) = Ruby::get() else {
             return "error: Ruby VM not initialized".to_owned();
         };
-        let file = fs::canonicalize(path)
-            .unwrap_or_else(|_| path.to_path_buf())
-            .display()
-            .to_string();
-        let result = ruby.eval::<Value>("TOPLEVEL_BINDING").and_then(|binding| {
-            ruby.module_kernel()
-                .funcall::<_, _, Value>("eval", (code, binding, file, 1))
-        });
-        match result {
+        match bytecode_module(&ruby).and_then(|module| {
+            module.funcall::<_, _, Value>("evaluate", (path.display().to_string(),))
+        }) {
             Ok(value) => value.inspect(),
             Err(error) => format!("error: {error}"),
         }
+    }
+
+    pub fn compile_file(&self, source: &Path, output: &Path, force: bool) -> Result<(), String> {
+        let ruby = Ruby::get().map_err(|_| "Ruby VM not initialized".to_owned())?;
+        bytecode_module(&ruby)
+            .and_then(|module| {
+                module.funcall::<_, _, Value>(
+                    "compile",
+                    (
+                        source.display().to_string(),
+                        output.display().to_string(),
+                        force,
+                    ),
+                )
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn eval_file_captured(&self, path: &Path) -> (String, String) {
+        if let Err(error) = crate::game_cli::validate_ruby_path(path) {
+            return (String::new(), format!("error: {error}"));
+        }
+        let Ok(ruby) = Ruby::get() else {
+            return (String::new(), "error: Ruby VM not initialized".to_owned());
+        };
+        capture(&ruby, || self.eval_file(path))
     }
 
     /// Whether any Ruby hook is registered for `event`.
@@ -629,7 +628,15 @@ fn install_partitioned_array(ruby: &Ruby) -> Result<(), Error> {
         let _: Value = load_path.funcall("unshift", (dir.display().to_string(),))?;
     }
     let _: Value = ruby.eval(PARTITIONED_ARRAY_BRIDGE)?;
+    let _: Value = ruby.eval(include_str!("ruby/game_storage.rb"))?;
+    let _: Value = ruby.eval(include_str!("ruby/game_world.rb"))?;
+    let _: Value = ruby.eval(include_str!("ruby/bytecode.rb"))?;
+    let _: Value = ruby.eval(include_str!("ruby/network.rb"))?;
     Ok(())
+}
+
+fn bytecode_module(ruby: &Ruby) -> Result<RModule, Error> {
+    selenite_module(ruby)?.const_get("Bytecode")
 }
 
 fn call_bridge(function: &str, db_path: &Path) -> Result<i64, String> {
@@ -961,11 +968,9 @@ fn grid_save() -> Result<bool, Error> {
     Ok(saved)
 }
 
-/// `grid_eval_file(path)` -- evaluate another Ruby source file in this VM.
+/// `grid_eval_file(path)` -- evaluate a Ruby source or bytecode file in this VM.
 fn grid_eval_file(ruby: &Ruby, path: String) -> Result<Value, Error> {
-    let code = fs::read_to_string(&path)
-        .map_err(|error| runtime_error(format!("could not read {path}: {error}")))?;
-    ruby.eval(&code)
+    bytecode_module(ruby)?.funcall("evaluate", (path,))
 }
 
 fn sel_grid() -> Result<RbGrid, Error> {
@@ -1362,6 +1367,10 @@ mod tests {
     #[test]
     fn grid_functions_round_trip_through_ruby() {
         let engine = ScriptEngine::new().expect("ruby VM should start");
+        assert!(engine
+            .eval_file_captured(Path::new("not-ruby.py"))
+            .1
+            .contains("Ruby-only"));
         let grid = Arc::new(Mutex::new(SavedGrid::new()));
         let save_path = std::env::temp_dir().join(format!(
             "selenite_scripting_test_{}.json",
@@ -1413,6 +1422,33 @@ mod tests {
             save_path.exists(),
             "grid_save should have written the save file"
         );
+        fs::write(
+            &script_path,
+            "puts 'COMPILED_OK'; raise 'save failed' unless Selenite.save; 42",
+        )
+        .unwrap();
+        let compiled_path = script_path.with_extension("rbc");
+        engine
+            .compile_file(&script_path, &compiled_path, false)
+            .unwrap();
+        assert!(engine
+            .compile_file(&script_path, &compiled_path, false)
+            .is_err());
+        fs::remove_file(&script_path).unwrap();
+        assert_eq!(
+            engine.eval_file_captured(&compiled_path),
+            ("COMPILED_OK\n".to_owned(), "42".to_owned())
+        );
+        let compiled_text = compiled_path
+            .display()
+            .to_string()
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'");
+        assert_eq!(
+            engine.eval(&format!("grid_eval_file('{compiled_text}')")),
+            "42"
+        );
+        fs::remove_file(&compiled_path).unwrap();
         let _ = std::fs::remove_file(&save_path);
         let _ = std::fs::remove_file(script_path);
 
@@ -1570,6 +1606,19 @@ mod tests {
             ]
         );
         let _ = fs::remove_dir_all(store.base());
+
+        // Embedded game storage and BSP are available without a game window.
+        assert_eq!(
+            engine.eval(
+                r#"require 'tmpdir'; Dir.mktmpdir('selenite-game-store-') do |dir|
+                  Selenite::Storage::Store.open(dir, partition_size: 2) do |store|
+                    t = store.table('actors'); 7.times { |i| t.insert(hp: i) }
+                    t.sleep!; [t[6]['hp'], t.revenants, Selenite::BSP.new(bounds: [0,0,100,100], depth: 1).leaves.size]
+                  end
+                end"#
+            ),
+            "[6, [2], 2]"
+        );
 
         // partitioned_array round trip on a fresh grid.
         let pa_grid = Arc::new(Mutex::new(SavedGrid::new()));
@@ -2007,8 +2056,61 @@ mod tests {
             assert_eq!(info.error, None, "{} failed to load: {output}", info.name);
             assert!(!info.items.is_empty());
         }
+        let network_plugin_dir =
+            std::env::temp_dir().join(format!("selenite-network-plugin-{}", std::process::id()));
+        fs::create_dir_all(&network_plugin_dir).unwrap();
+        let network_plugin_grid = Arc::new(Mutex::new(SavedGrid::new()));
+        engine.set_context(ScriptContext::new(
+            Arc::clone(&network_plugin_grid),
+            network_plugin_grid,
+            network_plugin_dir.join("grid.json"),
+        ));
+        let plugin_cleanup_result = engine.eval(
+            r#"
+          previous_key = ENV['SELENITE_NET_KEY']
+          begin
+            ENV['SELENITE_NET_KEY'] = 'plugin-lifecycle-test'
+            Selenite.run('net-host', '0')
+            plugin_session = $selenite_network_grid.session
+            Selenite::Plugins.reset!
+            plugin_session.closed? && $selenite_network_grid.nil?
+          ensure
+            ENV['SELENITE_NET_KEY'] = previous_key
+          end
+        "#,
+        );
+        assert_eq!(plugin_cleanup_result, "true");
+        fs::remove_dir_all(network_plugin_dir).unwrap();
         engine.load_plugins(&[]);
         let _ = fs::remove_dir_all(&plugin_dir);
+
+        assert_eq!(engine.eval("$unload_count = 0; Selenite.plugin('Cleanup') { |plugin| plugin.on_unload { $unload_count += 1 } }; Selenite::Plugins.reset!; Selenite::Plugins.reset!; $unload_count"), "1");
+        let network_result = engine.eval(r#"
+          host = Selenite::Network.host(port: 0, key: 'embedded-test')
+          client = Selenite::Network.join('127.0.0.1', port: host.address['port'], key: 'embedded-test')
+          begin
+            host_grid = Selenite.grid.new_grid(72, 73)
+            client_grid = Selenite.grid.new_grid(74, 75)
+            shared_host = Selenite::Network::GridRoom.new(host, grid: host_grid, assets: { tile: '/host/tile.png' })
+            shared_client = Selenite::Network::GridRoom.new(client, grid: client_grid, assets: { tile: '/client/tile.png' })
+            deadline = Selenite::Network.clock + 2
+            until client.synced?
+              host.poll; client.poll
+              raise 'network handshake timed out' if Selenite::Network.clock > deadline
+              sleep 0.001
+            end
+            shared_client.place(1, 2, 'tile')
+            until client_grid[1, 2]
+              host.poll; client.poll
+              raise 'grid replication timed out' if Selenite::Network.clock > deadline
+              sleep 0.001
+            end
+            [host_grid[1, 2].path, client_grid[1, 2].path]
+          ensure
+            host.close; client.close
+          end
+        "#);
+        assert_eq!(network_result, "[\"/host/tile.png\", \"/client/tile.png\"]");
 
         // v3 game API: raylib-bindings style module, usable headless for
         // everything that doesn't need a window.
@@ -2068,6 +2170,7 @@ mod tests {
         );
         let error = engine.eval("Selenite::Game.run(width: 8, height: 8) { }");
         assert!(error.contains("--game"), "unexpected: {error}");
+        assert_eq!(engine.eval("game = Selenite::Game.new; owned_peer = game.peer(port: 0); begin; game.run; rescue StandardError; end; owned_peer.closed?"), "true");
 
         // Bogus Ruby surfaces as a readable error string, not a panic.
         let error = engine.eval("this is not ruby (((");

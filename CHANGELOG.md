@@ -1,6 +1,37 @@
 # Changelog
 
-## Unreleased
+## 3.0.0-rc.4
+
+### Added
+
+- Ruby multiplayer networking in both runtimes: nonblocking TCP peers/meshes,
+  shared-key handshake/message authentication, bounded queues, host-authoritative
+  state and late-join snapshots, IPv4 LAN discovery, and logical-asset grid rooms.
+- Cooperative Gems multiplayer example, Shared Grid organizer plugin,
+  plugin resource-cleanup callbacks, and networking documentation/tests.
+- Ruby `.rbc` compilation and execution in both executables, with runtime
+  compatibility metadata, corruption checks, explicit replacement, compiled
+  helper loading, relocated game assets, and bytecode-aware exports/launchers.
+- Dedicated `selenite-game` executable, built only with the `scripting`
+  feature. Runs Ruby games without opening the organizer or selecting a profile.
+- `bootstrap-game.sh` and `package.sh --game` produce a game-only portable
+  distribution with Ruby libraries, PartitionedArray, documentation,
+  examples, and a playable starter. Full packages include both executables.
+- Persistent game tables, stable IDs, lazy loading, active / dormant / revenant
+  partition labels, metadata, checkpoints, and safe commits.
+- Deterministic BSP trees and persistent worlds with region streaming.
+- Complete game-development tutorial and partitioned-storage instructions.
+
+### Changed
+
+- Game/script entry files must use `.rb` or `.rbc`. Games execute through embedded Ruby;
+  no Python, JavaScript, or other language runners are added.
+- Standalone exports prefer the dedicated game executable and copy sibling
+  `game-data`, along with assets and the array library.
+- Portable launchers configure Ruby standard-library and architecture extension
+  paths, and include the actual versioned libruby shared libraries.
+
+### Fixed
 
 - Fixed maximized windows retaining an old-sized drawing area by refreshing
   the framebuffer viewport and projection every frame.

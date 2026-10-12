@@ -2,6 +2,8 @@ mod camera;
 mod download;
 #[cfg(feature = "scripting")]
 mod game;
+#[allow(dead_code)]
+mod game_cli;
 mod grid_inventory;
 mod help;
 mod history;
@@ -132,7 +134,7 @@ impl ToolbarAction {
             Self::Delete => "Delete the selected cell(s) and everything stacked on them (Del). Shift+Del removes only the top item. Non-empty nested grids ask first.",
             Self::Paste => "Paste into the selected cell (Ctrl+V): an image of any size, copied files, file paths, or URLs (one per line). URLs download in the background with no size limit. Ctrl+Shift+V stacks everything onto the one cell.",
             Self::Copy => "Copy the selected cells' files to the clipboard (Ctrl+C); Ctrl+X cuts.",
-            Self::OpenRun => "Open the selected cell's top item (Enter): images in the viewer, .rb scripts in embedded Ruby, music in the built-in player, video and other files in the system player.",
+            Self::OpenRun => "Open the selected cell's top item (Enter): images in the viewer, .rb or .rbc scripts in embedded Ruby, music in the built-in player, video and other files in the system player.",
             Self::PaExport => help::PA_EXPORT_TIP,
             Self::PaImport => help::PA_IMPORT_TIP,
             Self::OpenInventory => "Open a separate window listing every file across all nested grids.",
@@ -268,9 +270,9 @@ enum MenuItem {
     GridFolder,
     /// Open a nested grid cell's own folder.
     NestedGridFolder,
-    /// Run a `.rb` cell as a game in its own window (`selenite --game`).
+    /// Run a Ruby cell as a game in its own window (`selenite --game`).
     RunGame,
-    /// Export a `.rb` cell as a self-contained game folder.
+    /// Export a Ruby cell as a self-contained game folder.
     ExportGame,
     /// A plugin's `p.menu` entry, by action id.
     Plugin(i64),
@@ -5777,6 +5779,7 @@ fn run() -> Result<(), String> {
         StartupMode::Inventory(json_path) => inventory::InventoryApp::new(json_path)?.run(),
         StartupMode::Script(script_path, target) => run_script_file(&script_path, target),
         StartupMode::Game(script_path, target) => run_game_file(&script_path, target),
+        StartupMode::Compile(source, output, force) => compile_ruby_file(&source, &output, force),
         StartupMode::Grid(json_path) => App::new(Mode::Main, json_path)?.run(),
         StartupMode::Profile(requested) => {
             let store = ProfileStore::open_default();
@@ -5802,6 +5805,7 @@ enum StartupMode {
     Image(PathBuf),
     Script(PathBuf, Target),
     Game(PathBuf, Target),
+    Compile(PathBuf, PathBuf, bool),
     ListProfiles,
     Usage,
 }
@@ -5813,10 +5817,12 @@ fn usage() -> String {
         "  selenite --profile NAME          open (or create) the profile NAME",
         "  selenite --grid FILE.json        edit a grid file directly, outside any profile",
         "  selenite --list-profiles         list local profiles",
-        "  selenite --script FILE.rb [--profile NAME | --grid FILE.json | FILE.json]",
+        "  selenite --script FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
         "                                   run a Ruby script headless against a profile or grid",
-        "  selenite --game FILE.rb [--profile NAME | --grid FILE.json | FILE.json]",
+        "  selenite --game FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
         "                                   run a Ruby game (Raylib API) with access to the grid",
+        "  selenite --compile FILE.rb [--output FILE.rbc] [--force]",
+        "                                   compile Ruby without running it; bytecode is not encryption",
         "  selenite --image FILE            open the image viewer",
         "  selenite --inventory FILE.json   open the inventory window",
     ];
@@ -5860,9 +5866,30 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
         Some("--inventory") => StartupMode::Inventory(PathBuf::from(value(1, "--inventory")?)),
         Some("--script") => StartupMode::Script(PathBuf::from(value(1, "--script")?), target(2)?),
         Some("--game") => StartupMode::Game(PathBuf::from(value(1, "--game")?), target(2)?),
+        Some("--compile") => match game_cli::parse_compile(&rest[1..])? {
+            game_cli::GameCommand::Compile {
+                source,
+                output,
+                force,
+            } => StartupMode::Compile(source, output, force),
+            _ => unreachable!(),
+        },
         Some(other) if other.ends_with(".json") => StartupMode::Grid(PathBuf::from(other)),
         Some(other) => return Err(format!("unknown argument: {other}\n\n{}", usage())),
     })
+}
+
+#[cfg(feature = "scripting")]
+fn compile_ruby_file(source: &Path, output: &Path, force: bool) -> Result<(), String> {
+    let engine = scripting::ScriptEngine::new()?;
+    engine.compile_file(source, output, force)?;
+    println!("Compiled {} -> {}", source.display(), output.display());
+    Ok(())
+}
+
+#[cfg(not(feature = "scripting"))]
+fn compile_ruby_file(_source: &Path, _output: &Path, _force: bool) -> Result<(), String> {
+    Err("Ruby compilation requires a build with --features scripting".to_owned())
 }
 
 #[cfg(feature = "scripting")]
@@ -5891,6 +5918,7 @@ fn script_engine_for(
 /// only written when the game saves (`Selenite.save` / `Game autosave:`).
 #[cfg(feature = "scripting")]
 fn run_game_file(script_path: &Path, target: Target) -> Result<(), String> {
+    game_cli::validate_ruby_path(script_path)?;
     let (engine, _root, _json_path) = script_engine_for(target)?;
     game::enable();
     let (printed, result) = engine.eval_file_captured(script_path);
@@ -6229,23 +6257,32 @@ const RUN_GAME_SH: &str = r#"#!/usr/bin/env bash
 # Generated by Selenite "Export standalone game".
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
-if [ -x "$DIR/runtime/run.sh" ]; then
-    exec "$DIR/runtime/run.sh" --game "$DIR/game.rb" --grid "$DIR/save.json" "$@"
+ENTRY="$DIR/game.rb"
+if [ -f "$DIR/game.rbc" ]; then
+    ENTRY="$DIR/game.rbc"
+fi
+if [ -x "$DIR/runtime/run-game.sh" ]; then
+    exec "$DIR/runtime/run-game.sh" "$ENTRY" --grid "$DIR/save.json" "$@"
+elif [ -x "$DIR/runtime/selenite-game" ]; then
+    exec "$DIR/runtime/selenite-game" "$ENTRY" --grid "$DIR/save.json" "$@"
+elif [ -x "$DIR/runtime/run.sh" ]; then
+    exec "$DIR/runtime/run.sh" --game "$ENTRY" --grid "$DIR/save.json" "$@"
 elif [ -x "$DIR/runtime/selenite" ]; then
-    exec "$DIR/runtime/selenite" --game "$DIR/game.rb" --grid "$DIR/save.json" "$@"
+    exec "$DIR/runtime/selenite" --game "$ENTRY" --grid "$DIR/save.json" "$@"
 else
-    exec selenite --game "$DIR/game.rb" --grid "$DIR/save.json" "$@"
+    exec selenite --game "$ENTRY" --grid "$DIR/save.json" "$@"
 fi
 "#;
 
 /// Writes `<script stem>-game/` next to `script`:
-/// - `game.rb`: the script.
+/// - `game.rb` or `game.rbc`: the script, preserving its format.
 /// - `save.json`: a snapshot of the current grid (world data and inventory).
 /// - `assets/`: copied if the script has a sibling `assets/` folder.
 /// - `runtime/`: the whole portable bundle when Selenite runs from one,
 ///   otherwise just this binary.
 /// - `run-game.sh`: the launcher.
 fn export_game(script: &Path, grid_json: &Path) -> Result<PathBuf, String> {
+    game_cli::validate_ruby_path(script)?;
     let stem = script
         .file_stem()
         .ok_or_else(|| "the script has no file name".to_owned())?
@@ -6258,7 +6295,13 @@ fn export_game(script: &Path, grid_json: &Path) -> Result<PathBuf, String> {
     let folder = parent.join(format!("{stem}-game"));
     let io = |error: std::io::Error| format!("export failed: {error}");
     fs::create_dir_all(&folder).map_err(io)?;
-    fs::copy(script, folder.join("game.rb")).map_err(io)?;
+    let compiled = script.extension().and_then(|extension| extension.to_str()) == Some("rbc");
+    let entry = if compiled { "game.rbc" } else { "game.rb" };
+    let alternate = folder.join(if compiled { "game.rb" } else { "game.rbc" });
+    fs::copy(script, folder.join(entry)).map_err(io)?;
+    if alternate.exists() {
+        fs::remove_file(alternate).map_err(io)?;
+    }
     if grid_json.exists() {
         fs::copy(grid_json, folder.join("save.json")).map_err(io)?;
     }
@@ -6266,12 +6309,21 @@ fn export_game(script: &Path, grid_json: &Path) -> Result<PathBuf, String> {
     if assets.is_dir() {
         copy_tree(&assets, &folder.join("assets")).map_err(io)?;
     }
+    // Explicit, script-relative partitioned game storage travels with a game.
+    // Close the game before export so its manifest and chunks are consistent.
+    let game_data = parent.join("game-data");
+    if game_data.is_dir() {
+        copy_tree(&game_data, &folder.join("game-data")).map_err(io)?;
+    }
     let exe = env::current_exe().map_err(io)?;
     let runtime = folder.join("runtime");
     fs::create_dir_all(&runtime).map_err(io)?;
     let bundle = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     if bundle.join("run.sh").is_file() && bundle.join("lib").is_dir() {
         fs::copy(bundle.join("run.sh"), runtime.join("run.sh")).map_err(io)?;
+        if bundle.join("run-game.sh").is_file() {
+            fs::copy(bundle.join("run-game.sh"), runtime.join("run-game.sh")).map_err(io)?;
+        }
         copy_tree(&bundle.join("lib"), &runtime.join("lib")).map_err(io)?;
         for extra in ["licenses", "partitioned_array"] {
             if bundle.join(extra).is_dir() {
@@ -6280,6 +6332,19 @@ fn export_game(script: &Path, grid_json: &Path) -> Result<PathBuf, String> {
         }
     }
     fs::copy(&exe, runtime.join("selenite")).map_err(io)?;
+    let game_runtime = bundle.join("selenite-game");
+    if game_runtime.is_file() {
+        fs::copy(game_runtime, runtime.join("selenite-game")).map_err(io)?;
+    }
+    #[cfg(feature = "scripting")]
+    if !runtime
+        .join("partitioned_array/lib/partitioned_array.rb")
+        .is_file()
+    {
+        if let Some(library) = scripting::partitioned_array_lib_dir() {
+            copy_tree(&library, &runtime.join("partitioned_array/lib")).map_err(io)?;
+        }
+    }
     let launcher = folder.join("run-game.sh");
     fs::write(&launcher, RUN_GAME_SH).map_err(io)?;
     #[cfg(unix)]
@@ -6371,22 +6436,6 @@ fn timestamp() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
-}
-
-fn extension_for_content_type(content_type: &str) -> &'static str {
-    match content_type.split(';').next().unwrap_or_default().trim() {
-        "image/png" => ".png",
-        "image/jpeg" => ".jpg",
-        "image/gif" => ".gif",
-        "image/webp" => ".webp",
-        "audio/mpeg" => ".mp3",
-        "audio/ogg" => ".ogg",
-        "audio/wav" | "audio/x-wav" => ".wav",
-        "video/mp4" => ".mp4",
-        "video/webm" => ".webm",
-        "text/x-ruby" | "application/x-ruby" => ".rb",
-        _ => ".bin",
-    }
 }
 
 fn open_with_system(path: &Path) -> Result<(), String> {
@@ -6880,6 +6929,8 @@ mod tests {
         let script = dir.join("pong.rb");
         fs::write(&script, "puts 1\n").unwrap();
         fs::write(dir.join("assets/ball.png"), b"png").unwrap();
+        fs::create_dir_all(dir.join("game-data/world")).unwrap();
+        fs::write(dir.join("game-data/world/manifest.json"), "{}").unwrap();
         let grid = dir.join("grid.json");
         fs::write(&grid, "{}").unwrap();
 
@@ -6891,9 +6942,17 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(folder.join("save.json")).unwrap(), "{}");
         assert!(folder.join("assets/ball.png").is_file());
+        assert_eq!(
+            fs::read_to_string(folder.join("game-data/world/manifest.json")).unwrap(),
+            "{}"
+        );
+        #[cfg(feature = "scripting")]
+        assert!(folder
+            .join("runtime/partitioned_array/lib/partitioned_array.rb")
+            .is_file());
         assert!(folder.join("runtime/selenite").is_file());
         let launcher = fs::read_to_string(folder.join("run-game.sh")).unwrap();
-        assert!(launcher.contains("--game \"$DIR/game.rb\""));
+        assert!(launcher.contains("--game \"$ENTRY\""));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -6905,7 +6964,58 @@ mod tests {
         }
         // Exporting again overwrites in place.
         export_game(&script, &grid).unwrap();
+        let compiled = script.with_extension("rbc");
+        fs::write(&compiled, b"bytecode fixture").unwrap();
+        export_game(&compiled, &grid).unwrap();
+        assert_eq!(
+            fs::read(folder.join("game.rbc")).unwrap(),
+            b"bytecode fixture"
+        );
+        assert!(!folder.join("game.rb").exists());
+        export_game(&script, &grid).unwrap();
+        assert!(!folder.join("game.rbc").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn exported_launcher_prefers_dedicated_game_runtime() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory =
+            env::temp_dir().join(format!("selenite-game-launcher-{}", std::process::id()));
+        fs::create_dir_all(directory.join("runtime")).unwrap();
+        let runtime_launcher = directory.join("runtime/run-game.sh");
+        fs::write(&runtime_launcher, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&runtime_launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        let launcher = directory.join("run-game.sh");
+        fs::write(&launcher, RUN_GAME_SH).unwrap();
+        let output = Command::new("bash")
+            .arg(&launcher)
+            .arg("extra-argument")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!(
+                "{}\n--grid\n{}\nextra-argument\n",
+                directory.join("game.rb").display(),
+                directory.join("save.json").display()
+            )
+        );
+        fs::write(directory.join("game.rbc"), b"bytecode fixture").unwrap();
+        let output = Command::new("bash").arg(&launcher).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!(
+                "{}\n--grid\n{}\n",
+                directory.join("game.rbc").display(),
+                directory.join("save.json").display()
+            )
+        );
+        assert!(export_game(&directory.join("game.py"), &directory.join("save.json")).is_err());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -7037,6 +7147,21 @@ mod tests {
             StartupMode::Game("pong.rb".into(), Target::Profile(Some("p".into())))
         );
         assert!(parse(&["--game"]).is_err());
+        assert!(game_cli::validate_ruby_path(Path::new("game.py")).is_err());
+        assert!(game_cli::validate_ruby_path(Path::new("game.rb")).is_ok());
+        assert!(game_cli::validate_ruby_path(Path::new("game.rbc")).is_ok());
+        assert_eq!(
+            parse(&[
+                "--compile",
+                "game.rb",
+                "--output",
+                "build/game.rbc",
+                "--force"
+            ])
+            .unwrap(),
+            StartupMode::Compile("game.rb".into(), "build/game.rbc".into(), true)
+        );
+        assert!(parse(&["--compile", "game.rb", "extra"]).is_err());
         assert_eq!(
             parse(&["--list-profiles"]).unwrap(),
             StartupMode::ListProfiles

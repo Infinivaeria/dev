@@ -2,12 +2,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIST_DIR="${SCRIPT_DIR}/dist"
 APP_NAME="selenite"
+DIST_DIR="${SCRIPT_DIR}/dist"
+BUILD_TARGETS=(--bins)
+if [[ "$#" == 1 && "$1" == "--game" ]]; then
+    APP_NAME="selenite-game"
+    DIST_DIR="${SCRIPT_DIR}/dist-game"
+    BUILD_TARGETS=(--bin selenite-game)
+elif [[ "$#" != 0 ]]; then
+    printf 'Usage: ./package.sh [--game]\n' >&2
+    exit 2
+fi
 
 echo "=== Building Selenite with embedded Ruby scripting ==="
 cd "${SCRIPT_DIR}"
-cargo build --release --features scripting
+cargo build --release --features scripting "${BUILD_TARGETS[@]}"
 
 echo "=== Preparing distribution folder at ${DIST_DIR} ==="
 rm -rf "${DIST_DIR}"
@@ -15,17 +24,25 @@ mkdir -p "${DIST_DIR}/lib"
 
 echo "=== Copying binary ==="
 cp "target/release/${APP_NAME}" "${DIST_DIR}/"
+if [[ "${APP_NAME}" == "selenite" ]]; then
+    cp target/release/selenite-game "${DIST_DIR}/"
+fi
 
 echo "=== Bootstrapping Ruby runtime libraries ==="
-RUBY_LIBDIR="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["libdir"]')"
+RUBY_LIBDIR="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["archlibdir"] || RbConfig::CONFIG["libdir"]')"
+RUBY_STDLIB="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["rubylibdir"]')"
+RUBY_ARCHLIB="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["rubyarchdir"]')"
+RUBY_SHARED="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["LIBRUBY_SO"]')"
 
 echo "Copying libruby from ${RUBY_LIBDIR}..."
-cp -d "${RUBY_LIBDIR}"/libruby.so* "${DIST_DIR}/lib/"
-
-if [ -d "${RUBY_LIBDIR}/ruby" ]; then
-    echo "Copying Ruby standard library..."
-    cp -r "${RUBY_LIBDIR}/ruby" "${DIST_DIR}/lib/"
+if [[ ! -f "${RUBY_LIBDIR}/${RUBY_SHARED}" ]]; then
+    RUBY_LIBDIR="$(dirname "$(ldd "target/release/${APP_NAME}" | awk '/libruby.*=>/ {print $3; exit}')")"
 fi
+cp -L "${RUBY_LIBDIR}"/libruby*.so* "${DIST_DIR}/lib/"
+
+mkdir -p "${DIST_DIR}/lib/ruby" "${DIST_DIR}/lib/ruby-arch"
+cp -r "${RUBY_STDLIB}" "${DIST_DIR}/lib/ruby/"
+cp -r "${RUBY_ARCHLIB}/." "${DIST_DIR}/lib/ruby-arch/"
 
 echo "=== Bundling partitioned_array library ==="
 PA_DIR="${SCRIPT_DIR}/partitioned_array"
@@ -42,33 +59,23 @@ cp "${SCRIPT_DIR}/assets/fonts/LICENSE-DejaVu.txt" "${DIST_DIR}/licenses/"
 echo "=== Copying documentation and example plugins ==="
 cp -r "${SCRIPT_DIR}/docs" "${SCRIPT_DIR}/examples" "${DIST_DIR}/"
 cp "${SCRIPT_DIR}/README.md" "${SCRIPT_DIR}/CHANGELOG.md" "${DIST_DIR}/"
-
-echo "=== Creating portable run launcher ==="
-cat << 'EOF' > "${DIST_DIR}/run.sh"
-#!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Ensure bundled lib directory takes precedence for dynamic linker
-export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
-# Configure Ruby library search paths to bundled lib/ruby if present
-if [ -d "${SCRIPT_DIR}/lib/ruby" ]; then
-    RUBY_VER_DIR="$(find "${SCRIPT_DIR}/lib/ruby" -maxdepth 1 -mindepth 1 -type d ! -name "gems" ! -name "site_ruby" ! -name "vendor_ruby" | head -n 1)"
-    if [ -n "${RUBY_VER_DIR}" ]; then
-        ARCH_DIR="$(find "${RUBY_VER_DIR}" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
-        export RUBYLIB="${RUBY_VER_DIR}${ARCH_DIR:+:${ARCH_DIR}}"
-    fi
+if [[ "${APP_NAME}" == "selenite-game" ]]; then
+    cp "${SCRIPT_DIR}/examples/games/starter.rb" "${DIST_DIR}/game.rb"
 fi
 
-exec "${SCRIPT_DIR}/selenite" "$@"
-EOF
-chmod +x "${DIST_DIR}/run.sh"
+echo "=== Creating portable run launcher ==="
+cp "${SCRIPT_DIR}/bin/portable-run.sh" "${DIST_DIR}/run-game.sh"
+chmod +x "${DIST_DIR}/run-game.sh"
+if [[ "${APP_NAME}" == "selenite" ]]; then
+    cp "${SCRIPT_DIR}/bin/portable-run.sh" "${DIST_DIR}/run.sh"
+    chmod +x "${DIST_DIR}/run.sh"
+fi
 
 echo "=== Creating portable tarball ==="
 cd "${SCRIPT_DIR}"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
 TARBALL="${APP_NAME}-${VERSION}-portable.tar.gz"
-tar -czf "${TARBALL}" -C dist .
+tar -czf "${TARBALL}" -C "${DIST_DIR}" .
 
 echo "=== Distribution bundle complete! ==="
 echo "Files ready in ${DIST_DIR}/ and packaged in ${TARBALL}"

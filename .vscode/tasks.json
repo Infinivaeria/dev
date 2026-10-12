@@ -1551,6 +1551,46 @@
 			"label": "v3-h49",
 			"type": "shell",
 			"command": "(git --no-pager log --stat --format='%h %an %ad %s' -3; git count-objects -vH | grep size) > /tmp/g.txt 2>&1"
+		},
+		{
+			"label": "selenite-build-scripting",
+			"type": "shell",
+			"command": "cargo build --features scripting",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-game-bootstrap",
+			"type": "shell",
+			"command": "bash ./bootstrap-game.sh",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-package-rc4",
+			"type": "shell",
+			"command": "bash ./package.sh",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "selenite-game-portable-smoke",
+			"type": "shell",
+			"command": "python3 tests/game_runtime_smoke.py --graphics",
+			"problemMatcher": []
+		},
+		{
+			"label": "selenite-network-portable-smoke",
+			"type": "shell",
+			"command": "python3 tests/network_runtime_smoke.py --graphics",
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }

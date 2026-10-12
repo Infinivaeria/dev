@@ -1,6 +1,6 @@
 [package]
 name = "selenite"
-version = "3.0.0-rc.3"
+version = "3.0.0-rc.4"
 edition = "2021"
 rust-version = "1.88"
 description = "Infinite, pannable, zoomable, recursively-nestable multimedia file grid"
@@ -9,6 +9,11 @@ license = "MIT"
 [[bin]]
 name = "selenite"
 path = "src/main.rs"
+
+[[bin]]
+name = "selenite-game"
+path = "src/game_main.rs"
+required-features = ["scripting"]
 
 [features]
 scripting = ["dep:magnus"]
