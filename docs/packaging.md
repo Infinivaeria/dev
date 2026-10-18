@@ -49,7 +49,7 @@ dist/
   docs/
   examples/
   licenses/
-selenite-3.0.0-rc.4-portable.tar.gz
+selenite-5.0.0-portable.tar.gz
 ```
 
 `./package.sh` builds both executables with embedded Ruby support (`scripting`)
@@ -76,7 +76,7 @@ dist-game/
   docs/
   examples/games/
   licenses/
-selenite-game-3.0.0-rc.4-portable.tar.gz
+selenite-game-5.0.0-portable.tar.gz
 ```
 
 The game-only bundle intentionally does **not** include the organizer binary
@@ -129,6 +129,27 @@ Or, to build only the game runtime:
 
 `./bootstrap-game.sh` is a convenience wrapper that runs `./package.sh --game`.
 Packaging replaces `dist/` or `dist-game/`.
+
+Packaging looks for libruby in the active Ruby's configured `libdir` and
+`archlibdir`, then checks the executable's resolved shared-library dependencies.
+This supports both rbenv and distribution Ruby installations. If no shared
+libruby is found, use a Ruby installation built with `--enable-shared`.
+
+To package with the rbenv Ruby 4.0.7 build containing YJIT and Prism:
+
+```sh
+RBENV_VERSION=4.0.7-yjit-prism ./package.sh
+# Or: RBENV_VERSION=4.0.7-yjit-prism ./package.sh --game
+```
+
+Packaging uses the selected Ruby executable and shared library consistently,
+even if `LD_LIBRARY_PATH` previously pointed at another Ruby installation.
+Additional include directories from Ruby's configured `CPPFLAGS` are passed
+to the native build tools, including CMake. Keep those development headers
+available while building; they are not required by the portable runtime.
+Prism is included in Ruby 4.0. Portable launchers enable YJIT by default when
+the bundled Ruby supports it; set `RUBY_YJIT_ENABLE=0` to opt out. The recipient
+does not need rbenv installed.
 
 For development without packaging:
 

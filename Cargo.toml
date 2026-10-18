@@ -1,6 +1,6 @@
 [package]
 name = "selenite"
-version = "3.0.0-rc.4"
+version = "5.0.0"
 edition = "2021"
 rust-version = "1.88"
 description = "Infinite, pannable, zoomable, recursively-nestable multimedia file grid"
@@ -26,3 +26,13 @@ image = "0.25"
 magnus = { git = "https://github.com/matsadler/magnus", rev = "c08ca65b527e2cff2b347c46d3f8a029e17ca665", version = "0.10", features = ["embed"], optional = true }
 arboard = "3.6.1"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "rustls"] }
+
+[workspace]
+resolver = "2"
+members = [
+    "mic_freq",
+]
+default-members = [
+    ".",
+    "mic_freq",
+]

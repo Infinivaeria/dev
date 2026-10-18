@@ -102,6 +102,7 @@ enum ToolbarAction {
     Delete,
     Paste,
     Copy,
+    EnterGrid,
     OpenRun,
     Find,
     PaExport,
@@ -134,7 +135,8 @@ impl ToolbarAction {
             Self::Delete => "Delete the selected cell(s) and everything stacked on them (Del). Shift+Del removes only the top item. Non-empty nested grids ask first.",
             Self::Paste => "Paste into the selected cell (Ctrl+V): an image of any size, copied files, file paths, or URLs (one per line). URLs download in the background with no size limit. Ctrl+Shift+V stacks everything onto the one cell.",
             Self::Copy => "Copy the selected cells' files to the clipboard (Ctrl+C); Ctrl+X cuts.",
-            Self::OpenRun => "Open the selected cell's top item (Enter): images in the viewer, .rb or .rbc scripts in embedded Ruby, music in the built-in player, video and other files in the system player.",
+            Self::EnterGrid => "Enter the selected cell's child grid (even if a grid is buried under other stacked items).",
+            Self::OpenRun => "Enter the selected child grid (Enter), including any empty cell's implicit grid. Files open in their viewer or player; Ruby scripts run in embedded Ruby.",
             Self::PaExport => help::PA_EXPORT_TIP,
             Self::PaImport => help::PA_IMPORT_TIP,
             Self::OpenInventory => "Open a separate window listing every file across all nested grids.",
@@ -309,7 +311,7 @@ impl MenuItem {
     /// items; `multi` is set when other cells are selected too.
     fn for_cell(kind: Option<CellKind>, stack_len: usize, multi: bool) -> Vec<Self> {
         let mut items = match kind {
-            None => vec![Self::Paste, Self::NewGrid],
+            None => vec![Self::Open, Self::Paste, Self::NewGrid],
             Some(CellKind::Grid) => vec![Self::Open, Self::NestedGridFolder, Self::Info],
             Some(kind) => {
                 let mut items = vec![Self::Open];
@@ -1563,11 +1565,7 @@ impl App {
                 self.activate_cell(col, row)?;
             }
             AppRequest::Enter(col, row) => {
-                let nested = lock(&self.grid).grid_at(col, row);
-                match nested {
-                    Some(nested) => self.enter_grid(nested),
-                    None => return Err(format!("({col}, {row}) is not a grid")),
-                }
+                self.enter_child_grid(col, row)?;
             }
             AppRequest::Back => self.exit_grid(),
             AppRequest::Download {
@@ -2838,7 +2836,7 @@ impl App {
                 Some((kind.name(), HookValue::Str(path.display().to_string())))
             }
             Some(ActivatedCell::Grid(_)) => Some(("grid", HookValue::Nil)),
-            None => None,
+            None => Some(("grid", HookValue::Nil)),
         };
         if let Some((kind, path)) = hook_args {
             let handled = self.emit_hook(
@@ -2870,7 +2868,7 @@ impl App {
                 self.enter_grid(grid);
                 Ok(())
             }
-            None => Ok(()),
+            None => self.enter_child_grid(col, row),
         }
     }
 
@@ -2897,6 +2895,7 @@ impl App {
             ToolbarAction::Delete => self.edit("Delete", |app| app.delete_selection()),
             ToolbarAction::Paste => self.edit("Paste", |app| app.paste_clipboard()),
             ToolbarAction::Copy => self.copy_selection(),
+            ToolbarAction::EnterGrid => self.enter_child_grid_inward(),
             ToolbarAction::OpenRun => self.open_or_run_selection(),
             ToolbarAction::PaExport => self.partitioned_array_transfer(true),
             ToolbarAction::PaImport => {
@@ -2963,6 +2962,29 @@ impl App {
             return Ok(());
         };
         self.activate_cell(col, row)
+    }
+
+    fn enter_child_grid_inward(&mut self) -> Result<(), String> {
+        let Some((col, row)) = self.selected else {
+            return Ok(());
+        };
+
+        let (nested, occupied) = {
+            let grid = lock(&self.grid);
+            (grid.grid_in(col, row), grid.occupied(col, row))
+        };
+
+        if let Some(nested) = nested {
+            self.enter_grid(nested);
+            return Ok(());
+        }
+
+        if !occupied {
+            return self.enter_child_grid(col, row);
+        }
+
+        self.status = Some("Selected cell has no child grid".to_owned());
+        Ok(())
     }
 
     fn clipboard(&mut self) -> Result<&mut arboard::Clipboard, String> {
@@ -3569,6 +3591,22 @@ impl App {
         let grid = lock(&self.root_grid);
         grid.save(&self.json_path)
             .map_err(|error| error.to_string())
+    }
+
+    fn enter_child_grid(&mut self, col: i64, row: i64) -> Result<(), String> {
+        let existing = lock(&self.grid).grid_in(col, row);
+        let nested = match existing {
+            Some(grid) => grid,
+            None => self.edit("Enter child grid", |app| {
+                let nested = lock(&app.grid)
+                    .ensure_child_grid(col, row)
+                    .map_err(|error| error.to_string())?;
+                app.save()?;
+                Ok(nested)
+            })?,
+        };
+        self.enter_grid(nested);
+        Ok(())
     }
 
     fn enter_grid(&mut self, sub_grid: Arc<Mutex<SavedGrid>>) {
@@ -4319,7 +4357,11 @@ impl App {
         let mut lines = vec![format!("Cell ({col}, {row})")];
         match (kind, nested) {
             (None, _) => {
-                lines.push("Empty — paste, drop a file, or right-click.".to_owned());
+                lines.push("Child grid — double-click or press Enter to enter.".to_owned());
+                lines.push(
+                    "Not stored until entered; files can still be pasted or dropped here."
+                        .to_owned(),
+                );
                 return lines;
             }
             (Some(CellKind::Grid), Some(nested)) => {
@@ -5535,7 +5577,10 @@ impl App {
                     );
                 }
             }
-            Some(DrawCell::Grid) => draw_nested_grid_icon(d, rect),
+            Some(DrawCell::Grid) => draw_nested_grid_icon(d, rect, NESTED_GRID_COLOR),
+            None if matches!(self.mode, Mode::Main) => {
+                draw_nested_grid_icon(d, rect, Color::new(120, 130, 180, 45));
+            }
             None => {}
         }
     }
@@ -5546,6 +5591,11 @@ impl App {
         let selection_occupied = self
             .selected
             .map(|(col, row)| lock(&self.grid).occupied(col, row));
+
+        let selection_can_enter = self.selected.is_some_and(|(col, row)| {
+            let grid = lock(&self.grid);
+            grid.grid_in(col, row).is_some() || !grid.occupied(col, row)
+        });
 
         let specs: Vec<(String, ToolbarAction, bool)> = match self.mode {
             Mode::Main => {
@@ -5576,10 +5626,16 @@ impl App {
                         ToolbarAction::Copy,
                         selection_occupied == Some(true),
                     ),
+                    ("In".to_owned(), ToolbarAction::EnterGrid, selection_can_enter),
                     (
                         "Open / Run".to_owned(),
                         ToolbarAction::OpenRun,
-                        selection_occupied == Some(true),
+                        self.selected.is_some(),
+                    ),
+                    (
+                        "Out".to_owned(),
+                        ToolbarAction::Back,
+                        !self.nav_stack.is_empty(),
                     ),
                     (
                         "PA Export".to_owned(),
@@ -5659,15 +5715,17 @@ impl App {
                         true,
                     ));
                 }
-                if !self.nav_stack.is_empty() {
-                    items.push(("Back".to_owned(), ToolbarAction::Back, true));
-                }
                 items
             }
             Mode::Inventory => {
-                let mut items = vec![
+                let items = vec![
                     ("Refresh".to_owned(), ToolbarAction::Refresh, true),
                     ("Find".to_owned(), ToolbarAction::Find, true),
+                    (
+                        "Out".to_owned(),
+                        ToolbarAction::Back,
+                        !self.nav_stack.is_empty(),
+                    ),
                     (
                         if self.view_3d { "2D View" } else { "3D View" }.to_owned(),
                         ToolbarAction::View3d,
@@ -5680,9 +5738,6 @@ impl App {
                     ),
                     ("Music".to_owned(), ToolbarAction::Music, true),
                 ];
-                if !self.nav_stack.is_empty() {
-                    items.push(("Back".to_owned(), ToolbarAction::Back, true));
-                }
                 items
             }
             Mode::ImageViewer(_) => Vec::new(),
@@ -6571,9 +6626,9 @@ fn draw_texture_fit(d: &mut RaylibDrawHandle<'_>, texture: &Texture2D, rect: Rec
     d.draw_texture_pro(texture, source, dest, Vector2::new(0.0, 0.0), 0.0, WHITE);
 }
 
-fn draw_nested_grid_icon(d: &mut RaylibDrawHandle<'_>, rect: Rectangle) {
+fn draw_nested_grid_icon(d: &mut RaylibDrawHandle<'_>, rect: Rectangle, color: Color) {
     let thickness = (rect.height * 0.03).clamp(1.5, 6.0);
-    d.draw_rectangle_lines_ex(rect, thickness, NESTED_GRID_COLOR);
+    d.draw_rectangle_lines_ex(rect, thickness, color);
     if rect.width > 16.0 && rect.height > 16.0 {
         // Inner square sits below the coordinate label.
         let size = rect.height * 0.62;
@@ -6583,7 +6638,7 @@ fn draw_nested_grid_icon(d: &mut RaylibDrawHandle<'_>, rect: Rectangle) {
             size,
             size,
         );
-        d.draw_rectangle_lines_ex(inset, thickness, NESTED_GRID_COLOR);
+        d.draw_rectangle_lines_ex(inset, thickness, color);
     }
 }
 
@@ -6883,6 +6938,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn implicit_child_grid_activation_saves_and_supports_undo_redo() {
+        let path = env::temp_dir().join(format!(
+            "selenite-dimensional-navigation-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut app = App::new(Mode::Main, path.clone()).unwrap();
+        let root = Arc::clone(&app.root_grid);
+        assert!(lock(&root).is_empty());
+        app.selected = Some((-500, 500));
+        app.activate_cell(-500, 500).unwrap();
+        let child = Arc::clone(&app.grid);
+        assert_eq!(app.nav_stack.len(), 1);
+        assert!(lock(&child).is_empty());
+        assert!(SavedGrid::load(&path)
+            .unwrap()
+            .unwrap()
+            .grid_at(-500, 500)
+            .is_some());
+
+        app.activate_cell(1000, -1000).unwrap();
+        assert_eq!(app.nav_stack.len(), 2);
+        assert_eq!(lock(&root).total_len(), 2);
+        app.undo().unwrap();
+        assert_eq!(app.nav_stack.len(), 1);
+        assert!(Arc::ptr_eq(&app.grid, &child));
+        assert!(lock(&child).is_empty());
+        app.redo().unwrap();
+        assert!(lock(&child).grid_at(1000, -1000).is_some());
+        app.exit_grid();
+        assert!(Arc::ptr_eq(&app.grid, &root));
+        assert_eq!(app.selected, Some((-500, 500)));
+        app.activate_cell(-500, 500).unwrap();
+        assert!(Arc::ptr_eq(&app.grid, &child));
+        assert_eq!(lock(&root).total_len(), 2);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn viewer_handles_decoder_disconnect_instead_of_waiting_forever() {
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut state = ViewerImage::Decoding(receiver);
@@ -7023,6 +7120,7 @@ mod tests {
         assert_eq!(
             MenuItem::for_cell(None, 0, false),
             vec![
+                MenuItem::Open,
                 MenuItem::Paste,
                 MenuItem::NewGrid,
                 MenuItem::GridFolder,

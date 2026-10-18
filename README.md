@@ -1,6 +1,6 @@
 # Selenite
 
-**Version 3.0.0-rc.4** (v3.0 release candidate). See [CHANGELOG.md](CHANGELOG.md).
+**Version 5.0.0**. See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
@@ -65,6 +65,10 @@ Everything else:
   before downsampling, and follows window resizing and maximization. This
   uses more GPU memory and rendering work than drawing at native resolution.
 - Infinite sparse grid of signed `(col, row)` cells, recursively nestable.
+- **Dimensional grids without a fixed child count:** every empty coordinate
+  leads to its own child grid, with the same unbounded coordinate space at
+  every level. Double-click or press **Enter** to descend; only entered
+  branches are materialized and saved. Existing files and grids are preserved.
 - **Local profiles** ("accounts"): each profile is a completely separate set
   of grids, pasted/downloaded assets, partitioned_array exports and an
   optional `init.rb`. Switch, create, rename and delete them from the
@@ -677,11 +681,11 @@ This script:
 4. Generates a portable launcher script `dist/run.sh` that sets up `LD_LIBRARY_PATH` and `RUBYLIB`.
 5. Copies `docs/`, `examples/`, `README.md` and `CHANGELOG.md` into the bundle.
 6. Compresses the release bundle into `selenite-<version>-portable.tar.gz`
-   (for example `selenite-3.0.0-rc.2-portable.tar.gz`).
+   (for example `selenite-5.0.0-portable.tar.gz`).
 
 To test or run the standalone package on any Linux machine:
 ```sh
-mkdir selenite && tar -xzf selenite-3.0.0-rc.2-portable.tar.gz -C selenite
+mkdir selenite && tar -xzf selenite-5.0.0-portable.tar.gz -C selenite
 cd selenite
 ./run.sh [--profile NAME | --grid FILE.json | --script FILE.rb | --game GAME.rb ...]
 ./run.sh --game examples/games/pong.rb

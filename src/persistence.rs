@@ -389,6 +389,17 @@ impl SavedGrid {
         Self::default()
     }
 
+    pub fn ensure_child_grid(
+        &mut self,
+        col: i64,
+        row: i64,
+    ) -> Result<Arc<Mutex<SavedGrid>>, SaveError> {
+        match self.grid_in(col, row) {
+            Some(grid) => Ok(grid),
+            None => self.create_grid(col, row),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.cells.len()
@@ -1184,6 +1195,150 @@ mod tests {
         assert_eq!(grid.image_at(1, 5), Some(Path::new("fresh.jpg")));
         assert_eq!(grid.kind_at(2, 5), Some(CellKind::Grid));
         assert_eq!(grid.image_at(3, 5), Some(Path::new("third.png")));
+    }
+
+    #[test]
+    fn dimensional_children_are_independent_and_lazy() {
+        let mut root = SavedGrid::new();
+        assert!(root.grid_at(0, 0).is_none());
+        assert!(root.entries().next().is_none());
+        assert!(root.collect_all_items("").is_empty());
+        assert!(root.is_empty());
+        let first = root.ensure_child_grid(0, 0).unwrap();
+        let sibling = root.ensure_child_grid(1, 0).unwrap();
+        assert!(!Arc::ptr_eq(&first, &sibling));
+        assert!(first.lock().unwrap().is_empty());
+        let grandchild = first.lock().unwrap().ensure_child_grid(500, -500).unwrap();
+        assert!(grandchild.lock().unwrap().is_empty());
+        assert!(sibling.lock().unwrap().is_empty());
+        assert_eq!(root.len(), 2);
+        assert_eq!(root.total_len(), 3);
+        assert!(Arc::ptr_eq(&first, &root.ensure_child_grid(0, 0).unwrap()));
+        assert_eq!(root.total_len(), 3);
+    }
+
+    #[test]
+    fn dimensional_children_have_no_fixed_count_or_coordinate_window() {
+        let mut root = SavedGrid::new();
+        for col in -64..64 {
+            assert!(root
+                .ensure_child_grid(col, 20)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .is_empty());
+        }
+        for (col, row) in [
+            (i64::MIN, i64::MIN),
+            (i64::MAX, i64::MAX),
+            (1_000_000, -1_000_000),
+        ] {
+            root.ensure_child_grid(col, row).unwrap();
+            assert!(root.grid_at(col, row).is_some());
+        }
+        assert_eq!(root.len(), 131);
+        assert_eq!(root.total_len(), 131);
+    }
+
+    #[test]
+    fn dimensional_children_expand_only_along_the_visited_branch() {
+        let root = Arc::new(Mutex::new(SavedGrid::new()));
+        let mut current = Arc::clone(&root);
+        for _ in 0..12 {
+            let child = {
+                let mut grid = current.lock().unwrap();
+                let child = grid.ensure_child_grid(-100, 100).unwrap();
+                assert_eq!(grid.len(), 1);
+                child
+            };
+            current = child;
+        }
+        assert!(current.lock().unwrap().is_empty());
+        assert_eq!(root.lock().unwrap().total_len(), 12);
+    }
+
+    #[test]
+    fn dimensional_children_preserve_existing_cells_and_stacks() {
+        let mut root = SavedGrid::new();
+        root.insert_image(0, 0, PathBuf::from("existing.png"))
+            .unwrap();
+        let existing = root.push_grid(0, 0);
+        root.push_file(0, 0, PathBuf::from("top.txt"));
+        let snapshot = root.snapshot();
+        assert!(Arc::ptr_eq(
+            &root.ensure_child_grid(0, 0).unwrap(),
+            &existing
+        ));
+        assert!(root.same_cells(&snapshot));
+        root.insert_file(1, 0, PathBuf::from("file.txt")).unwrap();
+        assert!(matches!(
+            root.ensure_child_grid(1, 0),
+            Err(SaveError::CellOccupied { col: 1, row: 0 })
+        ));
+        assert_eq!(root.file_at(1, 0), Some(Path::new("file.txt")));
+        root.ensure_child_grid(2, 0).unwrap();
+        assert_eq!(root.len(), 3);
+        assert_eq!(root.total_len(), 5);
+    }
+
+    #[test]
+    fn dimensional_generation_survives_save_load_and_deletion() {
+        let path = unique_file();
+        let mut root = SavedGrid::new();
+        let child = root.ensure_child_grid(-50, 50).unwrap();
+        let grandchild = child.lock().unwrap().ensure_child_grid(500, -500).unwrap();
+        grandchild
+            .lock()
+            .unwrap()
+            .insert_file(0, 0, PathBuf::from("kept.txt"))
+            .unwrap();
+        root.ensure_child_grid(1, 0).unwrap();
+        let removed = root.remove(1, 0).unwrap();
+        root.save(&path).unwrap();
+
+        let mut loaded = SavedGrid::load(&path).unwrap().unwrap();
+        assert!(!loaded.occupied(1, 0));
+        assert_eq!(loaded.len(), 1);
+        let child = loaded.ensure_child_grid(-50, 50).unwrap();
+        let grandchild = child.lock().unwrap().ensure_child_grid(500, -500).unwrap();
+        assert_eq!(
+            grandchild.lock().unwrap().file_at(0, 0),
+            Some(Path::new("kept.txt"))
+        );
+        let replacement = loaded.ensure_child_grid(1, 0).unwrap();
+        assert!(replacement.lock().unwrap().is_empty());
+        assert!(!removed[0].same_as(&loaded.items_at(1, 0)[0]));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn dimensional_generation_survives_snapshots_and_clear() {
+        let mut root = SavedGrid::new();
+        let child = root.ensure_child_grid(0, 0).unwrap();
+        let mut snapshot = root.snapshot();
+        assert!(root.same_cells(&snapshot));
+        assert!(Arc::ptr_eq(
+            &child,
+            &snapshot.ensure_child_grid(0, 0).unwrap()
+        ));
+        root.clear();
+        assert!(root.is_empty());
+        let replacement = root.ensure_child_grid(0, 0).unwrap();
+        assert!(!Arc::ptr_eq(&child, &replacement));
+    }
+
+    #[test]
+    fn legacy_grids_support_on_demand_dimensional_children() {
+        for json in [
+            "[]",
+            r#"{"cells":[]}"#,
+            r#"{"cells":[],"children_initialized":true}"#,
+        ] {
+            let mut root: SavedGrid = serde_json::from_str(json).unwrap();
+            assert!(root.is_empty());
+            root.ensure_child_grid(-100, 100).unwrap();
+            assert_eq!(root.len(), 1);
+        }
     }
 
     #[test]

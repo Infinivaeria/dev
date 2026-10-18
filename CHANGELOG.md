@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.0.0
+
+### Changed
+
+- Bumped the Selenite organizer and dedicated game runtime to 5.0.0.
+- Dimensional grids have child-grid portals at every empty coordinate, with
+  the same coordinate space at every level and no fixed child-count preset.
+  Entered branches are materialized and saved on demand, with undo/redo support.
+
 ## 3.0.0-rc.4
 
 ### Added

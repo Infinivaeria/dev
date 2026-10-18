@@ -1,6 +1,6 @@
 # Selenite instruction manual
 
-For **Selenite 3.0.0-rc.4**, as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled.
+For **Selenite 5.0.0**, as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled.
 
 ## Contents
 
@@ -219,7 +219,11 @@ Unstack leaves an item at the original coordinate and places the others in free 
 
 ## 8. Nested grids
 
-Select an empty cell and choose **New Grid**, then activate it to enter. The nested grid has its own cells, game-item inventory, and folder identity. Editing inside it changes the same saved hierarchy as the root; it is not a separate save file.
+Every grid has an unbounded coordinate space of child-grid portals, not a fixed 3×3 set. Every empty cell is an implicit child grid, shown with a faint nested-grid outline in 2D. Double-click any coordinate, press **Enter**, or choose **Open / Run** to enter its child grid. That child has the same unbounded coordinate space, and so does every child below it. In 3D, double-click an empty ground cell to descend in the same way.
+
+You can also select an empty cell and choose **New Grid** to add another branch. The nested grid has its own cells, game-item inventory, and folder identity. Editing inside it changes the same saved hierarchy as the root; it is not a separate save file.
+
+Only entered or explicitly created child grids are materialized and saved. Panning, drawing, searching, listing, or loading does not allocate unseen children. Existing files and grids keep their coordinates and contents, including any children previously created by the nine-grid starter layout. Empty cells remain available for files: paste or drop onto them normally. Deleting or moving a child removes that stored branch; its old coordinate becomes an implicit portal again, and entering it creates a fresh empty child, not a copy of the deleted contents. Creating a child by entering its portal supports undo and redo.
 
 Use **Backspace** or **Back** to return one level. Each level retains navigation camera state while you browse, including its 3D camera. These navigation states are not a substitute for persisted content.
 

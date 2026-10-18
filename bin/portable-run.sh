@@ -13,6 +13,7 @@ else
     RUNTIME_BINARY="selenite"
 fi
 export LD_LIBRARY_PATH="${RUNTIME_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export RUBY_YJIT_ENABLE="${RUBY_YJIT_ENABLE:-1}"
 if [[ -d "${RUNTIME_DIR}/lib/ruby" ]]; then
     RUBY_VERSION_PATH="$(find "${RUNTIME_DIR}/lib/ruby" -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)"
     export RUBYLIB="${RUBY_VERSION_PATH}:${RUNTIME_DIR}/lib/ruby-arch${RUBYLIB:+:${RUBYLIB}}"

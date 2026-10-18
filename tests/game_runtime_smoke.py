@@ -34,7 +34,7 @@ def main():
         runtime.mkdir()
         subprocess.run(["tar", "-xzf", str(archive), "-C", str(runtime)], check=True)
         environment = os.environ.copy()
-        for variable in ("RUBYLIB", "RUBYOPT", "GEM_HOME", "GEM_PATH",
+        for variable in ("RUBYLIB", "RUBYOPT", "RUBY_YJIT_ENABLE", "GEM_HOME", "GEM_PATH",
                          "LD_LIBRARY_PATH", "SELENITE_PARTITIONED_ARRAY_LIB"):
             environment.pop(variable, None)
         environment["SELENITE_HOME"] = str(workspace / "organizer-home")
@@ -46,11 +46,25 @@ def main():
                           ["game.rb", "--grid", "game.rb"]):
             run([launcher, *arguments], environment=environment, directory=workspace, success=False)
 
+        jit_opt_out = workspace / "jit-opt-out.rb"
+        jit_opt_out.write_text('raise "YJIT opt-out ignored" unless ENV["RUBY_YJIT_ENABLE"] == "0"; '
+                               'raise "YJIT enabled" if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?')
+        run([launcher, str(jit_opt_out)], environment={**environment, "RUBY_YJIT_ENABLE": "0"},
+            directory=workspace)
+
         fixture = workspace / "integration.rb"
         fixture.write_text('''require "json"
 require "digest"
 require "zlib"
 require "socket"
+raise "YJIT launcher default missing" unless ENV["RUBY_YJIT_ENABLE"] == "1"
+if defined?(RubyVM::YJIT)
+  raise "YJIT disabled" unless RubyVM::YJIT.enabled?
+end
+if RUBY_VERSION.split(".").first.to_i >= 4
+  require "prism"
+  raise "Prism parse failed" unless Prism.parse("1 + 2").success?
+end
 raise "wrong version" unless Selenite::VERSION == "VERSION"
 raise "not game mode" unless Selenite::Game.game_mode?
 raise "digest missing" unless Digest::SHA256.hexdigest("ruby").size == 64

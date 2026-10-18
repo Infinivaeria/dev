@@ -16,6 +16,16 @@ fi
 
 echo "=== Building Selenite with embedded Ruby scripting ==="
 cd "${SCRIPT_DIR}"
+RUBY_LIBDIR="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["libdir"]')"
+export LD_LIBRARY_PATH="${RUBY_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+RUBY="$(ruby -rrbconfig -e 'puts RbConfig.ruby')"
+export RUBY
+RUBY_INCLUDE_PATH="$("${RUBY}" -rrbconfig -rshellwords -e 'puts Shellwords.split(RbConfig::CONFIG["CPPFLAGS"]).grep(/\A-I./).map { |flag| flag.delete_prefix("-I") }.join(":")')"
+if [[ -n "${RUBY_INCLUDE_PATH}" ]]; then
+    export CPATH="${RUBY_INCLUDE_PATH}${CPATH:+:${CPATH}}"
+    export CMAKE_INCLUDE_PATH="${RUBY_INCLUDE_PATH}${CMAKE_INCLUDE_PATH:+:${CMAKE_INCLUDE_PATH}}"
+fi
+echo "Using Ruby: $("${RUBY}" --version)"
 cargo build --release --features scripting "${BUILD_TARGETS[@]}"
 
 echo "=== Preparing distribution folder at ${DIST_DIR} ==="
@@ -29,15 +39,23 @@ if [[ "${APP_NAME}" == "selenite" ]]; then
 fi
 
 echo "=== Bootstrapping Ruby runtime libraries ==="
-RUBY_LIBDIR="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["archlibdir"] || RbConfig::CONFIG["libdir"]')"
-RUBY_STDLIB="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["rubylibdir"]')"
-RUBY_ARCHLIB="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["rubyarchdir"]')"
-RUBY_SHARED="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["LIBRUBY_SO"]')"
+RUBY_ARCHLIBDIR="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["archlibdir"]')"
+RUBY_STDLIB="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubylibdir"]')"
+RUBY_ARCHLIB="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubyarchdir"]')"
+RUBY_SHARED="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["LIBRUBY_SO"]')"
 
-echo "Copying libruby from ${RUBY_LIBDIR}..."
 if [[ ! -f "${RUBY_LIBDIR}/${RUBY_SHARED}" ]]; then
-    RUBY_LIBDIR="$(dirname "$(ldd "target/release/${APP_NAME}" | awk '/libruby.*=>/ {print $3; exit}')")"
+    RUBY_LIBDIR="${RUBY_ARCHLIBDIR}"
 fi
+if [[ ! -f "${RUBY_LIBDIR}/${RUBY_SHARED}" ]]; then
+    RUBY_LINKED_LIBRARY="$(ldd "target/release/${APP_NAME}" | awk '/libruby.*=>/ && $3 ~ /^\// {print $3; exit}')"
+    if [[ -z "${RUBY_LINKED_LIBRARY}" || ! -f "${RUBY_LINKED_LIBRARY}" ]]; then
+        printf 'Unable to locate Ruby shared library %s in libdir, archlibdir, or linked dependencies. Use a Ruby installation built with --enable-shared.\n' "${RUBY_SHARED}" >&2
+        exit 1
+    fi
+    RUBY_LIBDIR="$(dirname "${RUBY_LINKED_LIBRARY}")"
+fi
+echo "Copying libruby from ${RUBY_LIBDIR}..."
 cp -L "${RUBY_LIBDIR}"/libruby*.so* "${DIST_DIR}/lib/"
 
 mkdir -p "${DIST_DIR}/lib/ruby" "${DIST_DIR}/lib/ruby-arch"
