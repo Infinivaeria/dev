@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-rustup update
+rustup update nightly
 
 gem update --system && gem update
 
@@ -14,5 +14,5 @@ else
   echo "Skipping apt updates (no sudo available)."
 fi
 
-cargo update --workspace
-cargo build --release --workspace
+rustup run nightly cargo update --workspace
+rustup run nightly cargo build --release --workspace

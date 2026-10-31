@@ -4,7 +4,7 @@
 
 - A default microphone input device for voice animation (the time tools also work without one).
 - A default audio output device for audible alerts; a banner always indicates completion.
-- Rust 1.88+, `cmake`, `clang`; on Linux: `libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
+- Rust nightly, `cmake`, `clang`; on Linux: `libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 
 ## Avatar images
 

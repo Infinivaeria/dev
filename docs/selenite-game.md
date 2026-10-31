@@ -6,7 +6,7 @@ The rest of this file focuses on the Ruby game runtime itself.
 
 ## Bootstrap from source
 
-On Linux, install Rust/Cargo (Rust 1.88 or newer), Ruby with development headers
+On Linux, install Rust/Cargo via rustup with the **nightly** toolchain, Ruby with development headers
 and shared libruby (Ruby 3.1 or newer), a C/C++ compiler, CMake, libclang,
 pkg-config, and raylib's desktop build dependencies. Debian/Ubuntu native
 dependencies are typically installed with:

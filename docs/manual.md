@@ -74,7 +74,7 @@ Use the same data location on later launches. Changing `SELENITE_HOME` changes w
 
 ### Build from this repository
 
-Requirements: Rust **1.88 or newer**, a C/C++ build toolchain, CMake, and raylib's native dependencies. On Debian/Ubuntu, a typical dependency installation is:
+Requirements: Rust **nightly**, a C/C++ build toolchain, CMake, and raylib's native dependencies. On Debian/Ubuntu, a typical dependency installation is:
 
 ```sh
 sudo apt install build-essential cmake clang pkg-config libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
