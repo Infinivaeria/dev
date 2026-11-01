@@ -1,59 +1,61 @@
 # mic_freq
 
-Voice-reactive VTuber-style avatar built with **raylib** and **cpal**. The microphone's volume switches between one of three full-frame avatar images: idle, talking and loud talking. No speech recognition, internet connection or frequency matching is involved.
+An offline PNGTuber studio built with **raylib** and **cpal**. Microphone volume selects idle, talking, or loud talking artwork. Each pose bounces smoothly: gentle idle breathing, talking hops, and stronger loud-talking hops. No speech recognition, recording, internet connection, or frequency matching is involved.
 
 ## Run
 
-Put three images named `idle.png`, `talking.png` and `loud.png` in an `assets/` folder **beside the executable**. For `cargo run --release`, that folder is `target/release/assets/`:
+From the repository root:
 
 ```sh
-cd mic_freq
-cargo run --release
-cargo run --release -- /path/to/images  # optional custom image folder
+cargo build -p mic_freq --release
+install -m 755 target/release/mic_freq mic_freq/target/release/mic_freq
+install -m 755 target/release/mic_freq mic_freq/target/debug/mic_freq
+./target/release/mic_freq mic_freq/assets
+cargo run -p mic_freq --release -- /path/to/images
+cargo run -p mic_freq -- --list-devices
+cargo run -p mic_freq -- --device "USB microphone" --capture
 ```
 
-When distributing the built executable, copy the `assets/` folder into the same directory as the executable. An explicit image-folder argument overrides the default; relative arguments are resolved from the current working directory.
+Cargo writes the current executable to the workspace's `target/release/mic_freq`. Launch that binary directly; no script or Cargo process is needed to run the built application. The old `mic_freq/target/release/mic_freq` and `mic_freq/target/debug/mic_freq` executables are real, independent copies of the current PNGTuber Studio release build, not symbolic links. After rebuilding, use the `install` commands above to refresh those copies. A running old process must be closed and relaunched to use a new build.
 
-PNG, JPG/JPEG, BMP, GIF (first frame), QOI and TGA are supported. Use transparent PNGs for avatars with transparent backgrounds in the image itself. Missing images show colored placeholders and a warning in the terminal; press **R** after adding or changing files to reload. Only one image per state is allowed.
+For distribution, copy any of these executables and your `assets/` folder together. No workspace files, launcher script, or symbolic links are required. The destination must be a compatible Linux system with the required audio and graphical system libraries.
 
-The dashboard displays the voice avatar alongside alarm, countdown, and stopwatch tiles. Press **F** for a larger avatar view. The avatar fits its panel without cropping. **Up/Down** adjusts the microphone noise gate by 2 dB, **R** reloads images, and **Esc** quits. The gate starts at -45 dBFS; increase it if background noise triggers the avatar or decrease it if quiet speech is ignored. Talking starts 4 dB above the gate, loud talking 24 dB above it. Smoothing and hysteresis prevent flickering on short pauses.
+Put `idle.png`, `talking.png`, and `loud.png` in your avatar folder. Folder priority is: an explicit folder argument, an existing `assets/` folder beside the executable, then an existing saved folder. Missing saved folders are ignored. This means a copied executable uses its own adjacent artwork instead of an old installation's saved path. The selected directory is printed as `Avatar images: ...` at startup. This workspace builds into the root `target/` directory. Relative folder arguments are resolved from the working directory. Missing artwork uses a transparent, animated demo character, so the app works out of the box.
+
+PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transparent PNGs and identically sized canvases for consistent framing. Optional `idle_blink.png`, `talking_blink.png`, and `loud_blink.png` provide closed-eye variants; each must match its base pose's dimensions. Missing blink art falls back to the base pose. Only one image per name is allowed, case-insensitively.
+
+## Studio controls
+
+- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, and loud threshold. The input meter shows microphone level in dBFS.
+- **Calibrate noise gate** measures three seconds of room noise. Stay quiet during calibration, then test normal speech and adjust as needed.
+- Checkboxes toggle microphone mute, horizontal mirroring, and automatic blinking.
+- **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.
+- **Next input / reconnect** cycles available microphones and the system default. Capture failure does not close the app; manual poses still work.
+- Drop one avatar folder or pose image into the window to switch sets. **R** reloads edited artwork. Failed reloads preserve the current set.
+- Background swatches select green, magenta, or dark. **Clean capture** hides every control, meter, and error message. Press **C** to return.
+
+The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Smoothing and 4 dB hysteresis reduce flicker.
 
 Full-scene anti-aliasing uses 4-sample supersampling: the avatar and text render at twice the window's width and height before being smoothly downsampled. Avatar textures also use mipmaps and trilinear filtering. The render buffer follows window resizing; this avoids requesting a window MSAA mode that can fail on some GLX drivers.
 
-Text, controls, and avatar margins scale together from a 1000×820 dashboard. Wide and tall windows use centered letterboxing, so controls and mouse hit areas stay aligned. The minimum window size is 720×600.
+The resizable studio has a 720 x 600 minimum window size. Avatar size preserves aspect ratio and reserves enough headroom for maximum bounce. Controls and mouse hit areas scale together.
 
 Linux needs ALSA + X11/GL dev packages (`libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`) plus `cmake` and `clang`.
 
-See [MANUAL.md](MANUAL.md) for details. Run `cargo test` to test voice states, timekeeping, launch modes, and layout.
+See [MANUAL.md](MANUAL.md) for shortcuts and troubleshooting. Run `cargo test -p mic_freq` to test voice states, motion, blinking, settings, CLI arguments, image discovery, layout, and the existing time-tool library.
 
-## Alarm, timer, and stopwatch
+## OBS setup
 
-- **Alarm:** click the time field, use Ctrl+A to clear, and enter local 24-hour `HH:MM`. Click **Arm** (or Enter) to schedule the next occurrence. **Cancel** disarms it. When it rings, use **Dismiss** or **Snooze 5m**. Alarms are one-shot; re-arm for another day.
-- **Timer:** enter `MM:SS` or `HH:MM:SS`, then **Start**, **Pause**, or **Resume**. **Reset** clears the countdown and unlocks the duration field. Completion rings once and stays visible until dismissed or reset.
-- **Stopwatch:** **Start**, **Pause**, **Lap**, and **Reset**. Laps show cumulative elapsed time; the latest four remain visible.
-- **A / T / S** or the top buttons hide/reopen each time tile. **F** toggles avatar focus. Hidden tools keep running.
-- Alarm and timer completion show a banner and play a repeating tone. **Sound: on/muted** controls audio independently of grid launching. The app remains usable without a microphone or output device; audio failures are printed in the terminal.
+1. Select green or magenta, avoiding colors in your artwork.
+2. Click **Clean capture**, or launch with `--capture`.
+3. Add an OBS Window Capture source for **mic_freq - PNGTuber Studio**. On Wayland, use the capture method supported by your compositor and OBS, such as portal Screen Capture.
+4. Add a **Chroma Key** filter matching the background; adjust similarity and spill reduction around the edges. Crop window decorations if your capture method includes them.
+5. Press **C** in the app to edit settings, then return to clean capture before going live.
 
-Timers and stopwatch use monotonic elapsed time, so rendering delays and wall-clock corrections do not distort their timing. Alarms follow the system's local wall clock. Times skipped by a daylight-saving transition use the next valid day; repeated times use the next future occurrence.
+The window itself is opaque: image transparency is composited onto the selected background. This is a PNGTuber application, not a Live2D/VRM renderer or webcam face tracker. Hotkeys require the app window to be focused; global shortcuts and direct OBS integration are not implemented. GIFs are still images, not animated playback.
 
-**Keep the application open:** tools and targets are session-only, are not restored after exit, and do not wake a sleeping computer. Monotonic-clock behavior during system suspend depends on the operating system.
+## Saved preferences
 
-## Open or run a Selenite grid piece
+Gate, loud sensitivity, bounce, size, mirror, blink, background, input device, and avatar folder save automatically after edits and on normal exit. Linux uses `$XDG_CONFIG_HOME/mic_freq/settings.json`, or `~/.config/mic_freq/settings.json`. Mute, manual pose, and clean-capture mode are session-only; `--capture` enables clean capture at startup. `--device` and a folder argument override saved choices and become the new preferences.
 
-Drop one Selenite grid (`.json`) or game script (`.rb`) into the window, or provide `--target`. Enable **Launch grid** separately on the desired tools:
-
-- Alarm: opens/runs the target when the alarm fires, including after snooze.
-- Timer: opens/runs the target when the countdown finishes.
-- Stopwatch: opens/runs the target on a fresh start; resuming a paused stopwatch does not launch it again. Reset before another fresh start.
-
-A JSON grid opens in Selenite with `--grid`; a Ruby game runs with `--game` (requires a Selenite build with scripting). Merely selecting a target does not execute it. All enabled tools share the currently selected target; **Clear target** removes it. Each event launches a separate Selenite process, with at most eight still-open instances launched by this app. Closing mic_freq leaves those windows open. Launch errors appear in the dashboard and child output goes to the terminal.
-
-By default, `selenite` must be on PATH. Supply `--selenite` when using a local build or the portable launcher:
-
-```sh
-cargo run --release -- --selenite ../dist/run.sh --target /path/to/grid.json
-cargo run --release -- /path/to/avatar-images --selenite ../dist/run.sh --target /path/to/game.rb
-cargo run -- --help
-```
-
-Target paths are passed as individual process arguments; paths containing spaces work without shell commands. The selected path and launch toggles can be changed while time tools run; the values at the moment of the event are used.
+Existing alarm/timer/stopwatch and grid-launch source modules are preserved, but are not wired into this PNGTuber executable.

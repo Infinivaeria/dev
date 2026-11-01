@@ -79,29 +79,66 @@ pub struct MicCapture {
     capacity: usize,
     pub sample_rate: f32,
     pub device_name: String,
+    failed: Arc<AtomicBool>,
 }
 
 impl MicCapture {
     /// Open the default input device and start streaming. `capacity` is the
     /// number of most recent mono samples retained.
     pub fn start(capacity: usize) -> Result<Self, Box<dyn Error>> {
+        Self::start_device(capacity, None)
+    }
+
+    pub fn devices() -> Result<Vec<String>, Box<dyn Error>> {
+        cpal::default_host()
+            .input_devices()?
+            .map(|device| device.name().map_err(Into::into))
+            .collect()
+    }
+
+    pub fn has_failed(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
+    }
+
+    pub fn start_device(capacity: usize, name: Option<&str>) -> Result<Self, Box<dyn Error>> {
+        if capacity == 0 {
+            return Err("microphone buffer must not be empty".into());
+        }
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("no default input (microphone) device found")?;
+        let device = if let Some(name) = name {
+            host.input_devices()?
+                .find(|device| device.name().is_ok_and(|found| found == name))
+                .ok_or_else(|| format!("input device not found: {name}"))?
+        } else {
+            host.default_input_device()
+                .ok_or("no default input (microphone) device found")?
+        };
         let device_name = device.name().unwrap_or_else(|_| "unknown".into());
         let supported = device.default_input_config()?;
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();
 
         let buffer = Arc::new(Mutex::new(VecDeque::with_capacity(capacity)));
+        let failed = Arc::new(AtomicBool::new(false));
         let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, buffer.clone(), capacity)?,
-            SampleFormat::I16 => build::<i16>(&device, &config, buffer.clone(), capacity)?,
-            SampleFormat::U16 => build::<u16>(&device, &config, buffer.clone(), capacity)?,
-            SampleFormat::I32 => build::<i32>(&device, &config, buffer.clone(), capacity)?,
-            SampleFormat::U8 => build::<u8>(&device, &config, buffer.clone(), capacity)?,
-            SampleFormat::F64 => build::<f64>(&device, &config, buffer.clone(), capacity)?,
+            SampleFormat::F32 => {
+                build::<f32>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
+            SampleFormat::I16 => {
+                build::<i16>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
+            SampleFormat::U16 => {
+                build::<u16>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
+            SampleFormat::I32 => {
+                build::<i32>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
+            SampleFormat::U8 => {
+                build::<u8>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
+            SampleFormat::F64 => {
+                build::<f64>(&device, &config, buffer.clone(), capacity, failed.clone())?
+            }
             other => return Err(format!("unsupported sample format {other:?}").into()),
         };
         stream.play()?;
@@ -112,6 +149,7 @@ impl MicCapture {
             capacity,
             sample_rate: config.sample_rate.0 as f32,
             device_name,
+            failed,
         })
     }
 
@@ -129,6 +167,7 @@ fn build<T>(
     config: &StreamConfig,
     buffer: Arc<Mutex<VecDeque<f32>>>,
     capacity: usize,
+    failed: Arc<AtomicBool>,
 ) -> Result<Stream, cpal::BuildStreamError>
 where
     T: SizedSample,
@@ -148,7 +187,10 @@ where
                 buf.push_back(mono);
             }
         },
-        |err| eprintln!("audio input error: {err}"),
+        move |err| {
+            failed.store(true, Ordering::Relaxed);
+            eprintln!("audio input error: {err}");
+        },
         None,
     )
 }

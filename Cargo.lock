@@ -1322,6 +1322,8 @@ dependencies = [
  "chrono",
  "cpal",
  "raylib",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

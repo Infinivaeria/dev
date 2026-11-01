@@ -10,3 +10,5 @@ license = "MIT"
 raylib = { version = "6.0", features = ["SUPPORT_IMAGE_GENERATION"] }
 cpal = "0.16"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
