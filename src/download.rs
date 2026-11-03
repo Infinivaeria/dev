@@ -257,6 +257,10 @@ fn copy_into(source: &Path, directory: &Path, progress: &Progress) -> Result<Pat
             .create_new(true)
             .open(&part_path)
         {
+            Ok(file) if final_path.exists() => {
+                drop(file);
+                let _ = fs::remove_file(&part_path);
+            }
             Ok(file) => break (final_path, part_path, file),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(format!("could not create {}: {error}", part_path.display())),

@@ -17,6 +17,8 @@ const BASE_BOOST: f32 = 1.25;
 const MIN_USER_SCALE: f32 = 0.5;
 const MAX_USER_SCALE: f32 = 3.0;
 const USER_SCALE_STEP: f32 = 0.1;
+/// Window-size scaling keeps growing up to this factor, so maximized windows on large displays stay readable.
+const MAX_WINDOW_SCALE: f32 = 6.0;
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 /// Glyph atlas resolution; larger sizes are upscaled, smaller ones use mipmaps.
@@ -223,8 +225,88 @@ pub fn scale(screen_width: i32, screen_height: i32) -> f32 {
 fn scale_for(width: f32, height: f32, user_scale: f32) -> f32 {
     let window = (width / BASE_WIDTH)
         .min(height / BASE_HEIGHT)
-        .clamp(0.75, 3.0);
+        .clamp(0.75, MAX_WINDOW_SCALE);
     window * BASE_BOOST * user_scale
+}
+
+fn clamp_user_scale(value: f32) -> f32 {
+    if !value.is_finite() {
+        return 1.0;
+    }
+    (value.clamp(MIN_USER_SCALE, MAX_USER_SCALE) * 10.0).round() / 10.0
+}
+
+/// The user's Ctrl +/- zoom multiplier (1.0 by default).
+#[allow(dead_code)]
+pub fn user_scale() -> f32 {
+    USER_SCALE.with(Cell::get)
+}
+
+/// Restores a saved zoom multiplier; out-of-range or invalid values are corrected.
+#[allow(dead_code)]
+pub fn set_user_scale(value: f32) {
+    USER_SCALE.with(|cell| cell.set(clamp_user_scale(value)));
+}
+
+/// Ctrl + mouse wheel zooms the UI like Ctrl +/-. Returns the new scale when it changed.
+#[allow(dead_code)]
+pub fn handle_scale_wheel(rl: &RaylibHandle) -> Option<f32> {
+    let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
+        || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+    let wheel = rl.get_mouse_wheel_move();
+    if !ctrl || wheel == 0.0 {
+        return None;
+    }
+    let current = user_scale();
+    let next = clamp_user_scale(current + USER_SCALE_STEP * wheel.signum());
+    set_user_scale(next);
+    (next != current).then_some(next)
+}
+
+/// Sizes a new window for the display: `width` x `height` scaled by the
+/// monitor's DPI factor, never larger than the monitor.
+#[allow(dead_code)]
+pub fn fit_window_to_display(rl: &mut RaylibHandle, width: i32, height: i32) {
+    let dpi = rl.get_window_scale_dpi();
+    let factor = if dpi.x.is_finite() && dpi.y.is_finite() {
+        dpi.x.max(dpi.y).clamp(1.0, 4.0)
+    } else {
+        1.0
+    };
+    let monitor = raylib::core::window::get_current_monitor();
+    let (monitor_width, monitor_height) = (
+        raylib::core::window::get_monitor_width(monitor),
+        raylib::core::window::get_monitor_height(monitor),
+    );
+    let (wanted_width, wanted_height) = window_size_for(
+        width,
+        height,
+        factor,
+        (monitor_width > 0).then_some((monitor_width, monitor_height)),
+    );
+    if (wanted_width, wanted_height) != (width, height) {
+        rl.set_window_size(wanted_width, wanted_height);
+    }
+}
+
+#[allow(dead_code)]
+fn window_size_for(
+    width: i32,
+    height: i32,
+    factor: f32,
+    monitor: Option<(i32, i32)>,
+) -> (i32, i32) {
+    let scaled = (
+        (width as f32 * factor).round() as i32,
+        (height as f32 * factor).round() as i32,
+    );
+    match monitor {
+        Some((monitor_width, monitor_height)) => (
+            scaled.0.min((monitor_width - 80).max(320)),
+            scaled.1.min((monitor_height - 80).max(240)),
+        ),
+        None => scaled,
+    }
 }
 
 /// Handles Ctrl+= / Ctrl+- / Ctrl+0 to grow, shrink, or reset the UI scale.
@@ -272,6 +354,49 @@ mod tests {
         assert!(scale_for(BASE_WIDTH * 2.0, BASE_HEIGHT, 1.0) - base < f32::EPSILON);
         assert!(scale_for(100.0, 100.0, 1.0) >= 0.75 * BASE_BOOST);
         assert!(scale_for(BASE_WIDTH, BASE_HEIGHT, 1.5) > base);
+    }
+
+    #[test]
+    fn maximized_windows_on_large_displays_keep_scaling() {
+        let hd = scale_for(1920.0, 1080.0, 1.0);
+        let uhd = scale_for(3840.0, 2160.0, 1.0);
+        let huge = scale_for(7680.0, 4320.0, 1.0);
+        assert!((uhd / hd - 2.0).abs() < 0.01, "4K is twice 1080p");
+        assert!(huge > uhd, "8K keeps growing past the old 3x cap");
+        assert!((huge - MAX_WINDOW_SCALE * BASE_BOOST).abs() < 0.01);
+        assert!(scale_for(1e9, 1e9, 1.0) <= MAX_WINDOW_SCALE * BASE_BOOST + 0.001);
+    }
+
+    #[test]
+    fn user_scale_is_clamped_rounded_and_survives_bad_input() {
+        assert_eq!(clamp_user_scale(1.04), 1.0);
+        assert_eq!(clamp_user_scale(0.01), MIN_USER_SCALE);
+        assert_eq!(clamp_user_scale(99.0), MAX_USER_SCALE);
+        assert_eq!(clamp_user_scale(f32::NAN), 1.0);
+        assert_eq!(clamp_user_scale(f32::INFINITY), 1.0);
+        set_user_scale(1.5);
+        assert_eq!(user_scale(), 1.5);
+        assert!(scale(960, 720) > BASE_BOOST);
+        set_user_scale(f32::NAN);
+        assert_eq!(user_scale(), 1.0);
+    }
+
+    #[test]
+    fn new_windows_follow_dpi_but_stay_on_the_monitor() {
+        assert_eq!(
+            window_size_for(960, 720, 1.0, Some((1920, 1080))),
+            (960, 720)
+        );
+        assert_eq!(
+            window_size_for(960, 720, 2.0, Some((3840, 2160))),
+            (1920, 1440)
+        );
+        assert_eq!(
+            window_size_for(960, 720, 2.0, Some((1920, 1080))),
+            (1840, 1000)
+        );
+        assert_eq!(window_size_for(960, 720, 1.5, None), (1440, 1080));
+        assert_eq!(window_size_for(960, 720, 1.0, Some((200, 100))), (320, 240));
     }
 
     #[test]

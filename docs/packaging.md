@@ -44,12 +44,16 @@ dist/
   selenite-game             bundled game runtime
   run.sh                    portable launcher for selenite
   run-game.sh               portable launcher for selenite-game
+  package-info.json         release version, binaries, Ruby build metadata
+  LICENSE
   lib/                      Ruby shared library, stdlib, native extensions
   partitioned_array/lib/
+  partitioned_array/*.md, *.txt bundled library documentation
+  mic_freq/README.md, MANUAL.md companion instructions only
   docs/
   examples/
   licenses/
-selenite-5.0.0-portable.tar.gz
+selenite-7.0.0-rc.1-portable.tar.gz
 ```
 
 `./package.sh` builds both executables with embedded Ruby support (`scripting`)
@@ -71,12 +75,16 @@ dist-game/
   selenite-game
   run-game.sh
   game.rb                   playable starter
+  package-info.json
+  LICENSE
   lib/                      Ruby shared library, stdlib, native extensions
   partitioned_array/lib/
+  partitioned_array/*.md, *.txt
+  mic_freq/README.md, MANUAL.md
   docs/
   examples/games/
   licenses/
-selenite-game-5.0.0-portable.tar.gz
+selenite-game-7.0.0-rc.1-portable.tar.gz
 ```
 
 The game-only bundle intentionally does **not** include the organizer binary
@@ -90,6 +98,11 @@ The portable bundles include everything Selenite ships itself:
 - Embedded Ruby support (`lib/` Ruby stdlib + native extensions).
 - The PartitionedArray Ruby library (`partitioned_array/lib`).
 - Documentation, examples, and licenses.
+
+Both packages include the Selenite manuals under `docs/`, the top-level README
+and changelog, PartitionedArray Markdown and text instructions and changelogs,
+and the mic_freq README and manual.
+They do not include the mic_freq executable, assets, or build sources.
 
 They still require a compatible Linux CPU/ABI, system graphics stack, and
 system libraries (X11/OpenGL and related dependencies). They are not
@@ -130,16 +143,62 @@ Or, to build only the game runtime:
 `./bootstrap-game.sh` is a convenience wrapper that runs `./package.sh --game`.
 Packaging replaces `dist/` or `dist-game/`.
 
+Packaging builds only the Selenite package with `--locked`; it does not build
+other workspace applications. Cargo metadata supplies the release version and
+target directory, including a custom `CARGO_TARGET_DIR`. Each archive includes
+`package-info.json` with its schema version, package name, release version,
+binary list, scripting support, Ruby version, and Ruby platform.
+
+## Verify the release candidate
+
+Add `--verify` to build and integration-test either archive. Verification needs
+Python 3.11 or newer; Python is not required by recipients of the bundle.
+
+```sh
+./package.sh --verify
+./package.sh --game --verify
+python3 tests/network_runtime_smoke.py
+```
+
+The package checks extract the selected archive into a temporary path containing
+a space and use only its launchers and files, not an existing `dist/` directory.
+They validate release metadata, current manuals and other bundled documentation,
+licenses, bundled Ruby native extensions,
+YJIT defaults and opt-out, saves, storage, revenants, BSP, source-free bytecode,
+and corruption rejection. Full-package checks also cover organizer scripts and
+games, same-name asset imports into nested grids, stack enumeration, per-grid
+inventory and metadata isolation, reload after deleting original files, and
+Ruby loops and recursion. Networking checks exercise both archives in separate
+processes, including authenticated replication, late joins, persistent storage,
+logical asset mappings, and relocated bytecode.
+
+Optional graphical checks need an accessible X11 display (including Xwayland),
+working OpenGL, Pillow, and, for native organizer tests, `cc` and X11 development
+headers. They open temporary windows and close them automatically:
+
+```sh
+python3 tests/game_runtime_smoke.py --archive selenite-7.0.0-rc.1-portable.tar.gz \
+  --graphics --artifacts test-artifacts/integration-7.0.0-rc.1
+python3 tests/game_runtime_smoke.py --graphics
+python3 tests/network_runtime_smoke.py --graphics
+```
+
+The full-package graphical test sends real X11 file-drop events into blank
+Asset Inventory space and an existing stack, checks copied assets after reload,
+and captures the panel. Game checks run bounded frames, validate nonblank source
+and bytecode screenshots, and check progress across relaunches. `--artifacts`
+preserves the inventory and game screenshots at the requested location.
+
 Packaging looks for libruby in the active Ruby's configured `libdir` and
 `archlibdir`, then checks the executable's resolved shared-library dependencies.
 This supports both rbenv and distribution Ruby installations. If no shared
 libruby is found, use a Ruby installation built with `--enable-shared`.
 
-To package with the rbenv Ruby 4.0.7 build containing YJIT and Prism:
+To package with the rbenv Ruby 4.0.9 build containing YJIT and Prism:
 
 ```sh
-RBENV_VERSION=4.0.7-yjit-prism ./package.sh
-# Or: RBENV_VERSION=4.0.7-yjit-prism ./package.sh --game
+RBENV_VERSION=4.0.9 ./package.sh
+# Or: RBENV_VERSION=4.0.9 ./package.sh --game
 ```
 
 Packaging uses the selected Ruby executable and shared library consistently,
@@ -173,8 +232,9 @@ To distribute the **organizer** (dimensional grids), extract
 To distribute the **game-only runtime**, extract `selenite-game-*-portable.tar.gz`
 and run `./run-game.sh`.
 
-The tarballs include Ruby and PartitionedArray, so a matching system Ruby
-installation is unnecessary. They still require a compatible Linux CPU/ABI,
+The tarballs include embedded Ruby and PartitionedArray, so a matching system
+Ruby installation is unnecessary for Selenite scripting. Terminal commands
+that invoke `ruby` still require a Ruby executable on `PATH`. They still require a compatible Linux CPU/ABI,
 system libraries, graphics driver, and rendering context. Ruby native
 extensions may have system library dependencies. These are not cross-platform
 executables or OS installers.

@@ -32,7 +32,7 @@ For a dedicated Ruby-only runtime with bundled dependencies, run
 See the [packaging guide](packaging.md). These storage APIs execute in Ruby;
 JSON is their data format, not another game language.
 
-The existing portable binary does not acquire new embedded APIs just because these Ruby source files change. Rebuild it with [package.sh](../package.sh) before using the portable runtime for these features. The normal [installation prerequisites](manual.md#2-install-and-start) apply. The array library is found through `SELENITE_PARTITIONED_ARRAY_LIB`, beside the executable in `partitioned_array/lib`, or in the source checkout. That environment variable must name the **lib directory**.
+The existing portable binary does not acquire new embedded APIs just because these Ruby source files change. Rebuild it with `./package.sh` from the source checkout before using the portable runtime for these features. The normal [installation prerequisites](manual.md#2-install-and-start) apply. The array library is found through `SELENITE_PARTITIONED_ARRAY_LIB`, beside the executable in `partitioned_array/lib`, or in the source checkout. That environment variable must name the **lib directory**.
 
 [Revenant World](../examples/games/revenant_world.rb) is a complete, asset-free example:
 
@@ -316,4 +316,4 @@ cargo test --features scripting
 
 The Ruby suite uses Minitest. It covers allocation, later-partition revival, sleeping data, stable IDs, update rollback, metadata, invalid input, writer locks, failed commits, snapshots, vacuum, BSP boundaries, world movement, and game lifecycle behavior. The Rust suite also checks embedded API availability and export support.
 
-Implementation: [storage layer](../src/ruby/game_storage.rb), [BSP and world layer](../src/ruby/game_world.rb), [game helper](../src/ruby/raylib_game.rb). Continue with the [game API reference](game.md) or [beginner tutorial](game-tutorial.md).
+Implementation in the source checkout: `src/ruby/game_storage.rb`, `src/ruby/game_world.rb`, and `src/ruby/raylib_game.rb`. Continue with the [game API reference](game.md) or [beginner tutorial](game-tutorial.md).

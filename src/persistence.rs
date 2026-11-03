@@ -582,6 +582,20 @@ impl SavedGrid {
         true
     }
 
+    pub fn extract_item(&mut self, col: i64, row: i64, index: usize) -> Option<(i64, i64)> {
+        self.items_at(col, row).get(index)?;
+        let mut target = col;
+        loop {
+            target = target.checked_add(1).unwrap_or(i64::MIN);
+            if !self.occupied(target, row) {
+                break;
+            }
+        }
+        let item = self.pop_item(col, row, index)?;
+        self.push_content(target, row, item);
+        Some((target, row))
+    }
+
     /// Moves every item of `from` on top of `to` (a plain move if `to` is
     /// empty). Returns how many items moved.
     pub fn merge_cells(&mut self, from: (i64, i64), to: (i64, i64)) -> usize {

@@ -1,6 +1,6 @@
 # Selenite
 
-**Version 5.0.0**. See [CHANGELOG.md](CHANGELOG.md).
+**Version 7.0.0-rc.1 (release candidate)**. See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
@@ -143,7 +143,8 @@ Everything else:
   **Show item labels** to toggle it individually. In a stack, this affects
   the top item; use **Tab** to reach another item. Individual choices are
   saved, follow moves and stacking, and support undo/redo. **Labels: Off**
-  hides all item labels without resetting those choices. The selected cell
+  keeps labels for files without a visible thumbnail, including music, so
+  items do not disappear. It does not reset those choices. The selected cell
   still shows its coordinates.
 - **Built-in music player**:
   - Formats: wav, ogg, mp3, flac, qoa, xm and mod.
@@ -247,6 +248,64 @@ to upstream Git revision `c08ca65b527e2cff2b347c46d3f8a029e17ca665` in
 GitHub for the initial fetch. Scripting requires Ruby 3.1 or newer.
 
 ## Run modes
+
+### Terminal
+
+Click **Terminal** in the main toolbar to open a separate terminal window, or
+run `selenite --terminal` in an existing terminal. This starts your normal
+shell (`$SHELL`, or `/bin/sh` if unset; `COMSPEC` on Windows), with the current
+directory, environment, terminal input/output, and your normal OS permissions.
+It is not sandboxed. The button requires an installed terminal emulator.
+
+```sh
+selenite --terminal -c 'printf "hello\n" | wc -l'
+selenite --terminal -c 'ruby my_script.rb arg1'
+```
+
+Arguments after `--terminal` go directly to the shell, so their syntax depends
+on that shell. Ruby commands require a Ruby executable on `PATH`; the portable
+bundle includes embedded Ruby libraries, not a standalone Ruby executable.
+For scripts using the Selenite grid API, use `--script` with a scripting build.
+
+To run commands from a grid piece, add a command file to the grid, right-click
+it, and choose **Run in terminal**. Files ending in `.rb` run with the system
+Ruby; other file pieces use the interpreter on their `#!` line, `python3` for
+`.py`, `node` for `.js`, or else Bash (`cmd` on Windows). Terminals receive
+`SELENITE_GRID`, `SELENITE_PROFILE` and `SELENITE_EXE`, and `selenite` is on
+their `PATH`. Ruby can open one with `Selenite.terminal(file, *args, dir: nil)`.
+Compiled `.rbc`
+files are not supported by this action. The terminal stays open in a shell after
+the command finishes. Scripts run with your full user permissions, inherit
+Selenite's working directory and environment, and should come from a trusted
+source. Bash and Ruby must be installed and available on `PATH`.
+
+Right-click any grid cell and choose **Terminal in grid folder** to start a
+shell in that grid's folder. To pass arguments to a command file, use
+`selenite --terminal-run script.rb 'argument with spaces'`; arguments are
+passed directly to the script. The grid action runs the file without arguments.
+
+### Text editor and grid notes
+
+`selenite --edit FILE` opens the built-in text editor. In the grid, right-click a
+file cell → **Edit text**, an empty cell → **New note here**, or use the **Notes**
+toolbar button for the current grid's own Markdown notes (`notes.md` in its grid
+folder). Enter on a `.md` or `.txt` cell opens it too, and Ruby can call
+`Selenite.edit(path)`.
+
+- Ruby is syntax-highlighted (keywords, symbols, strings with interpolation,
+  heredocs, regexes, comments) and Enter/`end` keep indentation aligned.
+- Markdown is highlighted in the source and rendered live beside it: headings,
+  emphasis, links, code (Ruby fences are highlighted), quotes, nested and task
+  lists, rules and tables. **Ctrl + P** cycles Split / Preview / Source, and the
+  divider between the panes can be dragged (double-click resets it). Links in the
+  preview are clickable: web and `mailto` links open in your browser, `#heading`
+  links scroll, relative paths open the file, and other schemes are blocked.
+- **Ctrl + F** finds and **Ctrl + H** finds and replaces (Enter/Shift+Enter step,
+  Alt + C toggles case, Alt + A replaces all, one Ctrl + Z undoes it).
+- Ctrl + S saves (atomically, keeping line endings and permissions); Ctrl + Z / Y
+  undo and redo; Ctrl + +/- or Ctrl + wheel zooms; F11 maximizes.
+
+See the [manual](docs/manual.md#text-editor-and-grid-notes) for every key.
 
 ### Main grid (profiles)
 
@@ -360,13 +419,19 @@ You can also launch this window directly from the main application using the **I
     **Home** resets the 3D camera.
 - **Backtick ( \` )**: toggle the Ruby console
 - **Ctrl + = / Ctrl + -**: make UI text (toolbar, console, dialogs, status
-  bar, inventory) larger or smaller; **Ctrl + 0** resets
+  bar, inventory, text editor) larger or smaller; **Ctrl + 0** resets. The
+  zoom is remembered between launches
 - **Drag and drop files**: place any files beginning at the target cell and
   fan them out left-to-right
 
 ### Text scaling
 
-- UI text and buttons scale with the window size (and the Ctrl +/- multiplier).
+- UI text and buttons scale with the window size (and the Ctrl +/- multiplier),
+  up to six times the base size, so a maximized window on a large display stays
+  readable. New windows are sized for the display's DPI factor and kept within
+  the monitor; the Ruby console takes a fixed share of the window, and the text
+  editor drops its Markdown split view to a single pane when the window is too
+  narrow for two. The Ctrl +/- zoom is saved as `ui_scale` in `settings.json`.
   When the window is too narrow, toolbar buttons wrap onto additional rows.
 - Text inside grid cells (coordinates, file names, type badges) is sized from
   each cell's on-screen size, so it grows and shrinks with the camera zoom.
@@ -401,8 +466,17 @@ Hover any button for a tooltip that explains it.
   replaces the previous export.
 - **PA Import** — load that export back into the grid you're viewing.
   Cells that are already occupied are left unchanged.
-- **Inventory** — spawn a separate inventory window
+- **File List** — open a separate read-only list of all files in the save
+- **Asset Inventory** — manage every asset in the current grid, including
+  stacks, in a live modal window. Drop multiple files on a row to extend its
+  cell's stack, or on blank panel space to create a new stacked asset cell.
+  Search, open, promote, extract, remove, paste and unstack; changes save
+  automatically and support undo/redo. Child grids have their own inventories.
 - **Items** — this grid's game inventory panel (B)
+- **Stack Items** — search and manage files/grids in the selected cell;
+  type to search, use arrows and Enter to open, Delete to remove, Ctrl+V to
+  stack clipboard items, and Ctrl+Z/Ctrl+Y to undo/redo. Extract moves only
+  one item to a free cell. Non-empty nested grids require removal confirmation.
 - **Grid Folder** — open this grid's own folder in the file manager (O)
 - **Undo / Redo** — step through the edit history (Ctrl+Z / Ctrl+Y)
 - **Find** — search the whole profile (Ctrl+F)
@@ -418,7 +492,9 @@ Hover any button for a tooltip that explains it.
   - **Reload**, **Open folder**, **Install examples**.
 
   `n` is the number of enabled plugins that loaded cleanly.
-- **Help** — every button, shortcut, and the Ruby API
+- **Help / F1** — the complete built-in keyboard reference, grouped by
+  grid, 3D camera, Find, stacks, inventory, music, console, profiles,
+  plugins, dialogs, image viewer and file list; followed by toolbar and API help.
 - **Cancel DL (n)** — only shown while downloads run
 - **Back** — return to the parent grid when inside a nested grid
 
@@ -681,11 +757,11 @@ This script:
 4. Generates a portable launcher script `dist/run.sh` that sets up `LD_LIBRARY_PATH` and `RUBYLIB`.
 5. Copies `docs/`, `examples/`, `README.md` and `CHANGELOG.md` into the bundle.
 6. Compresses the release bundle into `selenite-<version>-portable.tar.gz`
-   (for example `selenite-5.0.0-portable.tar.gz`).
+  (for example `selenite-7.0.0-rc.1-portable.tar.gz`).
 
 To test or run the standalone package on any Linux machine:
 ```sh
-mkdir selenite && tar -xzf selenite-5.0.0-portable.tar.gz -C selenite
+mkdir selenite && tar -xzf selenite-7.0.0-rc.1-portable.tar.gz -C selenite
 cd selenite
 ./run.sh [--profile NAME | --grid FILE.json | --script FILE.rb | --game GAME.rb ...]
 ./run.sh --game examples/games/pong.rb

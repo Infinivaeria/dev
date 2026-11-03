@@ -177,6 +177,7 @@ Selenite.enter(c, r); Selenite.back; Selenite.depth; Selenite.selected
 Selenite.labels(false); Selenite.labels?  # grid labels on/off
 Selenite.view_3d(true); Selenite.orbit(yaw, pitch, distance)
 Selenite.copy_text("text")              # system clipboard
+Selenite.terminal("run.sh", "arg")       # open a terminal running a command file
 Selenite.download(url, col, row)        # background, any size
 Selenite.search("q"); Selenite.find("q")
 Selenite.undo; Selenite.redo; Selenite.save

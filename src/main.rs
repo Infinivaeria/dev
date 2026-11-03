@@ -1,5 +1,6 @@
 mod camera;
 mod download;
+mod editor;
 #[cfg(feature = "scripting")]
 mod game;
 #[allow(dead_code)]
@@ -10,6 +11,7 @@ mod history;
 mod imaging;
 mod inventory;
 mod item_panel;
+mod markdown;
 mod music;
 mod panels;
 mod persistence;
@@ -21,6 +23,8 @@ mod scripting;
 mod search;
 mod selection;
 mod settings;
+mod stack_panel;
+mod syntax;
 mod ui;
 mod view3d;
 
@@ -109,8 +113,12 @@ enum ToolbarAction {
     PaImport,
     OpenInventory,
     Items,
+    StackItems,
+    AssetInventory,
     GridFolder,
     Console,
+    Terminal,
+    Notes,
     Home,
     View3d,
     Labels,
@@ -141,8 +149,12 @@ impl ToolbarAction {
             Self::PaImport => help::PA_IMPORT_TIP,
             Self::OpenInventory => "Open a separate window listing every file across all nested grids.",
             Self::Items => "This grid's game inventory (B): named items with counts and metadata, shared with Ruby as Selenite.grid.inventory.",
+            Self::StackItems => "Manage the selected cell's stacked items: bring to top, open, remove, paste or unstack.",
+            Self::AssetInventory => "Manage this grid's assets. Drop multiple files onto a row to stack them, or onto blank inventory space to create a new asset cell.",
             Self::GridFolder => "Open this grid's own folder in your file manager (O). Every grid gets a folder when first used; files added to the grid are copied into its assets/ subfolder, along with pasted images and downloads.",
             Self::Console => "Toggle the embedded Ruby console (` key). Type Selenite.help for the API.",
+            Self::Terminal => "Open a system terminal with your shell. Commands run with your normal user permissions.",
+            Self::Notes => "Edit this grid's Markdown notes (notes.md in its grid folder) in the text editor.",
             Self::Home => "Reset pan and zoom (and the 3D camera) back to the origin.",
             Self::View3d => help::VIEW_3D_TIP,
             Self::Labels => help::LABELS_TIP,
@@ -266,14 +278,25 @@ enum MenuItem {
     Unstack,
     /// Move every other selected cell's items onto this cell.
     StackSelectionHere,
+    StackItems,
     /// Open this grid's game inventory panel.
     Items,
     /// Open the current grid's folder in the file manager.
     GridFolder,
+    GridTerminal,
+    /// Edit the current grid's Markdown notes.
+    GridNotes,
+    /// Edit a nested grid's Markdown notes.
+    NestedGridNotes,
+    /// Edit a file cell in the text editor.
+    EditText,
+    /// Create a Markdown note in an empty cell and edit it.
+    NewNote,
     /// Open a nested grid cell's own folder.
     NestedGridFolder,
     /// Run a Ruby cell as a game in its own window (`selenite --game`).
     RunGame,
+    RunTerminal,
     /// Export a Ruby cell as a self-contained game folder.
     ExportGame,
     /// A plugin's `p.menu` entry, by action id.
@@ -298,10 +321,17 @@ impl MenuItem {
             Self::RemoveTop => "Remove top item (Shift+Del)",
             Self::Unstack => "Unstack into free cells",
             Self::StackSelectionHere => "Stack selection here",
+            Self::StackItems => "Manage stack items",
             Self::Items => "Grid inventory… (B)",
             Self::GridFolder => "Open grid folder (O)",
+            Self::GridTerminal => "Terminal in grid folder",
+            Self::GridNotes => "Grid notes",
+            Self::NestedGridNotes => "Edit its grid notes",
+            Self::EditText => "Edit text",
+            Self::NewNote => "New note here",
             Self::NestedGridFolder => "Open its grid folder",
             Self::RunGame => "Run as game",
+            Self::RunTerminal => "Run in terminal",
             Self::ExportGame => "Export standalone game",
             Self::Plugin(_) => "Plugin",
         }
@@ -311,15 +341,26 @@ impl MenuItem {
     /// items; `multi` is set when other cells are selected too.
     fn for_cell(kind: Option<CellKind>, stack_len: usize, multi: bool) -> Vec<Self> {
         let mut items = match kind {
-            None => vec![Self::Open, Self::Paste, Self::NewGrid],
-            Some(CellKind::Grid) => vec![Self::Open, Self::NestedGridFolder, Self::Info],
+            None => vec![Self::Open, Self::Paste, Self::NewGrid, Self::NewNote],
+            Some(CellKind::Grid) => vec![
+                Self::Open,
+                Self::NestedGridFolder,
+                Self::NestedGridNotes,
+                Self::Info,
+            ],
             Some(kind) => {
                 let mut items = vec![Self::Open];
+                if matches!(kind, CellKind::File | CellKind::RubyScript) {
+                    items.push(Self::EditText);
+                }
                 if kind == CellKind::Audio {
                     items.push(Self::QueueAudio);
                 }
                 if kind == CellKind::RubyScript {
                     items.extend([Self::RunGame, Self::ExportGame]);
+                }
+                if matches!(kind, CellKind::File | CellKind::RubyScript) {
+                    items.push(Self::RunTerminal);
                 }
                 items.extend([
                     Self::Info,
@@ -332,7 +373,12 @@ impl MenuItem {
             }
         };
         if stack_len > 1 {
-            items.extend([Self::CycleStack, Self::RemoveTop, Self::Unstack]);
+            items.extend([
+                Self::StackItems,
+                Self::CycleStack,
+                Self::RemoveTop,
+                Self::Unstack,
+            ]);
         }
         if multi {
             items.push(Self::StackSelectionHere);
@@ -341,6 +387,8 @@ impl MenuItem {
             items.extend([Self::HideLabels, Self::Delete]);
         }
         items.push(Self::GridFolder);
+        items.push(Self::GridTerminal);
+        items.push(Self::GridNotes);
         items.push(Self::Items);
         items
     }
@@ -424,6 +472,9 @@ struct App {
     /// inside it); empty means no confirmation dialog is showing.
     pending_delete: Vec<(i64, i64)>,
     item_panel: Option<item_panel::ItemPanel>,
+    stack_panel: Option<stack_panel::Panel>,
+    asset_panel: Option<inventory::AssetPanel>,
+    stack_remove_guard: Option<persistence::CellContent>,
     console_open: bool,
     console_input: String,
     console_history: Vec<String>,
@@ -517,6 +568,9 @@ impl App {
             panning: false,
             pending_delete: Vec::new(),
             item_panel: None,
+            stack_panel: None,
+            asset_panel: None,
+            stack_remove_guard: None,
             console_open: false,
             console_input: String::new(),
             console_history: Vec::new(),
@@ -578,7 +632,15 @@ impl App {
     }
 
     fn item_labels(&self, col: i64, row: i64) -> bool {
-        self.labels() && lock(&self.grid).labels_at(col, row)
+        let grid = lock(&self.grid);
+        let requires_label = match grid.kind_at(col, row) {
+            Some(CellKind::Image) => grid
+                .image_at(col, row)
+                .is_none_or(|path| self.thumbnails.get(path).is_none()),
+            Some(CellKind::Grid) | None => false,
+            Some(_) => true,
+        };
+        requires_label || (self.labels() && grid.labels_at(col, row))
     }
 
     fn set_labels(&mut self, on: bool) {
@@ -606,6 +668,7 @@ impl App {
         next.volume = self.player.volume();
         next.shuffle = self.player.playlist.shuffle();
         next.repeat = self.player.playlist.repeat;
+        next.ui_scale = ui::user_scale();
         let path_on_disk = self.settings_path.is_file();
         if next != self.settings || !path_on_disk && next != Settings::default() {
             self.settings = next;
@@ -635,6 +698,9 @@ impl App {
         rl.set_target_fps(60);
         // Esc closes overlays / cancels downloads instead of quitting.
         rl.set_exit_key(None);
+        rl.set_window_min_size(480, 320);
+        ui::fit_window_to_display(&mut rl, WINDOW_WIDTH, WINDOW_HEIGHT);
+        ui::set_user_scale(self.settings.ui_scale);
         ui::load_font(&thread);
         let mut renderer = rendering::Renderer::default();
         self.run_profile_init();
@@ -711,6 +777,12 @@ impl App {
         }
         if self.item_panel.is_some() {
             return self.handle_item_panel(rl);
+        }
+        if self.stack_panel.is_some() {
+            return self.handle_stack_panel(rl);
+        }
+        if self.asset_panel.is_some() {
+            return self.handle_asset_panel(rl);
         }
 
         let just_toggled = rl.is_key_pressed(KeyboardKey::KEY_GRAVE);
@@ -1317,6 +1389,16 @@ impl App {
         }
     }
 
+    /// Lines one PageUp/PageDown scrolls: a window's worth, keeping one line of overlap.
+    fn console_page(&self, rl: &RaylibHandle) -> usize {
+        let layout = console_layout(
+            rl.get_screen_width(),
+            rl.get_screen_height(),
+            self.toolbar_layout(rl).height,
+        );
+        layout.visible_lines.saturating_sub(1).max(1)
+    }
+
     fn handle_console_input(&mut self, rl: &mut RaylibHandle) {
         if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
             self.console_open = false;
@@ -1378,10 +1460,12 @@ impl App {
             }
         }
         if rl.is_key_pressed(KeyboardKey::KEY_PAGE_UP) {
-            self.console_scroll = (self.console_scroll + 5).min(self.console_history.len());
+            let page = self.console_page(rl);
+            self.console_scroll = (self.console_scroll + page).min(self.console_history.len());
         }
         if rl.is_key_pressed(KeyboardKey::KEY_PAGE_DOWN) {
-            self.console_scroll = self.console_scroll.saturating_sub(5);
+            let page = self.console_page(rl);
+            self.console_scroll = self.console_scroll.saturating_sub(page);
         }
         let wheel = rl.get_mouse_wheel_move();
         if wheel != 0.0 {
@@ -1608,6 +1692,12 @@ impl App {
                 }
             }
             AppRequest::Labels(on) => self.set_labels(on),
+            AppRequest::StackItems(col, row) => {
+                self.selected = Some((col, row));
+                self.selection.select_all(std::iter::once((col, row)));
+                self.open_stack_panel();
+            }
+            AppRequest::AssetInventory => self.open_asset_panel(),
             AppRequest::CopyText(text) => {
                 self.clipboard()?
                     .set_text(text)
@@ -1615,6 +1705,18 @@ impl App {
                 self.status = Some("Copied text to the clipboard".to_owned());
             }
             AppRequest::ReloadPlugins => self.load_plugins(),
+            AppRequest::Edit(path) => {
+                spawn_editor(Path::new(&path))?;
+                self.status = Some(format!("Editing {path}"));
+            }
+            AppRequest::Terminal {
+                file,
+                args,
+                directory,
+            } => {
+                launch_terminal_request(self.terminal_launch(), file, args, directory)?;
+                self.status = Some("Opened terminal".to_owned());
+            }
             AppRequest::Music(command) => self.apply_music_command(command)?,
         }
         Ok(())
@@ -2226,6 +2328,499 @@ impl App {
         self.item_panel = Some(item_panel::ItemPanel::default());
     }
 
+    fn open_asset_panel(&mut self) {
+        if matches!(self.mode, Mode::Main) {
+            self.asset_panel = Some(inventory::AssetPanel::new());
+        }
+    }
+
+    fn asset_panel_layout(&self, width: i32, height: i32) -> stack_panel::Layout {
+        let rows = inventory::grid_assets(&lock(&self.grid));
+        let title = if self.nav_stack.is_empty() {
+            "root".to_owned()
+        } else {
+            self.breadcrumb()
+        };
+        let mut layout = self
+            .asset_panel
+            .as_ref()
+            .unwrap()
+            .layout(&rows, width, height, &title);
+        let progress = self
+            .downloads
+            .iter()
+            .find(|pending| Arc::ptr_eq(&pending.grid, &self.grid));
+        layout.set_message(
+            progress
+                .map(|pending| pending.download.describe())
+                .or_else(|| self.status.clone()),
+        );
+        layout
+    }
+
+    fn asset_import_target(&self) -> (i64, i64) {
+        let grid = lock(&self.grid);
+        let mut col = 0i64;
+        while grid.occupied(col, 0)
+            || self.downloads.iter().any(|pending| {
+                Arc::ptr_eq(&pending.grid, &self.grid) && pending.col == col && pending.row == 0
+            })
+        {
+            col = col.checked_add(1).unwrap_or(i64::MIN);
+        }
+        (col, 0)
+    }
+
+    fn handle_asset_panel(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
+        use stack_panel::Action;
+        if rl.is_key_pressed(KeyboardKey::KEY_F1) {
+            self.help_open = true;
+            return Ok(());
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            if self
+                .downloads
+                .iter()
+                .any(|pending| Arc::ptr_eq(&pending.grid, &self.grid))
+            {
+                self.cancel_downloads();
+            } else if !self.asset_panel.as_ref().unwrap().controls.query.is_empty() {
+                let panel = &mut self.asset_panel.as_mut().unwrap().controls;
+                panel.query.clear();
+                panel.scroll = 0;
+                panel.focused = None;
+            } else {
+                self.asset_panel = None;
+            }
+            return Ok(());
+        }
+        if ctrl_down(rl)
+            && (rl.is_key_pressed(KeyboardKey::KEY_Z) || rl.is_key_pressed(KeyboardKey::KEY_Y))
+        {
+            return if rl.is_key_pressed(KeyboardKey::KEY_Y) || shift_down(rl) {
+                self.redo()
+            } else {
+                self.undo()
+            };
+        }
+        let rows = inventory::grid_assets(&lock(&self.grid));
+        let names = rows
+            .iter()
+            .map(|asset| asset.name.clone())
+            .collect::<Vec<_>>();
+        let layout = self.asset_panel_layout(rl.get_screen_width(), rl.get_screen_height());
+        let panel = &mut self.asset_panel.as_mut().unwrap().controls;
+        let mut changed = false;
+        while let Some(character) = rl.get_char_pressed() {
+            if !ctrl_down(rl) && !character.is_control() && panel.query.chars().count() < 120 {
+                panel.query.push(character);
+                changed = true;
+            }
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE)
+            || rl.is_key_pressed_repeat(KeyboardKey::KEY_BACKSPACE)
+        {
+            panel.query.pop();
+            changed = true;
+        }
+        if changed {
+            panel.focused = None;
+            panel.scroll = 0;
+        }
+        if changed
+            || panel
+                .focused
+                .is_none_or(|index| !panel.matching_indices(&names).contains(&index))
+        {
+            panel.navigate(&names, 0, layout.visible_rows);
+        }
+        for (key, delta) in [
+            (KeyboardKey::KEY_UP, -1),
+            (KeyboardKey::KEY_DOWN, 1),
+            (KeyboardKey::KEY_HOME, isize::MIN),
+            (KeyboardKey::KEY_END, isize::MAX),
+        ] {
+            if rl.is_key_pressed(key) || rl.is_key_pressed_repeat(key) {
+                panel.navigate(&names, delta, layout.visible_rows);
+            }
+        }
+        let mut action = if ctrl_down(rl) && rl.is_key_pressed(KeyboardKey::KEY_V) {
+            Some(Action::Paste)
+        } else {
+            None
+        };
+        if let Some(index) = panel.focused {
+            if rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                action = Some(Action::Open(index));
+            }
+            if rl.is_key_pressed(KeyboardKey::KEY_DELETE) {
+                action = Some(Action::Remove(index));
+            }
+        }
+        let wheel = rl.get_mouse_wheel_move();
+        if wheel != 0.0 {
+            panel.scroll = panel.scroll.saturating_add_signed(-wheel.signum() as isize);
+        }
+        panel.scroll = panel.scroll.min(
+            panel
+                .matching_indices(&names)
+                .len()
+                .saturating_sub(layout.visible_rows),
+        );
+        let layout = self.asset_panel_layout(rl.get_screen_width(), rl.get_screen_height());
+        let mouse = rl.get_mouse_position();
+        if rl.is_file_dropped() {
+            let paths = rl
+                .load_dropped_files()
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            if point_in_rect(mouse, layout.frame) {
+                let target = layout
+                    .row_hits
+                    .iter()
+                    .find(|(rect, _)| point_in_rect(mouse, *rect))
+                    .map(|(_, index)| rows[*index].cell)
+                    .unwrap_or_else(|| self.asset_import_target());
+                if let Err(error) = self.import_dropped_files(&paths, target.0, target.1, true) {
+                    self.status = Some(format!("Error: {error}"));
+                }
+            }
+            return Ok(());
+        }
+        if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+            action = layout
+                .buttons
+                .iter()
+                .find(|(rect, _, _, _)| point_in_rect(mouse, *rect))
+                .map(|(_, _, _, action)| *action)
+                .or_else(|| {
+                    layout
+                        .row_hits
+                        .iter()
+                        .find(|(rect, _)| point_in_rect(mouse, *rect))
+                        .map(|(_, index)| Action::Focus(*index))
+                });
+            if !point_in_rect(mouse, layout.frame) {
+                self.asset_panel = None;
+                return Ok(());
+            }
+        }
+        if let Some(action) = action {
+            if let Err(error) = self.apply_asset_action(action, &rows) {
+                self.status = Some(format!("Error: {error}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_asset_action(
+        &mut self,
+        action: stack_panel::Action,
+        rows: &[inventory::AssetRow],
+    ) -> Result<(), String> {
+        use stack_panel::Action;
+        if action == Action::Close {
+            self.asset_panel = None;
+            return Ok(());
+        }
+        if let Action::Focus(index) = action {
+            self.asset_panel.as_mut().unwrap().controls.focused = Some(index);
+            return Ok(());
+        }
+        let focused = self.asset_panel.as_ref().unwrap().controls.focused;
+        let selected = match action {
+            Action::Select(index)
+            | Action::Open(index)
+            | Action::Remove(index)
+            | Action::Extract(index) => rows.get(index),
+            _ => focused.and_then(|index| rows.get(index)),
+        };
+        let cell = selected
+            .map(|asset| asset.cell)
+            .unwrap_or_else(|| self.asset_import_target());
+        let index = selected.map_or(0, |asset| asset.index);
+        let translated = match action {
+            Action::Select(_) => Action::Select(index),
+            Action::Open(_) => Action::Open(index),
+            Action::Remove(_) => Action::Remove(index),
+            Action::Extract(_) => Action::Extract(index),
+            other => other,
+        };
+        self.stack_panel = Some(stack_panel::Panel {
+            cell,
+            scroll: 0,
+            pending_remove: None,
+            query: String::new(),
+            focused: Some(index),
+        });
+        let result = self.apply_stack_action(translated);
+        if self
+            .stack_panel
+            .as_ref()
+            .is_some_and(|panel| panel.pending_remove.is_none())
+        {
+            self.stack_panel = None;
+        }
+        if matches!(action, Action::Open(_)) {
+            self.asset_panel = None;
+        }
+        result
+    }
+
+    fn open_stack_panel(&mut self) {
+        if !matches!(self.mode, Mode::Main) {
+            return;
+        }
+        if let Some(cell) = self
+            .selected
+            .filter(|(col, row)| lock(&self.grid).occupied(*col, *row))
+        {
+            self.stack_panel = Some(stack_panel::Panel {
+                cell,
+                scroll: 0,
+                pending_remove: None,
+                query: String::new(),
+                focused: Some(0),
+            });
+        }
+    }
+
+    fn stack_panel_layout(&self, width: i32, height: i32) -> stack_panel::Layout {
+        let panel = self.stack_panel.as_ref().unwrap();
+        let names = lock(&self.grid)
+            .items_at(panel.cell.0, panel.cell.1)
+            .iter()
+            .map(content_label)
+            .collect::<Vec<_>>();
+        panel.layout(&names, width, height)
+    }
+
+    fn handle_stack_panel(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            let panel = self.stack_panel.as_mut().unwrap();
+            if panel.pending_remove.is_some() {
+                panel.pending_remove = None;
+            } else if !panel.query.is_empty() {
+                panel.query.clear();
+                panel.scroll = 0;
+            } else {
+                self.stack_panel = None;
+            }
+            return Ok(());
+        }
+        if ctrl_down(rl)
+            && (rl.is_key_pressed(KeyboardKey::KEY_Z) || rl.is_key_pressed(KeyboardKey::KEY_Y))
+        {
+            self.stack_panel.as_mut().unwrap().pending_remove = None;
+            if rl.is_key_pressed(KeyboardKey::KEY_Y) || shift_down(rl) {
+                self.redo()?;
+            } else {
+                self.undo()?;
+            }
+            return Ok(());
+        }
+        let layout = self.stack_panel_layout(rl.get_screen_width(), rl.get_screen_height());
+        let panel = self.stack_panel.as_mut().unwrap();
+        let names = lock(&self.grid)
+            .items_at(panel.cell.0, panel.cell.1)
+            .iter()
+            .map(content_label)
+            .collect::<Vec<_>>();
+        let mut action = None;
+        if let Some(index) = panel.pending_remove {
+            if rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                action = Some(stack_panel::Action::ConfirmRemove(index));
+            }
+        } else {
+            let mut changed = false;
+            while let Some(character) = rl.get_char_pressed() {
+                if !ctrl_down(rl) && !character.is_control() && panel.query.chars().count() < 120 {
+                    panel.query.push(character);
+                    changed = true;
+                }
+            }
+            if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE)
+                || rl.is_key_pressed_repeat(KeyboardKey::KEY_BACKSPACE)
+            {
+                panel.query.pop();
+                changed = true;
+            }
+            if changed {
+                panel.scroll = 0;
+                panel.focused = None;
+            }
+            if changed
+                || panel
+                    .focused
+                    .is_none_or(|index| !panel.matching_indices(&names).contains(&index))
+            {
+                panel.navigate(&names, 0, layout.visible_rows);
+            }
+            for (key, delta) in [
+                (KeyboardKey::KEY_UP, -1),
+                (KeyboardKey::KEY_DOWN, 1),
+                (KeyboardKey::KEY_HOME, isize::MIN),
+                (KeyboardKey::KEY_END, isize::MAX),
+            ] {
+                if rl.is_key_pressed(key) || rl.is_key_pressed_repeat(key) {
+                    panel.navigate(&names, delta, layout.visible_rows);
+                }
+            }
+            if ctrl_down(rl) && rl.is_key_pressed(KeyboardKey::KEY_V) {
+                action = Some(stack_panel::Action::Paste);
+            } else if let Some(index) = panel.focused {
+                if rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                    action = Some(stack_panel::Action::Open(index));
+                } else if rl.is_key_pressed(KeyboardKey::KEY_DELETE) {
+                    action = Some(stack_panel::Action::Remove(index));
+                }
+            }
+        }
+        let count = panel.matching_indices(&names).len();
+        let wheel = rl.get_mouse_wheel_move();
+        if wheel != 0.0 {
+            panel.scroll = panel.scroll.saturating_add_signed(-wheel.signum() as isize);
+        }
+        panel.scroll = panel.scroll.min(count.saturating_sub(layout.visible_rows));
+        let layout = self.stack_panel_layout(rl.get_screen_width(), rl.get_screen_height());
+        let mouse = rl.get_mouse_position();
+        if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+            action = layout
+                .buttons
+                .iter()
+                .find(|(rect, _, _, _)| point_in_rect(mouse, *rect))
+                .map(|(_, _, _, action)| *action)
+                .or_else(|| {
+                    layout
+                        .row_hits
+                        .iter()
+                        .find(|(rect, _)| point_in_rect(mouse, *rect))
+                        .map(|(_, index)| stack_panel::Action::Focus(*index))
+                });
+            if !point_in_rect(mouse, layout.frame) {
+                self.stack_panel = None;
+                return Ok(());
+            }
+        }
+        if let Some(action) = action {
+            if let Err(error) = self.apply_stack_action(action) {
+                self.status = Some(format!("Error: {error}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_stack_action(&mut self, action: stack_panel::Action) -> Result<(), String> {
+        use stack_panel::Action;
+        let Some(panel) = self.stack_panel.as_ref() else {
+            return Ok(());
+        };
+        let (col, row) = panel.cell;
+        if let Some(index) = panel.pending_remove {
+            if action != stack_panel::Action::ConfirmRemove(index)
+                && !matches!(action, Action::CancelRemove | Action::Close)
+            {
+                return Ok(());
+            }
+        } else if matches!(action, Action::ConfirmRemove(_)) {
+            return Ok(());
+        }
+        self.selected = Some((col, row));
+        match action {
+            Action::Close => {
+                self.stack_panel = None;
+                self.stack_remove_guard = None;
+            }
+            Action::Focus(index) => self.stack_panel.as_mut().unwrap().focused = Some(index),
+            Action::Extract(index) => {
+                self.edit("Extract stack item", |app| {
+                    let target = lock(&app.grid).extract_item(col, row, index);
+                    app.info_cache = None;
+                    if let Some((target_col, target_row)) = target {
+                        app.status = Some(format!("Item moved to ({target_col}, {target_row})"));
+                    }
+                    app.save()
+                })?;
+                if !lock(&self.grid).occupied(col, row) {
+                    self.stack_panel = None;
+                }
+            }
+            Action::CancelRemove => {
+                self.stack_panel.as_mut().unwrap().pending_remove = None;
+                self.stack_remove_guard = None;
+            }
+            Action::Paste => {
+                return self.edit("Paste into stack", |app| app.paste_clipboard_with(true))
+            }
+            Action::Unstack => {
+                self.edit("Unstack", |app| app.unstack_selected((col, row)))?;
+                self.stack_panel = None;
+            }
+            Action::Select(index) | Action::Open(index) => {
+                self.edit("Select stack item", |app| {
+                    lock(&app.grid).raise_item(col, row, index);
+                    app.info_cache = None;
+                    app.save()
+                })?;
+                self.stack_panel.as_mut().unwrap().focused = Some(0);
+                if matches!(action, Action::Open(_)) {
+                    self.stack_panel = None;
+                    return self.open_or_run_selection();
+                }
+            }
+            Action::Remove(index) | Action::ConfirmRemove(index) => {
+                if matches!(action, Action::ConfirmRemove(_)) {
+                    let unchanged =
+                        lock(&self.grid)
+                            .items_at(col, row)
+                            .get(index)
+                            .is_some_and(|item| {
+                                self.stack_remove_guard
+                                    .as_ref()
+                                    .is_some_and(|guard| item.same_as(guard))
+                            });
+                    if !unchanged {
+                        self.stack_panel.as_mut().unwrap().pending_remove = None;
+                        self.stack_remove_guard = None;
+                        self.status = Some(
+                            "The stack changed; select the item again before deleting.".to_owned(),
+                        );
+                        return Ok(());
+                    }
+                }
+                let nonempty_grid =
+                    lock(&self.grid)
+                        .items_at(col, row)
+                        .get(index)
+                        .is_some_and(|item| {
+                            if let persistence::CellValue::Grid(grid) = &item.content {
+                                !lock(grid).is_empty()
+                            } else {
+                                false
+                            }
+                        });
+                if nonempty_grid && !matches!(action, Action::ConfirmRemove(_)) {
+                    self.stack_remove_guard =
+                        lock(&self.grid).items_at(col, row).get(index).cloned();
+                    self.stack_panel.as_mut().unwrap().pending_remove = Some(index);
+                    return Ok(());
+                }
+                self.edit("Remove stack item", |app| {
+                    lock(&app.grid).pop_item(col, row, index);
+                    app.info_cache = None;
+                    app.save()
+                })?;
+                self.stack_panel.as_mut().unwrap().pending_remove = None;
+                self.stack_remove_guard = None;
+                if !lock(&self.grid).occupied(col, row) {
+                    self.stack_panel = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn item_panel_title(&self) -> String {
         if self.nav_stack.is_empty() {
             "Inventory — root grid".to_owned()
@@ -2630,11 +3225,21 @@ impl App {
             (col, row)
         };
 
-        let before = lock(&self.grid).snapshot();
         let stack = {
             let grid = lock(&self.grid);
             shift_down(rl) || matches!(grid.kind_at(col, row), Some(kind) if kind != CellKind::Grid)
         };
+        self.import_dropped_files(&paths, col, row, stack)
+    }
+
+    fn import_dropped_files(
+        &mut self,
+        paths: &[PathBuf],
+        col: i64,
+        row: i64,
+        stack: bool,
+    ) -> Result<(), String> {
+        let before = lock(&self.grid).snapshot();
         let mut linked = Vec::new();
         let mut copying = 0;
         for (offset, path) in paths.iter().enumerate() {
@@ -2863,6 +3468,9 @@ impl App {
             Some(ActivatedCell::File(CellKind::Audio, path)) if music::is_playable(&path) => {
                 self.play_audio(path)
             }
+            Some(ActivatedCell::File(CellKind::File, path)) if editor::is_text_path(&path) => {
+                spawn_editor(&path)
+            }
             Some(ActivatedCell::File(_, path)) => open_with_system(&path),
             Some(ActivatedCell::Grid(grid)) => {
                 self.enter_grid(grid);
@@ -2909,6 +3517,14 @@ impl App {
                 self.open_item_panel();
                 Ok(())
             }
+            ToolbarAction::StackItems => {
+                self.open_stack_panel();
+                Ok(())
+            }
+            ToolbarAction::AssetInventory => {
+                self.open_asset_panel();
+                Ok(())
+            }
             ToolbarAction::GridFolder => {
                 let grid = Arc::clone(&self.grid);
                 self.open_grid_folder(&grid)
@@ -2916,6 +3532,15 @@ impl App {
             ToolbarAction::Console => {
                 self.toggle_console();
                 Ok(())
+            }
+            ToolbarAction::Terminal => {
+                self.terminal_launch().open()?;
+                self.status = Some("Opened terminal".to_owned());
+                Ok(())
+            }
+            ToolbarAction::Notes => {
+                let grid = Arc::clone(&self.grid);
+                self.open_grid_notes(&grid, "Grid notes")
             }
             ToolbarAction::Home => {
                 self.reset_view();
@@ -3403,6 +4028,16 @@ impl App {
         let folder = self.folder_of(grid)?;
         open_with_system(&folder)?;
         self.status = Some(format!("Opened grid folder {}", folder.display()));
+        Ok(())
+    }
+
+    /// Edits the Markdown notes kept in `grid`'s folder, creating them on first use.
+    fn open_grid_notes(&mut self, grid: &Arc<Mutex<SavedGrid>>, title: &str) -> Result<(), String> {
+        let path = self.folder_of(grid)?.join("notes.md");
+        editor::create_note_if_missing(&path, title)
+            .map_err(|error| format!("could not create the grid notes: {error}"))?;
+        spawn_editor(&path)?;
+        self.status = Some(format!("Editing {}", path.display()));
         Ok(())
     }
 
@@ -3914,11 +4549,13 @@ impl App {
                         | MenuItem::ShowLabels
                         | MenuItem::Paste
                         | MenuItem::NewGrid
+                        | MenuItem::NewNote
                         | MenuItem::Delete
                         | MenuItem::CycleStack
                         | MenuItem::RemoveTop
                         | MenuItem::Unstack
                         | MenuItem::StackSelectionHere
+                        | MenuItem::StackItems
                         | MenuItem::Items
                 )
             });
@@ -4027,15 +4664,57 @@ impl App {
                 self.open_item_panel();
                 Ok(())
             }
+            MenuItem::StackItems => {
+                self.open_stack_panel();
+                Ok(())
+            }
             MenuItem::GridFolder => {
                 let grid = Arc::clone(&self.grid);
                 self.open_grid_folder(&grid)
+            }
+            MenuItem::GridTerminal => {
+                let folder = self.folder_of(&self.grid)?;
+                let folder = fs::canonicalize(&folder)
+                    .map_err(|error| format!("could not open {}: {error}", folder.display()))?;
+                let mut launch = self.terminal_launch();
+                launch.directory = Some(folder.clone());
+                launch.open()?;
+                self.status = Some(format!("Opened terminal in {}", folder.display()));
+                Ok(())
             }
             MenuItem::NestedGridFolder => {
                 let nested = lock(&self.grid)
                     .grid_at(col, row)
                     .ok_or_else(|| "this cell is not a grid".to_owned())?;
                 self.open_grid_folder(&nested)
+            }
+            MenuItem::GridNotes => {
+                let grid = Arc::clone(&self.grid);
+                self.open_grid_notes(&grid, "Grid notes")
+            }
+            MenuItem::NestedGridNotes => {
+                let nested = lock(&self.grid)
+                    .grid_at(col, row)
+                    .ok_or_else(|| "this cell is not a grid".to_owned())?;
+                self.open_grid_notes(&nested, &format!("Notes for the grid at ({col}, {row})"))
+            }
+            MenuItem::EditText => {
+                let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
+                spawn_editor(&path)?;
+                self.status = Some(format!("Editing {}", path.display()));
+                Ok(())
+            }
+            MenuItem::NewNote => {
+                let note = editor::unique_note_path(&self.asset_directory()?);
+                editor::create_note_if_missing(&note, "Note")
+                    .map_err(|error| format!("could not create the note: {error}"))?;
+                self.edit("New note", |app| {
+                    lock(&app.grid)
+                        .insert_file(col, row, note.clone())
+                        .map_err(|error| error.to_string())?;
+                    app.save()
+                })?;
+                spawn_editor(&note)
             }
             MenuItem::QueueAudio => {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
@@ -4052,6 +4731,18 @@ impl App {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
                 self.run_game(&path)
             }
+            MenuItem::RunTerminal => {
+                let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
+                let path = validate_terminal_file(&path)?;
+                let mut launch = self.terminal_launch();
+                launch
+                    .env
+                    .push(("SELENITE_CELL_FILE", path.clone().into_os_string()));
+                launch.file = Some(path.clone());
+                launch.open()?;
+                self.status = Some(format!("Running {} in terminal", path.display()));
+                Ok(())
+            }
             MenuItem::ExportGame => {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
                 let folder = export_game(&path, &self.json_path)?;
@@ -4062,6 +4753,17 @@ impl App {
                 Ok(())
             }
         }
+    }
+
+    /// A terminal that knows which save and profile this window is editing.
+    fn terminal_launch(&self) -> TerminalLaunch {
+        let grid = fs::canonicalize(&self.json_path).unwrap_or_else(|_| self.json_path.clone());
+        let mut launch = TerminalLaunch::default();
+        launch.env.push(("SELENITE_GRID", grid.into_os_string()));
+        if let Some(profile) = &self.profile {
+            launch.env.push(("SELENITE_PROFILE", profile.into()));
+        }
+        launch
     }
 
     /// Saves, then runs `script` as `selenite --game` in a child process
@@ -5159,6 +5861,15 @@ impl App {
             layout.draw(&mut d, screen_width, screen_height, mouse);
         }
 
+        if self.asset_panel.is_some() {
+            self.asset_panel_layout(screen_width, screen_height)
+                .draw(&mut d, mouse);
+        }
+        if self.stack_panel.is_some() {
+            self.stack_panel_layout(screen_width, screen_height)
+                .draw(&mut d, mouse);
+        }
+
         if self.help_open {
             panels::draw_help(&mut d, screen_width, screen_height, self.help_scroll, mouse);
         }
@@ -5626,7 +6337,11 @@ impl App {
                         ToolbarAction::Copy,
                         selection_occupied == Some(true),
                     ),
-                    ("In".to_owned(), ToolbarAction::EnterGrid, selection_can_enter),
+                    (
+                        "In".to_owned(),
+                        ToolbarAction::EnterGrid,
+                        selection_can_enter,
+                    ),
                     (
                         "Open / Run".to_owned(),
                         ToolbarAction::OpenRun,
@@ -5648,7 +6363,17 @@ impl App {
                         cfg!(feature = "scripting"),
                     ),
                     ("File List".to_owned(), ToolbarAction::OpenInventory, true),
+                    (
+                        "Asset Inventory".to_owned(),
+                        ToolbarAction::AssetInventory,
+                        true,
+                    ),
                     ("Items".to_owned(), ToolbarAction::Items, true),
+                    (
+                        "Stack Items".to_owned(),
+                        ToolbarAction::StackItems,
+                        selection_occupied == Some(true),
+                    ),
                     ("Grid Folder".to_owned(), ToolbarAction::GridFolder, true),
                     (
                         "Undo".to_owned(),
@@ -5662,6 +6387,8 @@ impl App {
                     ),
                     ("Find".to_owned(), ToolbarAction::Find, true),
                     ("Ruby".to_owned(), ToolbarAction::Console, true),
+                    ("Terminal".to_owned(), ToolbarAction::Terminal, true),
+                    ("Notes".to_owned(), ToolbarAction::Notes, true),
                     ("Home".to_owned(), ToolbarAction::Home, true),
                     (
                         if self.view_3d { "2D View" } else { "3D View" }.to_owned(),
@@ -5811,6 +6538,13 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<OsString> = env::args_os().collect();
+    if args.get(1).is_some_and(|arg| arg == "--terminal") {
+        return run_terminal(&args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--terminal-run") {
+        let path = args.get(2).ok_or("--terminal-run needs a command file")?;
+        return run_terminal_file(Path::new(path), &args[3..]);
+    }
     match parse_mode(&args)? {
         StartupMode::Usage => {
             println!("{}", usage());
@@ -5831,6 +6565,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         StartupMode::Image(path) => run_image_viewer(&path),
+        StartupMode::Edit(path) => editor::run(&path),
         StartupMode::Inventory(json_path) => inventory::InventoryApp::new(json_path)?.run(),
         StartupMode::Script(script_path, target) => run_script_file(&script_path, target),
         StartupMode::Game(script_path, target) => run_game_file(&script_path, target),
@@ -5841,6 +6576,156 @@ fn run() -> Result<(), String> {
             let profile = store.startup_profile(requested.as_deref())?;
             App::with_profile(store, profile)?.run()
         }
+    }
+}
+
+fn validate_terminal_file(path: &Path) -> Result<PathBuf, String> {
+    let path = fs::canonicalize(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    if !path.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    if path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("rbc"))
+    {
+        return Err("compiled Ruby bytecode cannot be run as a terminal command".to_owned());
+    }
+    Ok(path)
+}
+
+/// Parses `#!interpreter [one argument]` the way the Linux kernel does.
+#[cfg(unix)]
+fn parse_shebang(head: &[u8]) -> Option<(String, Option<String>)> {
+    let line = head
+        .strip_prefix(b"#!")?
+        .split(|byte| *byte == b'\n')
+        .next()?;
+    let line = String::from_utf8_lossy(line);
+    let line = line.trim();
+    let (program, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+    let rest = rest.trim();
+    (!program.is_empty()).then(|| {
+        (
+            program.to_owned(),
+            (!rest.is_empty()).then(|| rest.to_owned()),
+        )
+    })
+}
+
+fn terminal_file_command(path: &Path) -> Command {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase);
+    if extension.as_deref() == Some("rb") {
+        return Command::new("ruby");
+    }
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+
+        let mut head = [0u8; 256];
+        let read = fs::File::open(path).and_then(|mut file| file.read(&mut head));
+        if let Some((program, argument)) = read.ok().and_then(|read| parse_shebang(&head[..read])) {
+            let mut command = Command::new(program);
+            command.args(argument);
+            return command;
+        }
+    }
+    match extension.as_deref() {
+        Some("py") => return Command::new("python3"),
+        Some("js") => return Command::new("node"),
+        _ => {}
+    }
+    #[cfg(not(windows))]
+    return Command::new("bash");
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd");
+        command.arg("/C");
+        command
+    }
+}
+
+/// Makes `selenite` resolvable and identifiable from commands run in a terminal.
+fn export_terminal_environment() {
+    let Ok(exe) = env::current_exe() else { return };
+    env::set_var("SELENITE_EXE", &exe);
+    let Some(directory) = exe.parent() else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = env::var_os("PATH")
+        .map(|value| env::split_paths(&value).collect())
+        .unwrap_or_default();
+    if !paths.iter().any(|path| path == directory) {
+        paths.push(directory.to_path_buf());
+        if let Ok(joined) = env::join_paths(paths) {
+            env::set_var("PATH", joined);
+        }
+    }
+}
+
+fn run_terminal_file(path: &Path, args: &[OsString]) -> Result<(), String> {
+    use std::io::IsTerminal;
+
+    let path = validate_terminal_file(path)?;
+    export_terminal_environment();
+    let mut command = terminal_file_command(&path);
+    let status = command
+        .arg(&path)
+        .args(args)
+        .status()
+        .map_err(|error| format!("could not run {}: {error}", path.display()));
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        match status {
+            Ok(status) => println!("\nCommand finished with {status}. Starting shell."),
+            Err(error) => eprintln!("{error}\nStarting shell."),
+        }
+        return run_terminal(&[]);
+    }
+    let status = status?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        process::exit(
+            status
+                .code()
+                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
+        );
+    }
+    #[cfg(not(unix))]
+    process::exit(status.code().unwrap_or(1));
+}
+
+fn run_terminal(args: &[OsString]) -> Result<(), String> {
+    export_terminal_environment();
+    #[cfg(windows)]
+    let shell = env::var_os("COMSPEC")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "cmd.exe".into());
+    #[cfg(not(windows))]
+    let shell = env::var_os("SHELL")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/bin/sh".into());
+
+    let mut command = Command::new(&shell);
+    command.args(args);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(format!(
+            "failed to start shell {shell:?}: {}",
+            command.exec()
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .map_err(|error| format!("failed to start shell {shell:?}: {error}"))?;
+        process::exit(status.code().unwrap_or(1));
     }
 }
 
@@ -5858,6 +6743,7 @@ enum StartupMode {
     Grid(PathBuf),
     Inventory(PathBuf),
     Image(PathBuf),
+    Edit(PathBuf),
     Script(PathBuf, Target),
     Game(PathBuf, Target),
     Compile(PathBuf, PathBuf, bool),
@@ -5872,6 +6758,8 @@ fn usage() -> String {
         "  selenite --profile NAME          open (or create) the profile NAME",
         "  selenite --grid FILE.json        edit a grid file directly, outside any profile",
         "  selenite --list-profiles         list local profiles",
+        "  selenite --terminal [SHELL ARGS] start your shell in the current terminal",
+        "  selenite --terminal-run FILE [ARGS...]  run a Bash or Ruby command file in the terminal",
         "  selenite --script FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
         "                                   run a Ruby script headless against a profile or grid",
         "  selenite --game FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
@@ -5879,6 +6767,7 @@ fn usage() -> String {
         "  selenite --compile FILE.rb [--output FILE.rbc] [--force]",
         "                                   compile Ruby without running it; bytecode is not encryption",
         "  selenite --image FILE            open the image viewer",
+        "  selenite --edit FILE             open the text editor (Ruby and Markdown aware)",
         "  selenite --inventory FILE.json   open the inventory window",
     ];
     format!(
@@ -5918,6 +6807,7 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
         Some("--profile") => StartupMode::Profile(Some(value(1, "--profile")?)),
         Some("--grid") => StartupMode::Grid(PathBuf::from(value(1, "--grid")?)),
         Some("--image") => StartupMode::Image(PathBuf::from(value(1, "--image")?)),
+        Some("--edit") => StartupMode::Edit(PathBuf::from(value(1, "--edit")?)),
         Some("--inventory") => StartupMode::Inventory(PathBuf::from(value(1, "--inventory")?)),
         Some("--script") => StartupMode::Script(PathBuf::from(value(1, "--script")?), target(2)?),
         Some("--game") => StartupMode::Game(PathBuf::from(value(1, "--game")?), target(2)?),
@@ -6004,8 +6894,21 @@ fn run_script_file(script_path: &Path, target: Target) -> Result<(), String> {
         return Err(result);
     }
     for request in engine.drain_requests() {
-        if let scripting::AppRequest::Status(text) = request {
-            println!("{text}");
+        match request {
+            scripting::AppRequest::Status(text) => println!("{text}"),
+            scripting::AppRequest::Edit(path) => spawn_editor(Path::new(&path))?,
+            scripting::AppRequest::Terminal {
+                file,
+                args,
+                directory,
+            } => {
+                let mut launch = TerminalLaunch::default();
+                launch
+                    .env
+                    .push(("SELENITE_GRID", json_path.clone().into_os_string()));
+                launch_terminal_request(launch, file, args, directory)?;
+            }
+            _ => {}
         }
     }
     let saved = lock(&root)
@@ -6058,6 +6961,7 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
         .resizable()
         .build();
     rl.set_target_fps(60);
+    ui::set_user_scale(settings::saved_ui_scale());
     ui::load_font(&thread);
     let mut renderer = rendering::Renderer::default();
 
@@ -6093,7 +6997,9 @@ fn run_image_viewer(path: &Path) -> Result<(), String> {
         if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
             break;
         }
-        ui::handle_scale_keys(&rl);
+        if let Some(scale) = ui::handle_scale_keys(&rl) {
+            let _ = settings::save_ui_scale(scale);
+        }
         let (sw, sh) = (rl.get_screen_width() as f64, rl.get_screen_height() as f64);
         if !fitted {
             // Start fitted when the image is larger than the window.
@@ -6281,6 +7187,16 @@ fn load_existing_root(path: &Path) -> Result<Arc<Mutex<SavedGrid>>, String> {
         return Err(format!("No saved grid found at {}", path.display()));
     };
     Ok(Arc::new(Mutex::new(grid)))
+}
+
+fn spawn_editor(path: &Path) -> Result<(), String> {
+    let exe = env::current_exe().map_err(|error| error.to_string())?;
+    Command::new(exe)
+        .arg("--edit")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("could not start the editor: {error}"))
 }
 
 fn spawn_mode(mode: Mode, json_path: Option<PathBuf>) -> Result<(), String> {
@@ -6512,6 +7428,131 @@ fn open_with_system(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not open {}: {error}", path.display()))
 }
 
+#[cfg(target_os = "linux")]
+fn spawn_terminal_emulator(
+    candidates: &[(&str, &[&str])],
+    launch: &[OsString],
+    directory: Option<&Path>,
+) -> Result<process::Child, String> {
+    for (program, flags) in candidates {
+        let mut command = Command::new(program);
+        command.args(*flags).args(launch);
+        if let Some(directory) = directory {
+            command.current_dir(directory);
+        }
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("could not start terminal {program}: {error}")),
+        }
+    }
+    Err("no supported terminal emulator found; install one such as xterm".to_owned())
+}
+
+/// A separate terminal window running `selenite --terminal` or `--terminal-run`.
+#[derive(Default)]
+struct TerminalLaunch {
+    file: Option<PathBuf>,
+    args: Vec<OsString>,
+    directory: Option<PathBuf>,
+    env: Vec<(&'static str, OsString)>,
+}
+
+impl TerminalLaunch {
+    /// Selenite's command line, prefixed with `env` so any emulator passes the variables on.
+    fn command(&self, exe: &Path) -> Vec<OsString> {
+        let mut command: Vec<OsString> = Vec::new();
+        #[cfg(not(windows))]
+        if !self.env.is_empty() {
+            command.push("env".into());
+            for (name, value) in &self.env {
+                let mut assignment = OsString::from(format!("{name}="));
+                assignment.push(value);
+                command.push(assignment);
+            }
+        }
+        command.push(exe.as_os_str().to_owned());
+        match &self.file {
+            Some(file) => {
+                command.push("--terminal-run".into());
+                command.push(file.as_os_str().to_owned());
+                command.extend(self.args.iter().cloned());
+            }
+            None => command.push("--terminal".into()),
+        }
+        command
+    }
+
+    fn open(&self) -> Result<(), String> {
+        if let Some(directory) = &self.directory {
+            if !directory.is_dir() {
+                return Err(format!("{} is not a folder", directory.display()));
+            }
+        }
+        let exe = env::current_exe().map_err(|error| error.to_string())?;
+        let launch = self.command(&exe);
+        #[cfg(target_os = "linux")]
+        let child = spawn_terminal_emulator(
+            &[
+                ("x-terminal-emulator", &["-e"]),
+                ("kgx", &["--"]),
+                ("gnome-terminal", &["--"]),
+                ("konsole", &["-e"]),
+                ("xfce4-terminal", &["-x"]),
+                ("mate-terminal", &["-x"]),
+                ("alacritty", &["-e"]),
+                ("kitty", &["-e"]),
+                ("xterm", &["-e"]),
+            ],
+            &launch,
+            self.directory.as_deref(),
+        )?;
+        #[cfg(target_os = "macos")]
+        let child = Command::new("osascript")
+            .args(["-e", "on run argv\n set commandText to \"cd \" & quoted form of item 2 of argv & \" && exec \" & quoted form of item 1 of argv\n repeat with argumentValue in items 3 thru -1 of argv\n set commandText to commandText & \" \" & quoted form of (contents of argumentValue)\n end repeat\n tell application \"Terminal\"\n activate\n do script commandText\n end tell\n end run"])
+            .arg(&launch[0])
+            .arg(match &self.directory {
+                Some(directory) => directory.clone(),
+                None => env::current_dir().map_err(|error| error.to_string())?,
+            })
+            .args(&launch[1..])
+            .spawn()
+            .map_err(|error| format!("could not start Terminal: {error}"))?;
+        #[cfg(target_os = "windows")]
+        let child = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "start", ""]).args(&launch);
+            command.envs(self.env.iter().map(|(name, value)| (name, value)));
+            if let Some(directory) = &self.directory {
+                command.current_dir(directory);
+            }
+            command
+                .spawn()
+                .map_err(|error| format!("could not start terminal: {error}"))?
+        };
+        std::thread::spawn(move || {
+            let _ = child.wait_with_output();
+        });
+        Ok(())
+    }
+}
+
+/// Opens a terminal for a Ruby `Selenite.terminal` request.
+#[cfg(feature = "scripting")]
+fn launch_terminal_request(
+    mut launch: TerminalLaunch,
+    file: Option<String>,
+    args: Vec<String>,
+    directory: Option<String>,
+) -> Result<(), String> {
+    if let Some(file) = file {
+        launch.file = Some(validate_terminal_file(Path::new(&file))?);
+        launch.args = args.into_iter().map(OsString::from).collect();
+    }
+    launch.directory = directory.map(PathBuf::from);
+    launch.open()
+}
+
 /// Decodes an image file with the `image` crate and uploads it as a raylib
 /// `Texture2D`.
 ///
@@ -6702,6 +7743,42 @@ fn draw_file_badge(d: &mut RaylibDrawHandle<'_>, rect: Rectangle, kind: CellKind
     }
 }
 
+/// Sizes of the scripting console for a window. It takes a fixed share of
+/// the space below the toolbar, so it grows with the window and its text.
+struct ConsoleLayout {
+    text_size: f32,
+    prompt_size: f32,
+    line_height: f32,
+    padding: f32,
+    visible_lines: usize,
+    height: f32,
+}
+
+fn console_layout(screen_width: i32, screen_height: i32, toolbar_height: f32) -> ConsoleLayout {
+    const SCREEN_SHARE: f32 = 0.6;
+    const MIN_LINES: usize = 4;
+
+    let scale = ui::scale(screen_width, screen_height);
+    let text_size = 16.0 * scale;
+    let prompt_size = 18.0 * scale;
+    let line_height = text_size * 1.3;
+    let padding = 10.0 * scale;
+    let available = (screen_height as f32 - toolbar_height).max(0.0);
+    let chrome = prompt_size * 1.6 + padding * 2.0;
+    let rows = |space: f32| ((space - chrome) / line_height).floor().max(0.0) as usize;
+    let visible_lines = rows(available * SCREEN_SHARE)
+        .max(MIN_LINES)
+        .min(rows(available));
+    ConsoleLayout {
+        text_size,
+        prompt_size,
+        line_height,
+        padding,
+        visible_lines,
+        height: (line_height * visible_lines as f32 + chrome).min(available),
+    }
+}
+
 /// Quake-style scripting console overlay: dims the bottom portion of the
 /// screen, shows recent scrollback, and the line currently being typed.
 fn draw_console(
@@ -6713,22 +7790,15 @@ fn draw_console(
     input: &str,
     scroll: usize,
 ) {
-    const MAX_VISIBLE_LINES: usize = 14;
-
-    let scale = ui::scale(screen_width, screen_height);
-    let text_size = 16.0 * scale;
-    let prompt_size = 18.0 * scale;
-    let line_height = text_size * 1.3;
-    let padding = 10.0 * scale;
+    let ConsoleLayout {
+        text_size,
+        prompt_size,
+        line_height,
+        padding,
+        visible_lines,
+        height,
+    } = console_layout(screen_width, screen_height, toolbar_height);
     let width = screen_width as f32;
-
-    let available = screen_height as f32 - toolbar_height;
-    let fitting_lines = ((available - padding * 2.0 - prompt_size * 1.6) / line_height)
-        .floor()
-        .max(0.0) as usize;
-    let visible_lines = MAX_VISIBLE_LINES.min(fitting_lines);
-    let height = (line_height * visible_lines as f32 + prompt_size * 1.6 + padding * 2.0)
-        .min(available.max(0.0));
     let top = screen_height as f32 - height;
     let panel = Rectangle::new(0.0, top, width, height);
     d.draw_rectangle_rec(panel, Color::new(10, 10, 14, 235));
@@ -6938,6 +8008,177 @@ mod tests {
     use super::*;
 
     #[test]
+    fn asset_inventory_multifile_copies_are_grid_local_saved_and_undoable() {
+        let directory = env::temp_dir().join(format!(
+            "selenite-asset-inventory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(directory.join("first")).unwrap();
+        fs::create_dir_all(directory.join("second")).unwrap();
+        let first = directory.join("first/shared.txt");
+        let second = directory.join("second/shared.txt");
+        fs::write(&first, "first asset").unwrap();
+        fs::write(&second, "second asset").unwrap();
+        let path = directory.join("grid.json");
+        let mut app = App::new(Mode::Main, path.clone()).unwrap();
+        app.settings.copy_files = true;
+        let child = lock(&app.root_grid).push_grid(-1, 0);
+        app.grid = Arc::clone(&child);
+        app.open_asset_panel();
+        let target = app.asset_import_target();
+        app.import_dropped_files(&[first.clone(), second.clone()], target.0, target.1, true)
+            .unwrap();
+        assert_eq!(app.downloads.len(), 2);
+        assert_ne!(app.asset_import_target(), target);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.downloads.is_empty() && std::time::Instant::now() < deadline {
+            app.poll_downloads();
+            std::thread::yield_now();
+        }
+        assert!(app.downloads.is_empty(), "asset copies timed out");
+        assert_eq!(
+            lock(&child).stack_len(target.0, target.1),
+            2,
+            "{:?}",
+            app.status
+        );
+        assert_eq!(inventory::grid_assets(&lock(&app.root_grid)).len(), 1);
+        let assets = lock(&child)
+            .items_at(target.0, target.1)
+            .iter()
+            .map(|item| item.path().unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+        assert_ne!(assets[0], assets[1]);
+        let assets_dir = app.asset_directory().unwrap();
+        assert!(assets.iter().all(|asset| asset.starts_with(&assets_dir)));
+        let mut contents = assets
+            .iter()
+            .map(|asset| fs::read_to_string(asset).unwrap())
+            .collect::<Vec<_>>();
+        contents.sort();
+        assert_eq!(contents, vec!["first asset", "second asset"]);
+        let saved = SavedGrid::load(&path)
+            .unwrap()
+            .unwrap()
+            .grid_at(-1, 0)
+            .unwrap();
+        assert_eq!(lock(&saved).stack_len(target.0, target.1), 2);
+        app.undo().unwrap();
+        assert_eq!(lock(&app.grid).stack_len(target.0, target.1), 1);
+        app.redo().unwrap();
+        assert_eq!(lock(&app.grid).stack_len(target.0, target.1), 2);
+        let rows = inventory::grid_assets(&lock(&app.grid));
+        app.apply_asset_action(stack_panel::Action::Remove(0), &rows)
+            .unwrap();
+        assert_eq!(inventory::grid_assets(&lock(&app.grid)).len(), 1);
+        app.undo().unwrap();
+        assert_eq!(inventory::grid_assets(&lock(&app.grid)).len(), 2);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn stack_confirmation_cannot_delete_an_item_shifted_by_an_import() {
+        let path = env::temp_dir().join(format!(
+            "selenite-confirm-import-{}.json",
+            std::process::id()
+        ));
+        let mut app = App::new(Mode::Main, path).unwrap();
+        let child = lock(&app.grid).push_grid(0, 0);
+        lock(&child).push_file(0, 0, PathBuf::from("inside.txt"));
+        app.selected = Some((0, 0));
+        app.open_stack_panel();
+        app.apply_stack_action(stack_panel::Action::Remove(0))
+            .unwrap();
+        lock(&app.grid).push_file(0, 0, PathBuf::from("new-import.txt"));
+        app.apply_stack_action(stack_panel::Action::ConfirmRemove(0))
+            .unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 2);
+        assert!(lock(&app.grid).grid_in(0, 0).is_some());
+        assert_eq!(app.stack_panel.as_ref().unwrap().pending_remove, None);
+    }
+
+    #[test]
+    fn stack_inventory_manages_items_and_preserves_nested_grid_confirmation() {
+        use stack_panel::Action;
+        let path = env::temp_dir().join(format!(
+            "selenite-stack-inventory-{}.json",
+            std::process::id()
+        ));
+        let mut app = App::new(Mode::Main, path.clone()).unwrap();
+        {
+            let mut grid = lock(&app.grid);
+            grid.push_files(0, 0, ["song.mp3", "notes.txt", "picture.png"]);
+        }
+        app.selected = Some((0, 0));
+        app.open_stack_panel();
+        let layout = app.stack_panel_layout(1280, 720);
+        assert!(layout
+            .buttons
+            .iter()
+            .any(|(_, _, _, action)| *action == Action::Remove(2)));
+        app.apply_stack_action(Action::Select(1)).unwrap();
+        assert_eq!(lock(&app.grid).file_at(0, 0), Some(Path::new("notes.txt")));
+        assert_eq!(
+            lock(&app.grid).items_at(0, 0)[1].path(),
+            Some(Path::new("song.mp3"))
+        );
+        app.apply_stack_action(Action::Extract(1)).unwrap();
+        assert_eq!(lock(&app.grid).file_at(1, 0), Some(Path::new("song.mp3")));
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 2);
+        app.undo().unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 3);
+        assert!(!lock(&app.grid).occupied(1, 0));
+        app.apply_stack_action(Action::Remove(1)).unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 2);
+        assert_eq!(SavedGrid::load(&path).unwrap().unwrap().stack_len(0, 0), 2);
+        app.undo().unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 3);
+        let nested = lock(&app.grid).push_grid(0, 0);
+        lock(&nested).push_file(0, 0, PathBuf::from("inside.txt"));
+        app.apply_stack_action(Action::Remove(0)).unwrap();
+        assert_eq!(app.stack_panel.as_ref().unwrap().pending_remove, Some(0));
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 4);
+        app.apply_stack_action(Action::Select(1)).unwrap();
+        assert_eq!(lock(&app.grid).kind_at(0, 0), Some(CellKind::Grid));
+        app.apply_stack_action(Action::CancelRemove).unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 4);
+        app.apply_stack_action(Action::Remove(0)).unwrap();
+        app.apply_stack_action(Action::ConfirmRemove(0)).unwrap();
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 3);
+        app.undo().unwrap();
+        assert_eq!(lock(&app.grid).kind_at(0, 0), Some(CellKind::Grid));
+        app.apply_stack_action(Action::Unstack).unwrap();
+        assert!(app.stack_panel.is_none());
+        assert_eq!(lock(&app.grid).stack_len(0, 0), 1);
+        assert_eq!(lock(&app.grid).len(), 4);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn nonvisual_items_keep_labels_when_labels_are_disabled() {
+        let path = env::temp_dir().join(format!(
+            "selenite-required-labels-{}.json",
+            std::process::id()
+        ));
+        let mut app = App::new(Mode::Main, path).unwrap();
+        app.settings.labels = false;
+        for (col, name) in [(0, "song.mp3"), (1, "notes.txt"), (2, "image.png")] {
+            let mut grid = lock(&app.grid);
+            grid.push_file(col, 0, PathBuf::from(name));
+            grid.toggle_labels_at(col, 0);
+            drop(grid);
+            assert!(app.item_labels(col, 0));
+        }
+        lock(&app.grid).push_grid(3, 0);
+        assert!(!app.item_labels(3, 0));
+        assert!(!app.item_labels(4, 0));
+    }
+
+    #[test]
     fn implicit_child_grid_activation_saves_and_supports_undo_redo() {
         let path = env::temp_dir().join(format!(
             "selenite-dimensional-navigation-{}-{}.json",
@@ -7123,13 +8364,24 @@ mod tests {
                 MenuItem::Open,
                 MenuItem::Paste,
                 MenuItem::NewGrid,
+                MenuItem::NewNote,
                 MenuItem::GridFolder,
+                MenuItem::GridTerminal,
+                MenuItem::GridNotes,
                 MenuItem::Items
             ]
         );
         let nested = MenuItem::for_cell(Some(CellKind::Grid), 1, false);
         assert!(nested.contains(&MenuItem::Open));
         assert!(nested.contains(&MenuItem::NestedGridFolder));
+        assert!(nested.contains(&MenuItem::NestedGridNotes));
+        assert!(!nested.contains(&MenuItem::EditText));
+        for kind in [CellKind::File, CellKind::RubyScript] {
+            assert!(MenuItem::for_cell(Some(kind), 1, false).contains(&MenuItem::EditText));
+        }
+        for kind in [CellKind::Image, CellKind::Audio, CellKind::Video] {
+            assert!(!MenuItem::for_cell(Some(kind), 1, false).contains(&MenuItem::EditText));
+        }
         assert!(!MenuItem::for_cell(Some(CellKind::Image), 1, false)
             .contains(&MenuItem::NestedGridFolder));
         let audio = MenuItem::for_cell(Some(CellKind::Audio), 1, false);
@@ -7157,6 +8409,10 @@ mod tests {
         let script = MenuItem::for_cell(Some(CellKind::RubyScript), 1, false);
         assert!(script.contains(&MenuItem::RunGame));
         assert!(script.contains(&MenuItem::ExportGame));
+        assert!(script.contains(&MenuItem::RunTerminal));
+        assert!(MenuItem::for_cell(Some(CellKind::File), 1, false).contains(&MenuItem::RunTerminal));
+        assert!(!stacked.contains(&MenuItem::RunTerminal));
+        assert!(!nested.contains(&MenuItem::RunTerminal));
         assert!(!stacked.contains(&MenuItem::RunGame));
 
         let mut items = MenuItem::for_cell(Some(CellKind::Image), 1, false);
@@ -7174,6 +8430,33 @@ mod tests {
         assert_eq!(rows.len(), menu.items.len());
         assert!(frame.x + frame.width <= 800.0 && frame.y + frame.height <= 600.0);
         assert!(rows[0].y > frame.y, "first row sits below the header");
+    }
+
+    #[test]
+    fn console_scales_with_the_window_and_always_fits() {
+        let small = console_layout(960, 720, 60.0);
+        let maximized = console_layout(3840, 2160, 120.0);
+        assert!(maximized.text_size > small.text_size * 2.9);
+        assert!(maximized.line_height > small.line_height * 2.9);
+        let share = |layout: &ConsoleLayout, window_height: f32| layout.height / window_height;
+        assert!(
+            (share(&small, 660.0) - share(&maximized, 2040.0)).abs() < 0.08,
+            "the same share of the window at any size"
+        );
+        assert!(small.visible_lines >= 10, "{}", small.visible_lines);
+        for (width, height, toolbar) in [
+            (480, 320, 40.0),
+            (320, 240, 300.0),
+            (100, 50, 0.0),
+            (7680, 4320, 200.0),
+            (960, 720, 5000.0),
+            (1, 1, 0.0),
+        ] {
+            let layout = console_layout(width, height, toolbar);
+            let available = (height as f32 - toolbar).max(0.0);
+            assert!(layout.height <= available + 0.01, "{width}x{height}");
+            assert!(layout.height >= 0.0 && layout.visible_lines <= 1000);
+        }
     }
 
     #[test]
@@ -7204,6 +8487,75 @@ mod tests {
         assert_eq!(rects[0].y, 10.0);
         assert_eq!(height, 60.0);
         assert_eq!(wrap_toolbar_items(&[], 100.0, 40.0, 10.0, 5.0).1, 0.0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_shebang_lines_like_the_kernel() {
+        assert_eq!(
+            parse_shebang(b"#!/usr/bin/env python3\nprint()"),
+            Some(("/usr/bin/env".into(), Some("python3".into())))
+        );
+        assert_eq!(
+            parse_shebang(b"#! /bin/sh -e -u\r\n"),
+            Some(("/bin/sh".into(), Some("-e -u".into())))
+        );
+        assert_eq!(
+            parse_shebang(b"#!/bin/bash"),
+            Some(("/bin/bash".into(), None))
+        );
+        assert_eq!(parse_shebang(b"echo hi"), None);
+        assert_eq!(parse_shebang(b"#!\n"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_emulator_receives_executable_and_falls_back() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = env::temp_dir().join(format!("selenite-terminal-{}", process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let emulator = directory.join("terminal emulator");
+        fs::write(
+            &emulator,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nprintf '%s\\n' \"$PWD\" > \"$0.cwd\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&emulator, fs::Permissions::from_mode(0o700)).unwrap();
+        let launch = TerminalLaunch {
+            file: Some("/a path/command.sh".into()),
+            args: vec!["two words".into(), "--flag".into()],
+            env: vec![("SELENITE_GRID", "/a path/save.json".into())],
+            ..TerminalLaunch::default()
+        }
+        .command(Path::new("/a path/selenite"));
+        let child = spawn_terminal_emulator(
+            &[
+                ("/no-such-selenite-terminal", &["-e"]),
+                (emulator.to_str().unwrap(), &["-e"]),
+            ],
+            &launch,
+            Some(&directory),
+        )
+        .unwrap();
+        assert!(child.wait_with_output().unwrap().status.success());
+        assert_eq!(
+            fs::read_to_string(directory.join("terminal emulator.args")).unwrap(),
+            "-e\nenv\nSELENITE_GRID=/a path/save.json\n/a path/selenite\n--terminal-run\n/a path/command.sh\ntwo words\n--flag\n"
+        );
+        assert_eq!(
+            fs::read_to_string(directory.join("terminal emulator.cwd"))
+                .unwrap()
+                .trim(),
+            directory.to_str().unwrap()
+        );
+        assert!(spawn_terminal_emulator(
+            &[("/no-such-selenite-terminal", &[])],
+            &["--terminal".into()],
+            None
+        )
+        .is_err());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -7260,6 +8612,11 @@ mod tests {
             StartupMode::Compile("game.rb".into(), "build/game.rbc".into(), true)
         );
         assert!(parse(&["--compile", "game.rb", "extra"]).is_err());
+        assert_eq!(
+            parse(&["--edit", "notes.md"]).unwrap(),
+            StartupMode::Edit("notes.md".into())
+        );
+        assert!(parse(&["--edit"]).is_err());
         assert_eq!(
             parse(&["--list-profiles"]).unwrap(),
             StartupMode::ListProfiles

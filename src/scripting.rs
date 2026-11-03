@@ -56,11 +56,21 @@ pub enum AppRequest {
     Redo,
     /// Opens the Find bar with this query and jumps to the first match.
     Find(String),
+    StackItems(i64, i64),
+    AssetInventory,
     /// Shows or hides cell labels.
     Labels(bool),
     Music(MusicCommand),
     CopyText(String),
     ReloadPlugins,
+    /// Open a file in the text editor window.
+    Edit(String),
+    /// Open a terminal window, optionally running `file` with `args` or starting in `directory`.
+    Terminal {
+        file: Option<String>,
+        args: Vec<String>,
+        directory: Option<String>,
+    },
 }
 
 /// A music-player command queued from Ruby (`Selenite.music.*`).
@@ -529,6 +539,8 @@ fn register_api(ruby: &Ruby) -> Result<(), Error> {
     module.define_singleton_method("redo", function!(app_redo, 0))?;
     module.define_singleton_method("history", function!(sel_history, 0))?;
     module.define_singleton_method("find", function!(app_find, 1))?;
+    module.define_singleton_method("__stack_items", function!(app_stack_items, 2))?;
+    module.define_singleton_method("asset_inventory", function!(app_asset_inventory, 0))?;
     module.define_singleton_method("search", function!(sel_search, 1))?;
     module.define_singleton_method("__download", function!(app_download, 4))?;
     module.define_singleton_method("selection", function!(sel_selection, 0))?;
@@ -541,6 +553,8 @@ fn register_api(ruby: &Ruby) -> Result<(), Error> {
     module.define_singleton_method("labels?", function!(sel_labels, 0))?;
     module.define_singleton_method("copy_text", function!(app_copy_text, 1))?;
     module.define_singleton_method("reload_plugins", function!(app_reload_plugins, 0))?;
+    module.define_singleton_method("__terminal", function!(app_terminal, 3))?;
+    module.define_singleton_method("edit", function!(app_edit, 1))?;
     module.define_singleton_method("file_info", function!(sel_file_info, 1))?;
     module.define_singleton_method("image_size", function!(sel_image_size, 1))?;
     module.define_singleton_method("checksum", function!(sel_checksum, 1))?;
@@ -573,6 +587,7 @@ fn register_api(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("__pop", method!(RbGrid::pop, 3))?;
     class.define_method("cycle", method!(RbGrid::cycle, 3))?;
     class.define_method("raise_item", method!(RbGrid::raise, 3))?;
+    class.define_method("extract_item", method!(RbGrid::extract_item, 3))?;
     class.define_method("merge", method!(RbGrid::merge, 4))?;
     class.define_method("unstack", method!(RbGrid::unstack, 2))?;
     class.define_method("stack_size", method!(RbGrid::stack_size, 2))?;
@@ -794,6 +809,10 @@ impl RbGrid {
 
     fn raise(&self, col: i64, row: i64, index: usize) -> bool {
         lock_grid(&self.0).raise_item(col, row, index)
+    }
+
+    fn extract_item(&self, col: i64, row: i64, index: usize) -> Option<(i64, i64)> {
+        lock_grid(&self.0).extract_item(col, row, index)
     }
 
     fn merge(&self, col: i64, row: i64, to_col: i64, to_row: i64) -> usize {
@@ -1153,6 +1172,15 @@ fn app_find(query: String) {
     push_request(AppRequest::Find(query));
 }
 
+fn app_stack_items(col: i64, row: i64) {
+    push_request(AppRequest::StackItems(col, row));
+}
+
+fn app_asset_inventory() -> bool {
+    push_request(AppRequest::AssetInventory);
+    true
+}
+
 fn app_labels(on: bool) {
     push_request(AppRequest::Labels(on));
 }
@@ -1167,6 +1195,20 @@ fn app_copy_text(text: String) {
 
 fn app_reload_plugins() {
     push_request(AppRequest::ReloadPlugins);
+}
+
+fn app_edit(path: String) -> bool {
+    push_request(AppRequest::Edit(path));
+    true
+}
+
+fn app_terminal(file: Option<String>, args: Vec<String>, directory: Option<String>) -> bool {
+    push_request(AppRequest::Terminal {
+        file,
+        args,
+        directory,
+    });
+    true
 }
 
 fn app_music(command: String, arg: Option<String>) -> Result<bool, Error> {
@@ -1381,6 +1423,52 @@ mod tests {
             Arc::clone(&grid),
             save_path.clone(),
         ));
+
+        assert_eq!(engine.eval("def selenite_factorial(n); n <= 1 ? 1 : n * selenite_factorial(n - 1); end; selenite_factorial(10)"), "3628800");
+        assert_eq!(engine.eval("counter = 0; tape = Hash.new(0); while counter < 100; tape[counter] = counter * counter; counter += 1; end; tape[99]"), "9801");
+        assert_eq!(engine.eval("Selenite.stack_items(12, 34)"), "true");
+        assert_eq!(
+            engine.drain_requests(),
+            vec![AppRequest::StackItems(12, 34)]
+        );
+        assert_eq!(engine.eval("Selenite.stack_items"), "false");
+        assert!(engine.drain_requests().is_empty());
+        assert_eq!(engine.eval("Selenite.asset_inventory"), "true");
+        assert_eq!(engine.drain_requests(), vec![AppRequest::AssetInventory]);
+        assert_eq!(
+            engine.eval("Selenite.terminal('run.sh', 1, 'two words', dir: '/tmp')"),
+            "true"
+        );
+        assert_eq!(engine.eval("Selenite.terminal"), "true");
+        assert_eq!(engine.eval("Selenite.edit('notes.md')"), "true");
+        assert_eq!(
+            engine.drain_requests(),
+            vec![
+                AppRequest::Terminal {
+                    file: Some("run.sh".to_owned()),
+                    args: vec!["1".to_owned(), "two words".to_owned()],
+                    directory: Some("/tmp".to_owned()),
+                },
+                AppRequest::Terminal {
+                    file: None,
+                    args: Vec::new(),
+                    directory: None,
+                },
+                AppRequest::Edit("notes.md".to_owned()),
+            ]
+        );
+        assert_eq!(engine.eval("g = Selenite.grid; g.push(20, 0, 'one.txt'); g.push(20, 0, 'two.txt'); g.extract_item(20, 0, 1)"), "[21, 0]");
+        assert_eq!(engine.eval("Selenite.grid.extract_item(20, 0, 99)"), "nil");
+        assert_eq!(engine.eval("Selenite.grid.stack_size(20, 0)"), "1");
+        assert_eq!(engine.eval("Selenite.assets.size"), "2");
+        assert_eq!(
+            engine.eval("Selenite.grid.assets.map(&:path).sort"),
+            "[\"one.txt\", \"two.txt\"]"
+        );
+        assert_eq!(
+            engine.eval("Selenite.grid.remove(20, 0); Selenite.grid.remove(21, 0)"),
+            "true"
+        );
 
         assert_eq!(engine.eval("grid_set(0, 0, \"cat.png\")"), "true");
         assert_eq!(engine.eval("grid_new_grid(1, 0)"), "true");

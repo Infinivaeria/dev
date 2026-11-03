@@ -72,6 +72,18 @@ module Selenite
       __download(url.to_s, Integer(col), Integer(row), stack ? true : false)
     end
 
+    def stack_items(col = nil, row = nil)
+      if col.nil? && row.nil?
+        cell = selected
+        return false unless cell
+        col, row = cell
+      elsif col.nil? || row.nil?
+        raise ArgumentError, "provide both col and row"
+      end
+      __stack_items(Integer(col), Integer(row))
+      true
+    end
+
     # Replace the multi-selection; the first cell becomes the primary one.
     def select_cells(cells)
       list = Array(cells).map { |c| c.respond_to?(:col) ? [c.col, c.row] : [Integer(c[0]), Integer(c[1])] }
@@ -84,6 +96,10 @@ module Selenite
       grid.inventory
     end
 
+    def assets
+      grid.assets
+    end
+
     # The built-in music player (see Selenite::Music).
     def music
       Music
@@ -91,6 +107,11 @@ module Selenite
 
     def labels(on = true)
       __labels(on ? true : false)
+    end
+
+    # Opens a terminal window; `file` (a shell, Ruby, Python or JS script) runs with `args`.
+    def terminal(file = nil, *args, dir: nil)
+      __terminal(file&.to_s, args.map(&:to_s), dir&.to_s)
     end
 
     # Define a plugin; see docs/plugins.md.
@@ -141,6 +162,10 @@ module Selenite
           g.items(c, r) => [Cell, ...]   g.stack_size(c, r)   g.item_count
           g.push(c, r, path), g.push_grid(c, r), g.pop(c, r, index = 0)
           g.cycle(c, r, +1|-1), g.raise_item(c, r, i), g.merge(c1, r1, c2, r2), g.unstack(c, r)
+          g.extract_item(c, r, i) => [new_col, row] or nil; moves only that item into a free cell
+          Selenite.stack_items(c = selected_col, r = selected_row)   open the stack manager
+          Selenite.asset_inventory   open this grid's live asset manager in the organizer
+          g.assets / Selenite.assets => [Cell, ...]   all items in this grid, including stacks
           Selenite.download(url, c, r, stack: true)
         Inventory  (inv = g.inventory or Selenite.inventory; persisted per grid)
           inv.add(name, n = 1), inv.remove(name, n = 1), inv[name], inv[name] = n
@@ -148,6 +173,8 @@ module Selenite
           inv.meta(name), inv.set_meta(name, key, value), inv.to_h, inv.each { |name, count, meta| }
           inv.transfer(other_grid_or_inventory, name, n), inv.total, inv.size
           Selenite.copy_text(str)              put text on the clipboard
+          Selenite.terminal(file = nil, *args, dir: nil)   open a terminal; file runs with args
+          Selenite.edit(path)                  open a file in the text editor (Ruby/Markdown aware)
           Selenite.profile, profiles, create_profile(n), switch_profile(n)
           Selenite.on(:activate|:paste|:drop|:download|:save|:profile|:track|:inventory) { |*args| }
         Rust helpers
@@ -538,6 +565,10 @@ module Selenite
       items_raw(col, row).map { |kind, path| Cell.new(col, row, kind, path) }
     end
     alias stack items
+
+    def assets
+      cells.flat_map { |cell| items(cell.col, cell.row) }
+    end
 
     # Removes and returns the item at `index` (0 = top) as a Cell.
     def pop(col, row, index = 0)

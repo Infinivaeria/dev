@@ -8,6 +8,68 @@ use crate::{
     VIEWER_BACKGROUND, VIEWER_TEXT, WHITE, WINDOW_HEIGHT, WINDOW_WIDTH,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssetRow {
+    pub cell: (i64, i64),
+    pub index: usize,
+    pub name: String,
+}
+
+pub fn grid_assets(grid: &crate::persistence::SavedGrid) -> Vec<AssetRow> {
+    let mut rows = grid
+        .stacks()
+        .flat_map(|(cell, items)| {
+            items.iter().enumerate().map(move |(index, item)| AssetRow {
+                cell,
+                index,
+                name: format!(
+                    "{} ({},{}, item {})",
+                    item.label(),
+                    cell.0,
+                    cell.1,
+                    index + 1
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|asset| (asset.cell.1, asset.cell.0, asset.index));
+    rows
+}
+
+pub struct AssetPanel {
+    pub controls: crate::stack_panel::Panel,
+}
+
+impl AssetPanel {
+    pub fn new() -> Self {
+        Self {
+            controls: crate::stack_panel::Panel {
+                cell: (0, 0),
+                scroll: 0,
+                pending_remove: None,
+                query: String::new(),
+                focused: Some(0),
+            },
+        }
+    }
+
+    pub fn layout(
+        &self,
+        rows: &[AssetRow],
+        width: i32,
+        height: i32,
+        title: &str,
+    ) -> crate::stack_panel::Layout {
+        let names = rows
+            .iter()
+            .map(|asset| asset.name.clone())
+            .collect::<Vec<_>>();
+        let mut layout = self.controls.layout(&names, width, height);
+        layout.set_title(format!("Asset Inventory - {title} - {} items", rows.len()));
+        layout
+    }
+}
+
 /// Window-scaled layout metrics for the inventory list.
 struct Metrics {
     scale: f32,
@@ -93,6 +155,9 @@ impl InventoryApp {
             .resizable()
             .build();
         rl.set_target_fps(60);
+        rl.set_window_min_size(480, 320);
+        ui::fit_window_to_display(&mut rl, WINDOW_WIDTH, WINDOW_HEIGHT);
+        ui::set_user_scale(crate::settings::saved_ui_scale());
         ui::load_font(&thread);
         let mut renderer = crate::rendering::Renderer::default();
 
@@ -113,7 +178,9 @@ impl InventoryApp {
     }
 
     fn update(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
-        ui::handle_scale_keys(rl);
+        if let Some(scale) = ui::handle_scale_keys(rl) {
+            let _ = crate::settings::save_ui_scale(scale);
+        }
         let m = Metrics::new(rl.get_screen_width(), rl.get_screen_height());
         let screen_height = rl.get_screen_height() as f32;
         let content_height = self.items.len() as f32 * m.row_height;
@@ -417,5 +484,35 @@ impl InventoryApp {
         } else {
             open_with_system(path)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::SavedGrid;
+
+    #[test]
+    fn asset_inventory_lists_each_stack_item_only_in_its_own_grid() {
+        let mut grid = SavedGrid::new();
+        grid.push_files(4, 2, ["song.mp3", "cover.png", "notes.txt"]);
+        let child = grid.push_grid(0, 0);
+        child
+            .lock()
+            .unwrap()
+            .push_files(0, 0, ["child-one.txt", "child-two.txt"]);
+        let assets = grid_assets(&grid);
+        assert_eq!(assets.len(), 4);
+        assert_eq!(assets[1].cell, (4, 2));
+        assert_eq!(assets[1].index, 0);
+        assert_eq!(assets[3].index, 2);
+        assert!(!assets.iter().any(|asset| asset.name.contains("child-one")));
+        assert_eq!(grid_assets(&child.lock().unwrap()).len(), 2);
+        let panel = AssetPanel::new();
+        let layout = panel.layout(&assets, 640, 480, "root");
+        assert!(layout
+            .buttons
+            .iter()
+            .any(|(_, _, _, action)| *action == crate::stack_panel::Action::Remove(3)));
     }
 }

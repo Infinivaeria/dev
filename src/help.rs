@@ -11,7 +11,8 @@ export back into the grid you're viewing. Cells that are already occupied are le
 pub const LABELS_TIP: &str = "Labels: show or hide coordinates, file names and type badges \
 (Image, Audio, Video, etc.) in 2D and 3D (L). Right-click an item to hide or show its labels \
 individually; this choice is saved. In stacks, Tab selects the next item. The selected cell \
-keeps its coordinates. Labels: Off hides all item labels without resetting individual choices.";
+keeps its coordinates. Files without a visible thumbnail (including music) always keep their \
+labels so they cannot disappear. Labels: Off does not reset individual choices.";
 pub const COPY_FILES_TIP: &str =
     "Copy In: when on, files dropped or pasted onto a grid are copied \
 into that grid's own assets/ folder in the background (any size, with progress, Esc cancels), so \
@@ -28,6 +29,177 @@ pub const VERSION_LABEL: &str = concat!("Selenite v", env!("CARGO_PKG_VERSION"))
 /// `(heading, [(keys / button, description)])`
 pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     (
+        "Keyboard: General",
+        &[
+            ("F1", "Open Help from the grid; F1 or Esc closes Help. Modal panels capture their own keys."),
+            ("Ctrl+= / Ctrl+- / Ctrl+0", "Increase, decrease or reset interface text and button scale. Keypad +, - and 0 work too; scaling remains available in panels. The zoom is remembered between launches, and windows also scale with their size when maximized."),
+            ("Ctrl / Super; Shift", "Grid command shortcuts accept left/right Ctrl or Super (Windows/Command). Text scaling, Ruby console paste/clear and image-viewer zoom modifiers use Ctrl. Either Shift key works."),
+            ("Text entry / Backspace", "Type into an active search or input field; Backspace deletes the last character. Context-specific bindings below replace normal grid commands."),
+            ("Games and custom plugins", "Game windows and plugin scripts may define additional controls. Those bindings belong to the running game/plugin; the sections below list Selenite's built-in shortcuts and assignable plugin keys."),
+        ],
+    ),
+    (
+        "Keyboard: Grid",
+        &[
+            ("Arrow keys", "Move the selected cell, repeating while held, and keep it visible. With no selection, select (0,0)."),
+            ("Enter / Keypad Enter", "Open/run the selected file or enter its child grid. Empty cells create a child grid on demand."),
+            ("Backspace", "Return to the parent nested grid when no text field or modal panel is active."),
+            ("Home", "Reset the grid view and 3D camera to the origin."),
+            ("Z", "In 2D, fit the multi-selection; otherwise fit every occupied cell."),
+            ("F3", "Switch between 2D and 3D views."),
+            ("I / M", "Toggle cell information / the minimap."),
+            ("L", "Toggle labels. Items without visible thumbnails still retain identifying labels."),
+            ("B", "Open the current grid's named game-item inventory, separate from Stack Items."),
+            ("O", "Open the current grid's folder in the file manager."),
+            ("Ctrl+S", "Save the current profile/grid."),
+            ("Ctrl+Z", "Undo the last grid edit."),
+            ("Ctrl+Y / Ctrl+Shift+Z", "Redo the last undone grid edit."),
+            ("Ctrl+C / Ctrl+X", "Copy selected files / cut the selected cells and copy their files."),
+            ("Ctrl+V", "Paste clipboard files, image, paths or URLs at the selected cell."),
+            ("Ctrl+Shift+V", "Add clipboard items to the selected cell's stack."),
+            ("Ctrl+A", "Select every occupied cell in the current grid."),
+            ("Ctrl+F", "Open or close Find for this profile's grid hierarchy."),
+            ("Tab / Shift+Tab", "Bring the next / previous item of the selected stack to the top."),
+            ("Delete", "Remove selected cells and their stacks; non-empty child grids require confirmation."),
+            ("Shift+Delete", "Remove only the top item of the selected stack; a single item uses normal deletion."),
+            ("Esc", "Cancel active downloads; otherwise clear the selection. If a menu or modal is active, cancel/close that instead."),
+            ("` (Backtick)", "Toggle the Ruby console when another modal panel is not active."),
+        ],
+    ),
+    (
+        "Keyboard: 3D Camera",
+        &[
+            ("Q / E", "Rotate the camera left / right in 15-degree steps; repeats while held."),
+            ("PageUp / PageDown", "Tilt the camera up / down; repeats while held."),
+            ("W / A / S / D", "Move the camera across the ground while held, outside text-entry mode."),
+            ("Shift + drag", "Pan the 3D camera rather than rotating it. Right/middle drag also pans."),
+            ("Arrow keys / Home / F3", "Grid selection follows the camera; Home resets it; F3 returns to 2D."),
+        ],
+    ),
+    (
+        "Keyboard: Find",
+        &[
+            ("Text / Backspace", "Edit the search query; names, paths and item kinds are searched across nested grids."),
+            ("Ctrl+V", "Paste clipboard text into the query."),
+            ("Enter / Keypad Enter / Down", "Visit the next search match."),
+            ("Shift+Enter / Shift+Keypad Enter / Up", "Visit the previous search match."),
+            ("Esc / Ctrl+F", "Close Find."),
+        ],
+    ),
+    (
+        "Keyboard: Stack Items",
+        &[
+            ("Text / Backspace", "Filter item names case-insensitively / edit the filter."),
+            ("Up / Down", "Focus the previous / next matching item and scroll it into view."),
+            ("Home / End", "Focus the first / last matching item."),
+            ("Enter", "Open the focused item. During nested-grid removal confirmation, confirm removal instead."),
+            ("Delete", "Remove the focused item; non-empty nested grids require confirmation."),
+            ("Ctrl+V / Ctrl+Shift+V", "Paste clipboard items into this cell's stack."),
+            ("Ctrl+Z", "Undo without closing the panel; cancels any pending removal prompt."),
+            ("Ctrl+Y / Ctrl+Shift+Z", "Redo without closing the panel; cancels any pending removal prompt."),
+            ("Esc", "Cancel a removal prompt; otherwise clear the filter; if already clear, close the panel."),
+        ],
+    ),
+    (
+        "Keyboard: Asset Inventory",
+        &[
+            ("Text / Backspace", "Search this grid's asset names and coordinates / edit the query."),
+            ("Up / Down / Home / End", "Focus the previous, next, first or last matching asset."),
+            ("Enter / Delete", "Open / remove the focused asset. Non-empty child-grid removal opens a confirmation prompt."),
+            ("Ctrl+V / Ctrl+Shift+V", "Add clipboard items to the focused cell's stack, or a new asset cell when no row is focused."),
+            ("Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z", "Undo / redo without closing the inventory."),
+            ("Esc", "Cancel active transfers; otherwise clear the query; otherwise close the inventory."),
+            ("F1", "Open Help without closing the inventory."),
+        ],
+    ),
+    (
+        "Keyboard: Game-Item Inventory",
+        &[
+            ("Text / Backspace", "Edit the inventory command: name, name x5, name = 5, old -> new or name @key=value."),
+            ("Enter / Keypad Enter", "Apply the typed inventory command."),
+            ("Ctrl+Z", "Undo the last edit and reset the inventory panel's input/selection."),
+            ("Esc", "Close the inventory panel. Other quantity, selection and deletion controls are mouse buttons."),
+        ],
+    ),
+    (
+        "Keyboard: Music",
+        &[
+            ("Space", "Toggle play/pause; when idle, start this grid's audio playlist."),
+            ("P", "Show/hide the music playlist."),
+            ("[ / ]", "Play the previous / next track."),
+            (", / .", "Seek backward / forward five seconds; repeats while held."),
+            ("9 / 0", "Decrease / increase volume by five percentage points; repeats while held. Ctrl+0 resets UI scale instead."),
+        ],
+    ),
+    (
+        "Keyboard: Ruby Console",
+        &[
+            ("Text / Backspace", "Edit the Ruby expression."),
+            ("Enter / Keypad Enter", "Evaluate the expression."),
+            ("Up / Down", "Recall older / newer submitted commands; Down past the newest clears input."),
+            ("Ctrl+V", "Paste text; non-empty lines are joined with semicolons."),
+            ("Ctrl+U", "Clear the current input."),
+            ("Ctrl+L", "Clear console output and reset its scroll position."),
+            ("PageUp / PageDown", "Scroll console output up / down one page."),
+            ("Esc / ` (Backtick)", "Close the console."),
+        ],
+    ),
+    (
+        "Keyboard: Profiles",
+        &[
+            ("N", "Start creating a profile when no input or deletion prompt is active."),
+            ("Text / Backspace", "Edit the profile name during creation or rename."),
+            ("Enter / Keypad Enter", "Submit a create/rename name."),
+            ("Esc", "Cancel create/rename input; otherwise close the profile panel."),
+            ("Enter / Y", "Confirm profile deletion while its confirmation prompt is active."),
+            ("Esc / N", "Cancel profile deletion while its confirmation prompt is active."),
+        ],
+    ),
+    (
+        "Keyboard: Menus and Plugins",
+        &[
+            ("Esc", "Close the cell context menu or Plugins panel."),
+            ("Up / Down", "Scroll the Plugins panel; repeats while held. Cell-menu actions are selected with the mouse."),
+            ("F2, F4, F5, F6, F7, F8, F9, F10, F11, F12", "Run enabled plugin actions assigned to these keys from the grid. F1 and F3 are reserved. Unassigned keys have no action; plugin behavior depends on installed plugins."),
+        ],
+    ),
+    (
+        "Keyboard: Grid Deletion Prompt",
+        &[
+            ("Enter / Y", "Confirm deletion of the selected non-empty child grids."),
+            ("Esc / N", "Cancel deletion."),
+        ],
+    ),
+    (
+        "Keyboard: Image Viewer",
+        &[
+            ("= / + / Keypad +", "Zoom in around the window center without Ctrl."),
+            ("- / Keypad -", "Zoom out around the window center without Ctrl."),
+            ("R / 1", "Reset pan and zoom to 100 percent (one image pixel per screen pixel)."),
+            ("F", "Fit the image to the window."),
+            ("Ctrl+= / Ctrl+- / Ctrl+0", "Adjust/reset interface scale; keypad equivalents work too."),
+            ("Esc", "Close the image viewer."),
+        ],
+    ),
+    (
+        "Keyboard: File List Window",
+        &[
+            ("Up / Down", "Select the previous / next list item. Keyboard selection does not automatically scroll the list."),
+            ("Enter", "Open the selected file using its viewer or system association."),
+            ("Ctrl+= / Ctrl+- / Ctrl+0", "Adjust/reset interface scale; keypad equivalents work too."),
+            ("Esc", "Close this window. Refresh and scrolling use the mouse; the organizer's editing shortcuts do not apply."),
+        ],
+    ),
+    (
+        "Keyboard: Help",
+        &[
+            ("Up / Down", "Scroll this reference; repeats while held."),
+            ("PageUp / PageDown", "Scroll almost one page up / down."),
+            ("Home / End", "Jump to the beginning / end."),
+            ("F1 / Esc", "Close Help."),
+        ],
+    ),
+    (
         "Toolbar buttons",
         &[
             ("Profile: NAME", "Switch, create, rename or delete local profiles. Each profile has its own separate set of grids, assets and PA exports."),
@@ -40,10 +212,14 @@ pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("PA Export", PA_EXPORT_TIP),
             ("PA Import", PA_IMPORT_TIP),
             ("Inventory", "Open a list window of every file across all nested grids."),
+            ("Asset Inventory", "Live asset management for the current grid. Drop multiple files on a row to add to that cell's stack, or on blank panel space to create a new stacked asset cell. Search, open, promote, extract, remove, paste and unstack; transfers show progress and changes save with undo/redo."),
+            ("Stack Items", "Search this cell's files and grids. Arrows/Home/End focus; Enter opens; Delete removes; Ctrl+V stacks clipboard items; Ctrl+Z/Ctrl+Y undo/redo. Row controls bring to top, open, extract into a free cell or remove. Non-empty nested grids require confirmation."),
             ("Grid Folder", "Open this grid's own folder in your file manager (O). Each grid gets a folder the first time it is used; files dropped or pasted onto the grid are copied into its assets/ subfolder, as are pasted images and URL downloads. Right-click a nested grid -> Open its grid folder."),
             ("Undo / Redo", "Step back or forward through edits: paste, drop, move, delete, new grid, downloads and Ruby changes (Ctrl+Z / Ctrl+Y). Keeps the last 200 steps per session."),
             ("Find", "Search every grid of this profile by file name, path or kind (image, audio, video, ruby, file, grid). Enter/Down = next, Shift+Enter/Up = previous, Esc closes (Ctrl+F)."),
             ("Ruby", "Toggle the embedded Ruby console (same as the ` key)."),
+            ("Terminal", "Open a separate system terminal running your shell."),
+            ("Notes", "Edit this grid's Markdown notes (notes.md in its grid folder) in the text editor, which highlights Ruby and previews Markdown. Also: right-click a cell for Edit text, New note here, or Grid notes; Enter on a .md or .txt cell opens it too."),
             ("Home", "Reset pan/zoom and the 3D camera to the origin (same as the Home key)."),
             ("3D View / 2D View", VIEW_3D_TIP),
             ("Labels: On / Off", LABELS_TIP),
@@ -56,44 +232,21 @@ pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Mouse & keyboard",
+        "Mouse and Modifiers",
         &[
             ("Click / double-click", "Select a cell / open it."),
-            ("Right-click a cell", "Context menu: open, run as game / export standalone game (Ruby), add to playlist (audio), stack actions, info, copy file or path, show in folder, paste, new grid, grid inventory, delete, plus any plugin menu entries (marked »)."),
+            ("Right-click a cell", "Context menu: open, run file or Ruby commands in a terminal, open a terminal in the grid folder, run as game / export standalone game (Ruby), add to playlist (audio), stack actions, info, copy file or path, show in folder, paste, new grid, grid inventory, delete, plus any plugin menu entries (marked »)."),
             ("Drag a cell", "Move (or swap) its contents to another cell."),
             ("Middle drag, wheel", "Pan and zoom the grid."),
-            ("Home", "Reset pan and zoom."),
-            ("F3", "Toggle the 3D view."),
-            ("3D: left-drag / Q, E / PgUp, PgDn", "Rotate around the grid, turn 15°, tilt."),
+            ("3D: left-drag", "Rotate around the grid."),
             ("3D: right or middle drag, Shift+drag", "Pan across the grid. Wheel zooms; arrow keys glide the camera to the selection."),
-            ("3D: W A S D", "Fly across the grid. Right-click without dragging opens the cell menu."),
-            ("Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)", "Undo / redo."),
-            ("Ctrl+F", "Find cells anywhere in the profile; matches are outlined in cyan."),
-            ("I / M", "Toggle the cell info panel / the minimap (click or drag the minimap to jump)."),
-            ("L", "Toggle grid labels (coordinates, file names and type badges)."),
-            ("Space / P", "Music: play-pause (plays this grid's audio when idle) / show the playlist."),
-            ("[ ] , . 9 0", "Music: previous / next track, seek -5 s / +5 s, volume -5% / +5%."),
-            ("F2, F4-F12", "Plugin buttons that declare a key: run on the selected cell."),
-            ("Arrow keys", "Move the selection."),
-            ("Enter", "Open / run the selected cell."),
-            ("Ctrl+V / Ctrl+C", "Paste into / copy from the selected cell."),
-            ("Ctrl+Shift+V", "Paste onto the selected cell as a stack (adds to what is already there)."),
-            ("Ctrl+A / Ctrl+X", "Select every occupied cell / cut the selection (delete it and copy its files)."),
             ("Ctrl+click, Shift+click", "Add or remove one cell from the multi-selection / select a rectangle. Dragging from an empty cell draws a selection box."),
             ("Drag a selected cell", "Moves the whole multi-selection together (blocked cells are reported, nothing is lost)."),
             ("Shift+drag a cell", "Stack its items on top of the target cell instead of swapping."),
             ("Drop on a file / Shift+drop", "Dropping onto an occupied file cell stacks the files there; Shift forces a stack anywhere."),
-            ("Tab / Shift+Tab", "Cycle which item of a stacked cell is on top."),
-            ("Shift+Delete", "Remove only the top item of a stack."),
-            ("B", "Open this grid's inventory panel (game-style items with counts and metadata)."),
-            ("O", "Open this grid's folder (created on first use) in the file manager."),
-            ("Z", "Zoom to fit every cell of the grid (2D)."),
-            ("Ctrl+S", "Save."),
-            ("Delete, Backspace", "Delete selection, go back out of a nested grid."),
             ("Drop files", "Drop any files from your file manager onto a cell. With Copy In on they are copied into the grid's assets/ folder (progress on the cell)."),
-            ("Ctrl + / - / 0", "Scale all text and buttons."),
-            ("F1, Esc", "Toggle this help, close dialogs. Esc also cancels downloads."),
-            ("`", "Ruby console: Up/Down history, Ctrl+V paste, PageUp/PageDown scroll, Ctrl+L clear."),
+            ("Image viewer: drag / wheel", "Drag with any mouse button to pan; wheel zooms around the pointer."),
+            ("Panels: wheel", "Scroll Help, Plugins, profiles, Stack Items, game-item inventory or the separate file list."),
         ],
     ),
     (
@@ -101,8 +254,11 @@ pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Selenite.grid", "Current grid object: g[col,row], g.set(col,row,path), g.remove, g.subgrid, g.new_grid, g.move, g.swap, g.each, g.cells, g.size, g.clear."),
             ("Selenite.root", "Top-level grid of the current profile."),
+            ("Selenite.assets / g.assets / Selenite.asset_inventory", "Enumerate all assets in the current grid or a specific grid, including stack contents; asset_inventory opens the current grid's live organizer manager."),
             ("Selenite.on(:event) { }", "Hooks: :activate (col,row,kind,path; return :handled to skip the default), :paste, :drop, :download, :save, :profile, :track (path, index, count)."),
             ("Selenite.labels(bool) / labels?", "Turn grid labels on or off from Ruby."),
+            ("Selenite.terminal(file = nil, *args, dir: nil)", "Open a terminal window; with a file it runs that command file with the arguments, then leaves a shell open. dir sets the starting folder. The terminal gets SELENITE_GRID, SELENITE_PROFILE and SELENITE_EXE."),
+            ("Selenite.edit(path)", "Open a file in the text editor window (Ruby and Markdown aware; F11 maximizes, Ctrl+P toggles the Markdown preview, Ctrl+F / Ctrl+H find and replace, preview links are clickable)."),
             ("Selenite.music", "play(path), play_grid, play_list(paths), queue(path), toggle, pause, resume, stop, next, previous, seek(s), volume(0..1), shuffle(bool), repeat(:off/:all/:one), state, playing?, track, show, hide, clear."),
             ("Rust helpers", "file_info(path), image_size(path), checksum(path) (fast, streaming), playable?(path), copy_text(text) — implemented in Rust, called from Ruby."),
             ("Selenite.select / open / goto", "Move the selection, open a cell (empty cells enter their child grid), or center the camera on a cell."),
@@ -161,3 +317,64 @@ pub const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_reference_covers_every_native_context() {
+        let expected = [
+            ("Keyboard: General", "Ctrl+= / Ctrl+- / Ctrl+0"),
+            ("Keyboard: Grid", "Shift+Delete"),
+            ("Keyboard: 3D Camera", "W / A / S / D"),
+            ("Keyboard: Find", "Shift+Enter / Shift+Keypad Enter / Up"),
+            ("Keyboard: Stack Items", "Ctrl+Y / Ctrl+Shift+Z"),
+            ("Keyboard: Game-Item Inventory", "Enter / Keypad Enter"),
+            ("Keyboard: Asset Inventory", "F1"),
+            ("Keyboard: Music", "9 / 0"),
+            ("Keyboard: Ruby Console", "Ctrl+U"),
+            ("Keyboard: Profiles", "Esc / N"),
+            (
+                "Keyboard: Menus and Plugins",
+                "F2, F4, F5, F6, F7, F8, F9, F10, F11, F12",
+            ),
+            ("Keyboard: Grid Deletion Prompt", "Enter / Y"),
+            ("Keyboard: Image Viewer", "R / 1"),
+            ("Keyboard: File List Window", "Enter"),
+            ("Keyboard: Help", "Home / End"),
+        ];
+        assert_eq!(HELP_SECTIONS[0].0, "Keyboard: General");
+        for (heading, shortcut) in expected {
+            let (_, items) = HELP_SECTIONS
+                .iter()
+                .find(|(name, _)| *name == heading)
+                .unwrap_or_else(|| panic!("missing keyboard context: {heading}"));
+            assert!(
+                items.iter().any(|(keys, _)| *keys == shortcut),
+                "missing {shortcut} in {heading}"
+            );
+        }
+        let mut headings = std::collections::HashSet::new();
+        for (heading, items) in HELP_SECTIONS {
+            assert!(headings.insert(heading), "duplicate heading: {heading}");
+            assert!(!items.is_empty());
+            for (keys, description) in *items {
+                assert!(!keys.trim().is_empty() && !description.trim().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn complete_help_reference_is_scrollable_at_supported_window_sizes() {
+        for (width, height) in [(320, 240), (640, 480), (1280, 720), (3840, 2160)] {
+            let layout = crate::panels::help_layout(width, height);
+            assert!(layout.body.width > 0.0 && layout.body.height > 0.0);
+            assert!(layout.frame.x >= 0.0 && layout.frame.y >= 0.0);
+            assert!(layout.frame.x + layout.frame.width <= width as f32);
+            assert!(layout.frame.y + layout.frame.height <= height as f32);
+            let max_scroll = crate::panels::help_max_scroll(&layout);
+            assert!(max_scroll.is_finite() && max_scroll > 0.0);
+        }
+    }
+}

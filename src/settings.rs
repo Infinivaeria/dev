@@ -26,6 +26,8 @@ pub struct Settings {
     /// Copy files dropped or pasted onto a grid into that grid's `assets/`
     /// folder (instead of only linking to the original).
     pub copy_files: bool,
+    /// Ctrl +/- zoom multiplier shared by every Selenite window.
+    pub ui_scale: f32,
 }
 
 impl Default for Settings {
@@ -38,6 +40,7 @@ impl Default for Settings {
             repeat: Repeat::All,
             disabled_plugins: Vec::new(),
             copy_files: true,
+            ui_scale: 1.0,
         }
     }
 }
@@ -87,8 +90,29 @@ impl Settings {
         } else {
             Self::default().volume
         };
+        self.ui_scale = if self.ui_scale.is_finite() {
+            self.ui_scale.clamp(0.5, 3.0)
+        } else {
+            Self::default().ui_scale
+        };
         self
     }
+}
+
+/// The saved zoom, for windows that start before the organizer does.
+pub fn saved_ui_scale() -> f32 {
+    Settings::load(&Settings::path_in(&crate::profiles::default_base_dir())).ui_scale
+}
+
+/// Saves just the zoom, leaving every other setting as found on disk.
+pub fn save_ui_scale(scale: f32) -> Result<(), String> {
+    let path = Settings::path_in(&crate::profiles::default_base_dir());
+    let mut settings = Settings::load(&path);
+    if settings.ui_scale == scale {
+        return Ok(());
+    }
+    settings.ui_scale = scale;
+    settings.save(&path)
 }
 
 #[cfg(test)]
@@ -122,6 +146,14 @@ mod tests {
         assert!(loaded.minimap);
         assert!(loaded.copy_files, "older settings files default to copying");
         assert_eq!(loaded.volume, 1.0);
+        assert_eq!(loaded.ui_scale, 1.0, "older settings files default to 100%");
+
+        fs::write(&path, r#"{"ui_scale": 9.0}"#).unwrap();
+        assert_eq!(Settings::load(&path).ui_scale, 3.0);
+        fs::write(&path, r#"{"ui_scale": 0.0}"#).unwrap();
+        assert_eq!(Settings::load(&path).ui_scale, 0.5);
+        fs::write(&path, r#"{"ui_scale": 1.5}"#).unwrap();
+        assert_eq!(Settings::load(&path).ui_scale, 1.5);
 
         fs::write(&path, "not json").unwrap();
         assert_eq!(Settings::load(&path), Settings::default());

@@ -1,5 +1,80 @@
 # Changelog
 
+## 7.0.0-rc.1
+
+### Added
+
+- Text editor (`selenite --edit FILE`) with Ruby and Markdown syntax
+  highlighting, a live Markdown preview, undo/redo, selection and clipboard,
+  Ruby block-aware indentation, Markdown list continuation, atomic saves that
+  keep line endings and permissions, and a warning before overwriting outside
+  changes. Open it from a cell's menu (Edit text, New note here), by activating
+  `.md`/`.txt` cells, or with `Selenite.edit(path)`.
+- Editor find and replace (Ctrl+F / Ctrl+H) with match highlighting, case
+  toggle, stepping, and a replace-all that undoes in one step.
+- Draggable divider between the editor and the Markdown preview
+  (double-click resets it) and clickable preview links: web and `mailto` links,
+  heading anchors and relative files open; other schemes are blocked.
+- Per-grid Markdown notes (`notes.md` in each grid's folder) from the Notes
+  toolbar button and the cell menu.
+- Terminal support: a Terminal toolbar button, `selenite --terminal` and
+  `--terminal-run FILE [ARGS]` (shebang, Ruby, Python, JS or Bash), Run in
+  terminal and Terminal in grid folder cell actions, `Selenite.terminal`, and
+  `SELENITE_*` variables inside terminals.
+- Scaling: windows keep scaling up to 6x when maximized, new windows follow the
+  display DPI and are kept on the monitor, the Ctrl +/- zoom is saved as
+  `ui_scale`, Ctrl+wheel zooms the editor, and the Ruby console grows with the
+  window instead of stopping at 14 lines.
+- Live Asset Inventory management for each grid, including every stacked file
+  and nested-grid container, with search and keyboard navigation.
+- Multi-file drag-and-drop into the inventory: drop on a row to extend its
+  stack, or on blank panel space to create a new stacked asset cell.
+- Inventory open, promote, extract, remove, paste and unstack commands,
+  in-panel undo/redo, transfer progress, and automatic saving.
+- Ruby `Grid#assets`, `Selenite.assets`, and `Selenite.asset_inventory` for
+  per-grid enumeration and organizer/plugin automation.
+
+### Fixed
+
+- Reserve blank-drop targets while background transfers are pending.
+- Prevent confirmed removal from deleting the wrong item if a background
+  import changed its stack while the prompt was open.
+- Recheck filename availability after acquiring a copy's temporary file so
+  concurrent same-named imports do not replace completed copies.
+
+### Changed
+
+- Organizer and dedicated game runtime version is 7.0.0-rc.1, a release
+  candidate rather than a final release. Existing save formats remain compatible.
+- The separate File List remains read-only, avoiding competing save-file
+  writers. The editable Asset Inventory is a live modal in the organizer.
+- Ruby remains the Turing-complete scripting language; no new language engine
+  or sandbox is introduced. Long-running scripts still require care.
+
+## 6.0.0
+
+### Added
+
+- Stack Items toolbar button and cell-menu manager with case-insensitive search,
+  focused rows, keyboard navigation, clipboard stacking, and in-panel undo/redo.
+- Extract a single stacked file or grid into a free cell, preserving the other
+  items, with undo and persistent saves.
+- Ruby `Grid#extract_item(col, row, index)` and
+  `Selenite.stack_items(col, row)` for organizer automation and plugins.
+
+### Changed
+
+- Bumped the organizer and dedicated game runtime to 6.0.0; existing saves remain
+  compatible. Ruby remains the general-purpose scripting language.
+- Bringing an item to the top preserves the relative order of all other items.
+- Music and other files without visible thumbnails retain labels even when
+  global or individual labels are disabled.
+
+### Fixed
+
+- Stack-manager removal of non-empty nested grids requires confirmation;
+  removal, extraction, promotion, and unstacking support undo.
+
 ## 5.0.0
 
 ### Changed

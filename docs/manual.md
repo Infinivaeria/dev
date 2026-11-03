@@ -1,6 +1,6 @@
 # Selenite instruction manual
 
-For **Selenite 5.0.0**, as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled.
+For **Selenite 7.0.0-rc.1**, a release candidate as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled.
 
 ## Contents
 
@@ -27,7 +27,7 @@ For **Selenite 5.0.0**, as implemented in this checkout. This manual covers the 
 21. [Plugins](#21-plugins)
 22. [Games and standalone exports](#22-games-and-standalone-exports)
 23. [Partitioned array import and export](#23-partitioned-array-import-and-export)
-24. [mic_freq alarms, timers, and stopwatch](#24-mic_freq-alarms-timers-and-stopwatch)
+24. [mic_freq companion](#24-mic_freq-companion)
 25. [Troubleshooting and limits](#25-troubleshooting-and-limits)
 26. [Save-format reference](#26-save-format-reference)
 27. [Maintenance and further references](#27-maintenance-and-further-references)
@@ -127,7 +127,9 @@ The grid occupies the area below the toolbar. Nested-grid navigation shows a bre
 | Open the cell menu | Right-click |
 | Show help | F1 or Help |
 
-**Ctrl+= / Ctrl+-** adjusts interface text and button scaling; **Ctrl+0** resets it. This is separate from grid zoom. Cell labels scale with the cell's on-screen size and long names are shortened to fit. UI scaling is a session adjustment, not a field in the saved preferences.
+**Ctrl+= / Ctrl+-** adjusts interface text and button scaling; **Ctrl+0** resets it. This is separate from grid zoom. Cell labels scale with the cell's on-screen size and long names are shortened to fit.
+
+Every Selenite window also scales with its own size: maximizing a window, or opening one on a larger display, makes text, toolbars, dialogs, and the Ruby console proportionally larger (up to six times the base size), and new windows are sized for the display's DPI factor and kept within the monitor. The Ctrl +/- multiplier (50% to 300%) is saved as `ui_scale` in the shared preferences, so the organizer, File List, image viewer, and text editor all start at the zoom you last chose. The Ruby console always takes about 60% of the space below the toolbar, so it grows with the window, and PageUp/PageDown scroll it by a page.
 
 Dialogs, the console, and search consume relevant keys while open. Close them before using shortcuts intended for the grid.
 
@@ -217,6 +219,18 @@ A cell with several items shows a `×N` badge. Its top item determines its visib
 
 Unstack leaves an item at the original coordinate and places the others in free cells to the right. Cycling, merging, and unstacking support undo. To reach a nested grid or label setting lower in a stack, first cycle that item to the top.
 
+**Stack Items** opens a searchable manager for the selected occupied cell;
+right-click a stack and choose **Manage stack items** for the same panel.
+It is separate from the named game-item inventory. Type to search names
+case-insensitively. Click a row or use **Up / Down**, **Home / End** to focus
+an item. **Enter** opens it; **Delete** removes it. Row controls bring an item
+to the top without reordering the others, open it, extract it into a free
+cell, or remove it. **Ctrl+V** adds clipboard items to the stack;
+**Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z** undo/redo without closing the panel.
+**Esc** cancels a deletion prompt, clears a search, or closes the panel.
+Non-empty nested grids require confirmation before removal. Extraction
+moves the item with its labels and nested contents; it does not copy it.
+
 ## 8. Nested grids
 
 Every grid has an unbounded coordinate space of child-grid portals, not a fixed 3×3 set. Every empty cell is an implicit child grid, shown with a faint nested-grid outline in 2D. Double-click any coordinate, press **Enter**, or choose **Open / Run** to enter its child grid. That child has the same unbounded coordinate space, and so does every child below it. In 3D, double-click an empty ground cell to descend in the same way.
@@ -239,7 +253,7 @@ Type a query. **Enter / Down** visits the next match; **Shift+Enter / Up** visit
 
 **Minimap (M)** shows an overview and the visible area. Click or drag within it to jump across the grid. The minimap is enabled by default and its preference is shared across profiles.
 
-**Labels (L)** globally hides or shows coordinates, filenames, and type badges in 2D and 3D. Right-click an item for **Hide item labels / Show item labels** to control that item separately. The per-item setting is saved, follows moves and stacks, and supports undo. Global Labels Off suppresses individual labels without resetting their saved choices. The selected cell still indicates its coordinates.
+**Labels (L)** globally hides or shows coordinates, filenames, and type badges in 2D and 3D. Right-click an item for **Hide item labels / Show item labels** to control that item separately. The per-item setting is saved, follows moves and stacks, and supports undo. Files without a visible thumbnail, including music and images still loading, keep their labels regardless of these toggles so they remain identifiable. Global Labels Off does not reset saved individual choices. The selected cell still indicates its coordinates.
 
 ## 10. 3D view
 
@@ -295,9 +309,72 @@ Repeat modes are **off**, **all**, and **one**. Default preferences are volume 8
 
 Videos and other files open through the operating system's registered application. A directory opens through the file manager. Ruby files in the main grid run in the embedded console when scripting is enabled; use **Run as game** for scripts that own a game window.
 
+### Text editor and grid notes
+
+Selenite includes its own text editor, started by `selenite --edit FILE` and opened in a separate window by:
+
+- activating (Enter or double-click) a `.md`, `.markdown`, or `.txt` cell;
+- right-clicking a file or Ruby cell and choosing **Edit text**;
+- right-clicking an empty cell and choosing **New note here**, which creates `note.md` (then `note-2.md`, and so on) in the grid's `assets/` folder, places it in the cell, and opens it;
+- the **Notes** toolbar button, or **Grid notes** in the cell menu, which edit `notes.md` in the current grid's own folder. **Edit its grid notes** does the same for a nested grid. Each grid therefore has its own Markdown document, created with a title heading on first use. Ruby can read it with `File.read(File.join(Selenite.grid_folder, "notes.md"))`, and open any file with `Selenite.edit(path)`.
+
+The editor handles UTF-8 text up to 4 MiB; other files are refused with a message rather than altered. Line endings (including Windows CRLF), a leading byte-order mark, and file permissions are preserved when saving, and saves replace the file atomically. If the file changes on disk while it is open, the first **Ctrl+S** is refused with a warning and a second one overwrites it.
+
+| Keys | Action |
+| --- | --- |
+| Ctrl+S | Save |
+| Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo / redo (typing runs undo together) |
+| Ctrl+A / Ctrl+C / Ctrl+X / Ctrl+V | Select all / copy / cut / paste (without a selection, copy and cut take the current line) |
+| Arrows, Home, End, PageUp, PageDown | Move; Shift extends the selection, Ctrl moves by word (arrows) or to the document start/end (Home/End) |
+| Tab / Shift+Tab | Indent (to the next stop, or every selected line) / unindent |
+| Click, double-click, triple-click, drag | Place the caret, select a word, select a line, select a range; click the line numbers to select a line |
+| Ctrl+F / Ctrl+H | Find / find and replace in the document (see below) |
+| F3 / Shift+F3 | Next / previous match |
+| Ctrl+P | Markdown only: cycle Split, Preview, and Source |
+| Ctrl +/- / Ctrl+0 / Ctrl+wheel | Zoom the editor like the other windows |
+| F11 | Maximize or restore the window |
+| Esc | Close; with unsaved changes, press Esc again to discard them |
+
+Closing the window with its close button saves unsaved changes instead of losing them. The window enforces a minimum size, line numbers and text scale with the window, and a Markdown **Split** view that is too narrow for two panes shows only the source (its title bar says so) until the window is wider.
+
+**Ruby** files (`.rb`, `.rake`, `.gemspec`, `Rakefile`, `Gemfile`) are highlighted: keywords, built-in calls, constants, symbols and `key:` labels, instance/global variables, numbers, strings (with `#{}` interpolation, `%w[]` and heredocs), regular expressions, comments, and `=begin`/`=end` blocks. Pressing Enter after `def`, `class`, `module`, `if`, `do |x|` and similar openers indents the next line, and typing a bare `end`, `else`, `ensure`, or `rescue` re-aligns it with its opener.
+
+**Markdown** files are highlighted in the source (headings, emphasis, inline code, links, quotes, list markers, fenced code, with Ruby highlighting inside ```` ```ruby ```` fences) and rendered live in the preview: headings, paragraphs and hard breaks, bold, italic, strikethrough, inline code, links and bare URLs, images (shown as `[image: alt]` links), block quotes, nested bullet, numbered and `[ ]`/`[x]` task lists, horizontal rules, fenced code blocks, and pipe tables with alignment. Pressing Enter in a list continues it (numbering and task boxes included), and Enter on an empty item ends the list. The preview does not run scripts or fetch images.
+
+**Find and replace.** Ctrl+F opens a find bar above the text and Ctrl+H adds a replace field; a one-line selection becomes the initial query. Matches are highlighted as you type, the current one is selected, and the bar shows its position (for example `2 of 5`). **Enter** (or Down/F3) goes to the next match, **Shift+Enter** (Up/Shift+F3) to the previous one, wrapping around. **Tab** switches between the find and replace fields, **Alt+C** toggles case sensitivity (off by default), and in the replace field **Enter** replaces the current match and moves on. **Alt+A** replaces every match, and a single Ctrl+Z undoes the whole replace-all. **Esc** closes the bar and keeps the current match selected. Searches are literal text, not regular expressions.
+
+**Split divider.** In the Markdown split view, drag the divider between the source and the preview to resize the panes (each keeps a minimum width); double-click it to restore an even split.
+
+**Links in the preview.** Links are underlined; hovering one shows its target in the status bar and clicking opens it. `http`, `https`, and `mailto` links open in the system's default application. `#heading` links scroll the preview to that heading (GitHub-style names, such as `#second-section`). Relative paths resolve against the note's folder: text files open in another editor window and other files open with the system's registered application. Missing files are reported, and links with any other scheme (`javascript:`, `file:`, and so on) are blocked with a message instead of being opened.
+
 ## 13. File Inventory window
 
-Click **Inventory**, or run:
+### Live per-grid Asset Inventory
+
+Click **Asset Inventory** in the organizer to open a live modal for the current
+grid. Every stacked item is listed with its cell coordinates and stack position;
+child-grid containers appear, but their contents belong to their own grids.
+Enter a child grid and open Asset Inventory there to manage its assets.
+
+Drop multiple files onto an inventory row to stack all of them on that cell.
+Drop on blank space inside the panel to create a new stacked asset cell without
+replacing existing cells. Copy In follows the normal organizer setting; copies
+run in the background into that grid's assets folder, with progress shown in
+the panel. Same-named copies receive distinct names. Closing the panel does not
+cancel transfers; closing the organizer cancels unfinished transfers.
+
+Type to search; Up/Down and Home/End focus matching assets. Enter opens;
+Delete removes; row controls promote, open, extract or remove. Ctrl+V adds
+clipboard items to the focused cell, or a new cell if none is focused.
+Unstack spreads the focused cell's stack into free cells. Ctrl+Z/Ctrl+Y and
+Ctrl+Shift+Z undo/redo. Esc cancels transfers, otherwise clears the search,
+otherwise closes the panel. F1 opens Help. Non-empty nested-grid removal
+requires confirmation, and a changed stack must be selected again before deletion.
+Removing an attachment does not delete its underlying asset file.
+
+### Read-only File List
+
+Click **File List**, or run:
 
 ```sh
 selenite --inventory /path/to/selenite.json
@@ -393,6 +470,7 @@ Preferences in `<data>/settings.json` apply across profiles, including direct `-
 | `repeat` | `"all"` | `"off"`, `"all"`, or `"one"` |
 | `disabled_plugins` | `[]` | Disabled plugin filenames |
 | `copy_files` | `true` | Copy In preference |
+| `ui_scale` | `1.0` | Ctrl +/- interface zoom, from 0.5 to 3.0 |
 
 Use the interface to change them. If editing JSON manually, close Selenite first. Missing fields use defaults; unreadable or malformed settings fall back to defaults. Plugin disabling is keyed by filename, so same-named plugin files share that preference.
 
@@ -441,6 +519,8 @@ Deleting cells does not garbage-collect asset files. Unreferenced copies may rem
 | Undo / Redo | Navigate session edit history |
 | Find | Search the current save hierarchy |
 | Ruby | Toggle console; execution requires scripting |
+| Terminal | Open a separate system terminal running your shell |
+| Notes | Edit the current grid's `notes.md` in the text editor |
 | Home | Reset camera |
 | 3D View / 2D View | Switch grid presentation |
 | Labels: On / Off | Toggle global cell labels |
@@ -451,7 +531,7 @@ Deleting cells does not garbage-collect asset files. Unreferenced copies may rem
 | Cancel DL (n) | Cancel pending transfers; appears while transfers run |
 | Back | Return from a nested grid |
 
-The right-click menu depends on the target and selection. It includes opening, Info, Copy file/path, Show in folder, Paste here, New grid, Delete, label visibility, stack actions, Grid inventory, and grid-folder actions. Audio adds **Add to playlist**. Ruby adds **Run as game** and **Export standalone game**. Plugins can add entries prefixed with `»`. Actions generally operate on the top item; cycle a stack first when necessary.
+The right-click menu depends on the target and selection. It includes opening, Info, Copy file/path, Show in folder, Paste here, New grid, Delete, label visibility, stack actions, Grid inventory, and grid-folder actions. **Terminal in grid folder** opens a shell in the current grid's own folder, creating that folder if necessary. **Grid notes** and **Edit its grid notes** open a grid's Markdown notes, **Edit text** opens a file or Ruby cell in the [text editor](#text-editor-and-grid-notes), and **New note here** creates a note in an empty cell. File and Ruby pieces offer **Run in terminal**: `.rb` files use the system Ruby; other files use the interpreter named on a `#!` first line, then `python3` for `.py` and `node` for `.js`, and otherwise Bash (or `cmd` on Windows). `.rbc` bytecode is not supported. The terminal remains open in a shell afterward. The program inherits Selenite's working directory and environment and runs with full user permissions; use only trusted files. Bash and Ruby must be installed on `PATH`. Audio adds **Add to playlist**. Ruby adds **Run as game** and **Export standalone game**. Plugins can add entries prefixed with `»`. Actions generally operate on the top item; cycle a stack first when necessary.
 
 ## 18. Keyboard reference
 
@@ -475,7 +555,7 @@ These shortcuts apply to the main grid unless a text field, panel, or dialog is 
 | F1 / F3 | Help / 3D view |
 | Backtick | Ruby console |
 | F2, F4–F12 | Plugin actions with assigned hotkeys |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Increase / decrease / reset interface scale |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Increase / decrease / reset interface scale (remembered between launches) |
 | Space / P | Music play-pause / playlist |
 | [ / ] | Previous / next track |
 | , / . | Seek −5 / +5 seconds |
@@ -496,6 +576,9 @@ Examples use `selenite` on PATH. Substitute `./run.sh` in the portable bundle or
 | `selenite --help` or `-h` | Print usage and version |
 | `selenite --profile NAME` | Open or create a profile |
 | `selenite --list-profiles` | List profiles and mark the last-used one |
+| `selenite --terminal [SHELL ARGS]` | Start the user's shell in the current terminal |
+| `selenite --terminal-run FILE [ARGS...]` | Run a command file (Bash, Ruby, Python, JS or its `#!` interpreter), passing arguments literally |
+| `selenite --edit FILE` | Open the text editor on a file (created on first save if missing) |
 | `selenite --grid FILE.json` | Edit a specific save outside profiles |
 | `selenite FILE.json` | Shorthand for direct-grid mode |
 | `selenite --image FILE` | Open image viewer |
@@ -512,11 +595,42 @@ selenite --game game.rb --profile Practice
 selenite --game game.rb --grid /path/to/work.json
 ```
 
+The **Terminal** toolbar button opens a separate system terminal emulator and
+starts `selenite --terminal` there. Linux requires a supported installed
+emulator, such as xterm. Terminal mode uses `$SHELL` (falling back to `/bin/sh`)
+or Windows `COMSPEC`, inherits the working directory and environment, and is
+not sandboxed. Arguments after `--terminal` are passed to the shell unchanged;
+for example, `selenite --terminal -c 'ruby script.rb'` works with a compatible
+shell and a Ruby executable on `PATH`. The portable bundle includes embedded
+Ruby libraries but not a standalone `ruby` command. Use `--script` for the
+embedded Ruby Selenite API.
+
+For example, add a `.sh` file containing the following to a grid and choose
+**Run in terminal** from its context menu:
+
+```bash
+#!/usr/bin/env bash
+ruby <<'RUBY'
+puts "Current directory: #{Dir.pwd}"
+puts Dir.children(".")
+RUBY
+```
+
+This example requires both Bash and a `ruby` executable on `PATH`. It lists
+the working directory inherited from Selenite, not necessarily the file's
+directory. The grid may hold a copied file when **Copy In** is enabled.
+For scripts needing arguments, run `selenite --terminal-run script.rb 'first
+argument' --option` from a terminal. Arguments are passed directly to the script;
+the grid context-menu action does not prompt for arguments. When not attached to
+a terminal, `--terminal-run` returns the script's exit status instead of opening
+an interactive shell.
+
 A bare JSON path after the script is also accepted. Choose one startup mode; do not combine unrelated modes or rely on extra trailing options. Relative paths refer to the process's working directory unless the script explicitly resolves them relative to `__dir__`.
 
 | Environment variable | Purpose |
 | --- | --- |
 | `SELENITE_HOME` | Override application data directory |
+| `SELENITE_EXE`, `SELENITE_GRID`, `SELENITE_PROFILE`, `SELENITE_CELL_FILE` | Set in Selenite terminals: the executable, the open save, its profile (if any), and the piece run by **Run in terminal**. The executable's folder is also appended to `PATH`, so `selenite` works in the terminal |
 | `XDG_DATA_HOME` | Linux data-base fallback when SELENITE_HOME is absent |
 | `SELENITE_PARTITIONED_ARRAY_LIB` | Override the PA Ruby library directory |
 | `SELENITE_GAME_FRAMES` | End game rendering after the specified frame count |
@@ -526,6 +640,29 @@ A bare JSON path after the script is also accepted. Choose one startup mode; do 
 The main executable has no dedicated `--version` mode; use `--help`. An unsuccessful startup or uncaught headless Ruby error is reported to stderr and returns exit status 1.
 
 ## 20. Ruby console and automation
+
+### General-purpose computation
+
+Scripting-enabled Selenite embeds Ruby, which already supports general-purpose
+computation: conditionals, loops, recursion, functions, classes, collections,
+and persistent grid/storage APIs. Adding UI controls does not make a language
+"more Turing complete." Actual runs are limited by memory, coordinate ranges,
+and time. Ruby code is trusted and is not sandboxed; long-running organizer
+scripts block its UI thread. Use headless `--script` mode for batch work.
+
+```ruby
+g = Selenite.grid
+destination = g.extract_item(0, 0, 1) # [new_col, row], or nil for a missing item
+Selenite.stack_items(0, 0)           # queue the organizer's stack manager
+Selenite.stack_items                # use the current selection; false if none
+g.assets                           # every item in this grid, including stacks
+Selenite.assets                    # shortcut for Selenite.grid.assets
+Selenite.asset_inventory           # queue the live per-grid organizer inventory
+```
+
+Stack indexes are zero-based. Extracting preserves the remaining stack order
+and skips occupied destination cells. The manager request requires the desktop
+organizer; it does not create a window in headless or game-only execution.
 
 ### Enable and use the console
 
@@ -539,7 +676,7 @@ Use a scripting-enabled build. Press **backtick** or click **Ruby**. Evaluate sh
 | Backspace | Edit input |
 | Ctrl+U | Clear input |
 | Ctrl+L | Clear console output |
-| Wheel / PageUp / PageDown | Scroll output |
+| Wheel / PageUp / PageDown | Scroll output (PageUp/PageDown move a page) |
 | Esc | Close console |
 
 A profile's `init.rb` is evaluated when that profile opens in the organizer. Use it for startup setup or event hooks. Profiles share one Ruby VM within a running app; variables and constants can outlive a plugin reload. Headless CLI modes create their script context directly: do not assume they replay the organizer's init/plugin startup lifecycle.
@@ -587,6 +724,8 @@ These statements are an API tour, not a script to run against valuable data unch
 | `save`, `save_path`, `status(text)` | Save location and messages |
 | `profile`, `profiles`, `create_profile(name)`, `switch_profile(name)` | Profile operations |
 | `labels(bool)`, `labels?`, `copy_text(text)` | Labels and clipboard |
+| `edit(path)` | Open a file in the text editor window |
+| `terminal(file = nil, *args, dir: nil)` | Open a terminal window, optionally running a command file with arguments or starting in a folder |
 | `download(url,col,row, stack: false)` | Queue a transfer in the organizer |
 | `classify(path)`, `file_info(path)`, `image_size(path)`, `playable?(path)` | File information |
 | `checksum(path)` | Streaming FNV-1a checksum; not a cryptographic verification hash |
@@ -786,27 +925,15 @@ The last three accept an optional database name after the directory. Import retu
 
 Library lookup prefers `SELENITE_PARTITIONED_ARRAY_LIB`, then `partitioned_array/lib` beside the executable, then the source checkout. Set the override to the directory containing `managed_partitioned_array.rb` if the library cannot be found.
 
-## 24. mic_freq alarms, timers, and stopwatch
+## 24. mic_freq companion
 
-The separate **mic_freq** application in this repository combines a voice-reactive avatar with time-tool tiles. These controls are not built into Selenite's main grid window and mic_freq is not included by Selenite's packaging script.
-
-From the repository root:
-
-```sh
-cargo run --manifest-path mic_freq/Cargo.toml --release -- --selenite "$PWD/dist/run.sh" --target /path/to/work.json
-```
-
-Supply an existing Selenite executable or portable launcher. Omit `--target` and drop one grid or game into the mic_freq window if preferred. Selecting a target does not execute it: enable **Launch grid** separately on the desired time tools.
-
-| Tool | Operation | Optional launch event |
-| --- | --- | --- |
-| Alarm | Local 24-hour HH:MM; Arm, Cancel, Dismiss, Snooze 5m | When alarm fires, including after snooze |
-| Timer | MM:SS or HH:MM:SS; Start, Pause, Resume, Reset | When countdown finishes |
-| Stopwatch | Start, Pause, Lap, Reset; latest four cumulative laps | Fresh start after zero/reset; not resume |
-
-A `.json` target opens Selenite with `--grid`. A `.rb` target runs with `--game` and requires scripting support. Opening a JSON grid does not automatically activate its individual cells. Ruby launches use Selenite's default profile unless the game manages another context itself.
-
-All enabled tools share the selected target. Alarm and timer alerts include a visual banner and optional sound. A/T/S hide/reopen tiles and F changes avatar focus; hidden tools keep running while mic_freq stays open. State is session-only, closing mic_freq stops its clocks, and it does not wake a sleeping computer. Already launched Selenite windows remain open. See the companion's [README](../mic_freq/README.md) and [manual](../mic_freq/MANUAL.md) in the source checkout; the Selenite portable bundle does not ship those companion files.
+The separate **mic_freq** application is an offline voice-reactive PNGTuber
+studio. Its current interface does not provide alarms, timers, stopwatch tiles,
+or Selenite grid launching; those source modules are not wired into the studio.
+See the companion's [README](../mic_freq/README.md) and
+[manual](../mic_freq/MANUAL.md) for build instructions, controls, and OBS setup.
+The Selenite bundles include these instructions but not the mic_freq executable,
+assets, or source needed to build it.
 
 ## 25. Troubleshooting and limits
 
