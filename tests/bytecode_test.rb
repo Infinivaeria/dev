@@ -1,6 +1,8 @@
 require "minitest/autorun"
 require "tmpdir"
 require "fileutils"
+require "open3"
+require "rbconfig"
 require_relative "../src/ruby/bytecode"
 
 class BytecodeTest < Minitest::Test
@@ -64,6 +66,43 @@ class BytecodeTest < Minitest::Test
     assert_equal original, File.binread(@output)
     Selenite::Bytecode.compile(@source, @output, true)
     assert_equal 4, Selenite::Bytecode.load(@output)
+  end
+
+  def test_embedded_bytecode_runs_without_payload_file_and_keeps_arguments
+    compile "[ARGV.dup, File.read('message'), __FILE__]"
+    bytes = File.binread(@output)
+    File.unlink(@source)
+    File.unlink(@output)
+    File.write(File.join(@directory, "message"), "asset")
+    original_arguments = ARGV.dup
+    original_directory = Dir.pwd
+    assert_equal [["one argument", "--literal"], "asset", "game.rbc"],
+                 Selenite::Bytecode.evaluate_binary(bytes, @directory, ["one argument", "--literal"])
+    assert_equal original_directory, Dir.pwd
+    assert_raises(Selenite::Bytecode::Error) { Selenite::Bytecode.evaluate_binary(bytes[0...-1], @directory) }
+  ensure
+    ARGV.replace(original_arguments) if original_arguments
+  end
+
+  def test_embedded_bytecode_preserves_system_exit
+    compile "exit 7"
+    assert_equal 7, Selenite::Bytecode.execute_binary(File.binread(@output), @directory)
+  end
+
+  def test_ruby_bootstrap_has_help_and_refuses_existing_output_without_execution
+    bootstrap = File.expand_path("../bootstrap-executable.rb", __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, bootstrap, "--help")
+    assert status.success?, error
+    assert_includes output, "--game"
+    File.write(@source, "File.write('must-not-run', 'bad')")
+    existing = File.join(@directory, "existing")
+    FileUtils.mkdir_p(existing)
+    File.write(File.join(existing, "personal.txt"), "keep")
+    _output, error, status = Open3.capture3(RbConfig.ruby, bootstrap, @source, "--output", existing)
+    refute status.success?
+    assert_includes error, "already exists"
+    assert_equal "keep", File.read(File.join(existing, "personal.txt"))
+    refute File.exist?(File.join(existing, "must-not-run"))
   end
 
   def test_invalid_source_does_not_replace_good_output

@@ -4,6 +4,7 @@ use std::{ffi::OsString, path::PathBuf};
 pub enum GameCommand {
     Help,
     Version,
+    CheckProject(PathBuf),
     Compile {
         source: PathBuf,
         output: PathBuf,
@@ -17,7 +18,7 @@ pub enum GameCommand {
 
 pub fn usage() -> String {
     format!(
-        "selenite-game {} — Ruby-only game runtime\n\nUsage:\n  selenite-game GAME.rb|GAME.rbc [--grid SAVE.json]\n  selenite-game --game GAME.rb|GAME.rbc [--grid SAVE.json]\n  selenite-game --compile GAME.rb [--output GAME.rbc] [--force]\n  selenite-game --help\n  selenite-game --version\n\nWithout arguments, prefers ./game.rbc, then ./game.rb. Default grid save: save.json beside the script.\nCompilation does not execute the source. Bytecode requires the same Ruby runtime; it is not encryption.\nEmbedded Ruby, Raylib, and PartitionedArray are included in the portable package.",
+        "selenite-game {} — Ruby-only game runtime\n\nUsage:\n  selenite-game GAME.rb|GAME.rbc [--grid SAVE.json]\n  selenite-game --game GAME.rb|GAME.rbc [--grid SAVE.json]\n  selenite-game --project DIR\n  selenite-game --compile GAME.rb [--output GAME.rbc] [--force]\n  selenite-game --help\n  selenite-game --version\n\nWithout arguments, prefers ./game.rbc, then ./game.rb. Default grid save: save.json beside the script.\nCompilation does not execute the source. Bytecode requires the same Ruby runtime; it is not encryption.\nEmbedded Ruby, Raylib, and PartitionedArray are included in the portable package.",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -84,10 +85,16 @@ pub fn parse(args: &[OsString]) -> Result<GameCommand, String> {
     match values.as_slice() {
         ["--help" | "-h"] => return Ok(GameCommand::Help),
         ["--version" | "-V"] => return Ok(GameCommand::Version),
+        ["--check-project", directory] if !directory.starts_with('-') => return Ok(GameCommand::CheckProject(directory.into())),
         _ => {}
     }
     if values.first() == Some(&"--compile") {
         return parse_compile(&values[1..]);
+    }
+    if values.first() == Some(&"--project") {
+        let [_, directory] = values.as_slice() else { return Err("--project expects one project folder".to_owned()) };
+        let project = crate::project::Project::load(std::path::Path::new(directory))?;
+        return Ok(GameCommand::Run { script: project.entry(), grid: project.grid() });
     }
     let values = if values.first() == Some(&"--game") {
         &values[1..]
@@ -96,11 +103,7 @@ pub fn parse(args: &[OsString]) -> Result<GameCommand, String> {
     };
     let (script, grid) = match values {
         [] if args.len() <= 1 => (
-            PathBuf::from(if std::path::Path::new("game.rbc").is_file() {
-                "game.rbc"
-            } else {
-                "game.rb"
-            }),
+            crate::portable::default_game(),
             None,
         ),
         [script] if !script.starts_with('-') => (PathBuf::from(script), None),

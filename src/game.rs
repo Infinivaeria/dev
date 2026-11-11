@@ -89,7 +89,7 @@ fn arg_error(message: impl Into<String>) -> Error {
     Error::new(ruby.exception_arg_error(), message.into())
 }
 
-fn need_game() -> Result<(), Error> {
+pub(crate) fn need_game() -> Result<(), Error> {
     if GAME_MODE.load(Ordering::SeqCst) {
         Ok(())
     } else {
@@ -274,7 +274,7 @@ fn take<T>(
 
 // ---- window & timing --------------------------------------------------------
 
-fn init_window(width: i32, height: i32, title: String) -> Result<(), Error> {
+pub(crate) fn init_window(width: i32, height: i32, title: String) -> Result<(), Error> {
     need_game()?;
     if WINDOW_OPEN.load(Ordering::SeqCst) {
         return Err(error("the game window is already open"));
@@ -291,7 +291,7 @@ fn init_window(width: i32, height: i32, title: String) -> Result<(), Error> {
     Ok(())
 }
 
-fn close_window() -> Result<(), Error> {
+pub(crate) fn close_window() -> Result<(), Error> {
     need_game()?;
     unload_all();
     if WINDOW_OPEN.swap(false, Ordering::SeqCst) {
@@ -300,7 +300,7 @@ fn close_window() -> Result<(), Error> {
     Ok(())
 }
 
-fn window_should_close() -> Result<bool, Error> {
+pub(crate) fn window_should_close() -> Result<bool, Error> {
     need_window()?;
     if frame_limit().is_some_and(|limit| FRAMES.load(Ordering::SeqCst) >= limit) {
         return Ok(true);
@@ -420,7 +420,7 @@ fn begin_drawing() -> Result<(), Error> {
     Ok(())
 }
 
-fn end_drawing() -> Result<(), Error> {
+pub(crate) fn end_drawing() -> Result<(), Error> {
     need_window()?;
     let frame = FRAMES.fetch_add(1, Ordering::SeqCst) + 1;
     if frame_limit() == Some(frame) {
@@ -782,7 +782,7 @@ fn set_random_seed(seed: u32) {
 
 // ---- audio --------------------------------------------------------------------
 
-fn init_audio_device() -> Result<bool, Error> {
+pub(crate) fn init_audio_device() -> Result<bool, Error> {
     need_game()?;
     if !AUDIO_OPEN.load(Ordering::SeqCst) {
         unsafe { ffi::InitAudioDevice() };
@@ -791,7 +791,7 @@ fn init_audio_device() -> Result<bool, Error> {
     Ok(AUDIO_OPEN.load(Ordering::SeqCst))
 }
 
-fn close_audio_device() -> Result<(), Error> {
+pub(crate) fn close_audio_device() -> Result<(), Error> {
     need_game()?;
     MUSIC.with_borrow_mut(|table| {
         for music in table.drain(..).flatten() {
@@ -1034,5 +1034,6 @@ pub fn register(ruby: &Ruby) -> Result<(), Error> {
     def!("GetMusicTimePlayed", get_music_time_played, 1);
 
     let _: Value = ruby.eval(RUBY_SIDE)?;
+    crate::raylib_api::register(ruby)?;
     Ok(())
 }

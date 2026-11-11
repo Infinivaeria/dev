@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "name": "starter",
+  "kind": "game",
+  "entry": "game.rb",
+  "grid": "save.json"
+}

@@ -1,6 +1,6 @@
 # Selenite instruction manual
 
-For **Selenite 7.0.0-rc.1**, a release candidate as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled.
+For **Selenite 11.0.0** as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, and the optional mic_freq companion. Some features require a build with Ruby scripting enabled. See the [IDE guide](ide.md) and [project guide](projects.md) for the integrated version 11 programming suite.
 
 ## Contents
 
@@ -470,7 +470,9 @@ Preferences in `<data>/settings.json` apply across profiles, including direct `-
 | `repeat` | `"all"` | `"off"`, `"all"`, or `"one"` |
 | `disabled_plugins` | `[]` | Disabled plugin filenames |
 | `copy_files` | `true` | Copy In preference |
-| `ui_scale` | `1.0` | Ctrl +/- interface zoom, from 0.5 to 3.0 |
+| `ui_scale` | `1.0` | Ctrl +/- interface zoom, from 0.5 to 3.0. The organizer and File List stop zooming once their wrapped toolbar would take more than 25% of the window, so a large saved value cannot bury the content |
+| `window_size` | unset | Organizer window `[width, height]` when it was last closed unmaximized; restored on start and kept on the monitor |
+| `window_maximized` | `false` | Whether the organizer window was maximized when closed |
 
 Use the interface to change them. If editing JSON manually, close Selenite first. Missing fields use defaults; unreadable or malformed settings fall back to defaults. Plugin disabling is keyed by filename, so same-named plugin files share that preference.
 
@@ -574,10 +576,13 @@ Examples use `selenite` on PATH. Substitute `./run.sh` in the portable bundle or
 | --- | --- |
 | `selenite` | Open last-used profile, or `default` |
 | `selenite --help` or `-h` | Print usage and version |
+| `selenite --version` or `-V` | Print the version |
 | `selenite --profile NAME` | Open or create a profile |
 | `selenite --list-profiles` | List profiles and mark the last-used one |
+| `selenite --with-terminal [--profile NAME \| --grid FILE.json \| FILE.json]` | Open the grid window and Selenite's terminal window together; the flag must come first and only applies to the grid window |
 | `selenite --terminal [SHELL ARGS]` | Start the user's shell in the current terminal |
 | `selenite --terminal-run FILE [ARGS...]` | Run a command file (Bash, Ruby, Python, JS or its `#!` interpreter), passing arguments literally |
+| `selenite --terminal-window [--terminal-run FILE [ARGS...]]` | Open Selenite's own terminal window (Linux and macOS) |
 | `selenite --edit FILE` | Open the text editor on a file (created on first save if missing) |
 | `selenite --grid FILE.json` | Edit a specific save outside profiles |
 | `selenite FILE.json` | Shorthand for direct-grid mode |
@@ -595,18 +600,46 @@ selenite --game game.rb --profile Practice
 selenite --game game.rb --grid /path/to/work.json
 ```
 
-The **Terminal** toolbar button opens a separate system terminal emulator and
-starts `selenite --terminal` there. Linux requires a supported installed
-emulator, such as xterm. Terminal mode uses `$SHELL` (falling back to `/bin/sh`)
-or Windows `COMSPEC`, inherits the working directory and environment, and is
-not sandboxed. Arguments after `--terminal` are passed to the shell unchanged;
+The **Terminal** toolbar button opens Selenite's own terminal window (Linux and
+macOS; no external emulator is needed). It draws with raylib and runs your shell
+(`$SHELL`, falling back to `/bin/sh`) on a pseudo-terminal, so full-screen
+programs such as `vim`, `less`, `htop` and `tmux`, 256-colour and true-colour
+output, the alternate screen, mouse reporting and bracketed paste all work.
+On Windows the button still starts `selenite --terminal` in a console window.
+
+Terminal window controls:
+
+| Input | Action |
+| --- | --- |
+| Ctrl +/- , Ctrl+wheel, Ctrl 0 | Zoom the text (saved as `ui_scale`); the character grid and the shell's window size follow the window and zoom |
+| Drag, double-click, triple-click | Select text, a word, or a line |
+| Ctrl+Shift+C / Ctrl+Insert | Copy the selection |
+| Ctrl+Shift+V / Shift+Insert | Paste |
+| Right-click | Copy the selection, or paste when nothing is selected |
+| Ctrl+click | Open the `http(s)` link under the pointer |
+| Mouse wheel, Shift+PageUp/PageDown, Shift+Home/End | Scroll through 10,000 lines of history |
+| Ctrl+Shift+H | Toggle syntax highlighting |
+| F11 | Maximize or restore |
+| Shift while using the mouse | Select text even when a program has mouse reporting on |
+
+Plain output is syntax highlighted: shell prompts and the command after them,
+quoted strings, flags, `$VARIABLES`, paths, URLs, numbers, comments, and
+error, warning and success words. Text that a program colours itself, and
+full-screen programs on the alternate screen, are never recoloured. Set
+`SELENITE_TERMINAL_HIGHLIGHT=0` to start with highlighting off. The window
+closes when the shell exits; if it fails to start, it stays open showing the
+error until a key is pressed. Closing the window hangs up the shell.
+
+The shell inherits the working directory and environment, and is not sandboxed.
+Terminal mode uses `$SHELL` (falling back to `/bin/sh`)
+or Windows `COMSPEC`. Arguments after `--terminal` are passed to the shell unchanged;
 for example, `selenite --terminal -c 'ruby script.rb'` works with a compatible
 shell and a Ruby executable on `PATH`. The portable bundle includes embedded
 Ruby libraries but not a standalone `ruby` command. Use `--script` for the
 embedded Ruby Selenite API.
 
 For example, add a `.sh` file containing the following to a grid and choose
-**Run in terminal** from its context menu:
+**Run in Selenite terminal** from its context menu, or select it and press the **Run in Terminal** toolbar button:
 
 ```bash
 #!/usr/bin/env bash
@@ -637,7 +670,7 @@ A bare JSON path after the script is also accepted. Choose one startup mode; do 
 | `SELENITE_GAME_SCREENSHOT` | Write a final game screenshot to this path |
 | `LD_LIBRARY_PATH`, `RUBYLIB` | Runtime library paths configured by the portable launcher |
 
-The main executable has no dedicated `--version` mode; use `--help`. An unsuccessful startup or uncaught headless Ruby error is reported to stderr and returns exit status 1.
+The main executable prints its version with `--version`. An unsuccessful startup or uncaught headless Ruby error is reported to stderr and returns exit status 1.
 
 ## 20. Ruby console and automation
 

@@ -33,7 +33,7 @@ This page remains the API and launch-mode reference.
 
 ## Running a game
 
-In **3.0.0-rc.4**, `selenite-game` is the dedicated Ruby-only executable. Run
+`selenite-game` is the dedicated Ruby-only executable. Run
 `./bootstrap-game.sh` to package it with Ruby and PartitionedArray, then
 `./dist-game/run-game.sh path/to/game.rb`. See the [packaging guide](packaging.md).
 Game/script entries accept Ruby source (`.rb`) or Selenite Ruby bytecode (`.rbc`);

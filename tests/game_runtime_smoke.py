@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -145,6 +146,49 @@ def native_inventory(repository, organizer, workspace, environment, artifacts):
     print("PASS: native X11 multi-file drop into blank Asset Inventory, drop into an existing stack, rendered panel, reload without originals")
 
 
+def native_mic_freq(repository, runtime, workspace, environment, artifacts):
+    from PIL import Image, ImageStat
+
+    driver = workspace / "x11-mic-freq-driver"
+    subprocess.run(["cc", "-Wall", "-Wextra", "-Werror", str(repository / "tests/x11_key_driver.c"),
+                    "-lX11", "-o", str(driver)], check=True)
+    config = workspace / "mic-freq-config"
+    (config / "mic_freq").mkdir(parents=True)
+    old_assets = workspace / "old installation artwork"
+    old_assets.mkdir()
+    (config / "mic_freq/settings.json").write_text(json.dumps({"assets": str(old_assets)}))
+    mic_environment = {**environment, "XDG_CONFIG_HOME": str(config)}
+    process = subprocess.Popen([str(runtime / "mic_freq/mic_freq"), "--capture"],
+                               env=mic_environment, cwd=workspace, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    screenshot = workspace / "mic-freq.ppm"
+    try:
+        deadline = time.monotonic() + 20
+        while True:
+            if process.poll() is not None:
+                raise AssertionError("mic_freq exited before rendering: " + "".join(process.communicate()))
+            capture = subprocess.run([str(driver), str(process.pid), "capture:" + str(screenshot)],
+                                     capture_output=True, timeout=12)
+            if capture.returncode == 0:
+                with Image.open(screenshot) as image:
+                    if min(image.size) >= 100 and sum(ImageStat.Stat(image.convert("RGB")).stddev) > 20:
+                        image.save(artifacts / "mic-freq-portable.png")
+                        break
+            assert time.monotonic() < deadline, "Relocated mic_freq did not render its avatar"
+            time.sleep(0.05)
+        run([str(driver), str(process.pid), "close"], environment=mic_environment, directory=workspace)
+        output, errors = process.communicate(timeout=10)
+        assert process.returncode == 0, output + errors
+        assert f"Avatar images: {runtime / 'mic_freq/assets'}" in output, output
+        saved = json.loads((config / "mic_freq/settings.json").read_text())
+        assert saved["assets"] == str(runtime / "mic_freq/assets")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+    print("PASS: relocated mic_freq launcher, adjacent artwork priority, rendered avatar, isolated preferences and clean shutdown")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--graphics", action="store_true")
@@ -168,31 +212,85 @@ def main():
                          "docs/packaging.md", "partitioned_array/lib/managed_partitioned_array.rb",
                          "licenses/LICENSE-DejaVu.txt", "package-info.json"):
             assert (runtime / filename).is_file(), f"Missing package file: {filename}"
-        documentation = [repository / "README.md", repository / "CHANGELOG.md",
-                         repository / "mic_freq/README.md", repository / "mic_freq/MANUAL.md"]
-        documentation.extend((repository / "docs").rglob("*.md"))
-        documentation.extend((repository / "partitioned_array").glob("*.md"))
+        document_manifest = json.loads((runtime / "documentation-manifest.json").read_text())
+        assert document_manifest["schema"] == 1
+        excluded_paths = {repository / path for path in document_manifest["excluded_source_directories"]}
+        ignored_names = {".git", "target", "node_modules", ".venv", "__pycache__", "tmp", "test-artifacts"}
+        documentation = []
+        for directory, folders, filenames in os.walk(repository):
+            parent = Path(directory)
+            kept = []
+            for folder in folders:
+                child = parent / folder
+                first = child.relative_to(repository).parts[0]
+                generated = first == "dist" or first.startswith(("dist-", "dist_"))
+                if folder not in ignored_names and child not in excluded_paths and not generated:
+                    kept.append(folder)
+            folders[:] = kept
+            documentation.extend(parent / filename for filename in filenames
+                                 if Path(filename).suffix.lower() == ".md" and (parent / filename).is_file())
+        expected_documents = {source.relative_to(repository).as_posix() for source in documentation}
+        packaged_documents = {entry["path"] for entry in document_manifest["documents"]}
+        assert len(packaged_documents) == len(document_manifest["documents"]), "Duplicate documentation entries"
+        assert packaged_documents == expected_documents, f"Documentation set mismatch: {packaged_documents ^ expected_documents}"
+        for entry in document_manifest["documents"]:
+            bundled = runtime / entry["path"]
+            assert bundled.is_file(), f"Missing package document: {entry['path']}"
+            assert hashlib.sha256(bundled.read_bytes()).hexdigest() == entry["sha256"], f"Document checksum mismatch: {entry['path']}"
         documentation.extend((repository / "partitioned_array").glob("*.txt"))
         for source in documentation:
             relative = source.relative_to(repository)
             bundled = runtime / relative
             assert bundled.is_file(), f"Missing package documentation: {relative}"
             assert bundled.read_bytes() == source.read_bytes(), f"Outdated package documentation: {relative}"
+        print(f"PASS: all {len(expected_documents)} Selenite/product Markdown documents, original paths and checksums")
         package_info = json.loads((runtime / "package-info.json").read_text())
         assert package_info["schema"] == 1
         assert package_info["name"] in ("selenite", "selenite-game")
-        expected_binaries = ["selenite", "selenite-game"] if package_info["name"] == "selenite" else ["selenite-game"]
+        expected_binaries = ["selenite", "selenite-game", "mic_freq/mic_freq"] if package_info["name"] == "selenite" else ["selenite-game"]
         assert package_info["binaries"] == expected_binaries
         assert (runtime / "run.sh").is_file() == ("selenite" in expected_binaries)
         assert package_info["version"] == version
         assert package_info["scripting"] is True
+        assert package_info["capabilities"]["projects"] is True
+        assert package_info["capabilities"]["native_raylib_functions"] == 600
+        assert package_info["capabilities"]["ide"] == ("selenite" in expected_binaries)
+        assert (runtime / "run-ide.sh").is_file() == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["mic_freq"] == ("selenite" in expected_binaries)
+        assert (runtime / "run-mic-freq.sh").is_file() == ("selenite" in expected_binaries)
         assert all((runtime / binary).is_file() for binary in package_info["binaries"])
+        if "selenite" in expected_binaries:
+            component = package_info["components"]["mic_freq"]
+            with (repository / "mic_freq/Cargo.toml").open("rb") as manifest:
+                assert component["version"] == tomllib.load(manifest)["package"]["version"]
+            assert component["binary"] == "mic_freq/mic_freq"
+            assert component["launcher"] == "run-mic-freq.sh"
+            assert component["assets"] == "mic_freq/assets"
+            assert (runtime / component["assets"]).is_dir()
+            for source in (repository / "mic_freq/assets").rglob("*"):
+                if source.is_file():
+                    bundled = runtime / "mic_freq/assets" / source.relative_to(repository / "mic_freq/assets")
+                    assert bundled.is_file() and bundled.read_bytes() == source.read_bytes(), f"Missing or outdated companion asset: {source}"
         environment = os.environ.copy()
         for variable in ("RUBYLIB", "RUBYOPT", "RUBY_YJIT_ENABLE", "GEM_HOME", "GEM_PATH",
                          "LD_LIBRARY_PATH", "SELENITE_PARTITIONED_ARRAY_LIB"):
             environment.pop(variable, None)
         environment["SELENITE_HOME"] = str(workspace / "organizer-home")
-        launcher = str(runtime / "run-game.sh")
+        if "selenite" in expected_binaries:
+            result = run([str(runtime / "run-mic-freq.sh"), "--help"], environment=environment, directory=workspace)
+            assert result.stdout.startswith("mic_freq [avatar-folder]")
+            assert "--device" in result.stdout and "--capture" in result.stdout
+            print("PASS: extracted mic_freq executable, launcher, artwork, component metadata and help")
+            run([str(runtime / "run-ide.sh"), "--version"], environment=environment, directory=workspace)
+            run([str(runtime / "mic_freq/mic_freq"), "--help"], environment=environment, directory=workspace)
+        run([str(runtime / "run-game.sh"), "--version"], environment=environment, directory=workspace)
+        for script in runtime.glob("run*.sh"):
+            script.unlink()
+        launcher = str(runtime / "selenite-game")
+        if shutil.which("ldd"):
+            linked = run(["ldd", launcher], environment=environment, directory=workspace)
+            ruby = next(line for line in linked.stdout.splitlines() if "libruby" in line)
+            assert str(runtime / "lib") in ruby, f"Ruby was not loaded from the relocated package: {ruby}"
         result = run([launcher, "--version"], environment=environment, directory=workspace)
         assert result.stdout.strip() == f"selenite-game {version}"
         for arguments in (["game.py"], ["game.js"], ["--script", "game.rb"],
@@ -221,6 +319,9 @@ if RUBY_VERSION.split(".").first.to_i >= 4
 end
 raise "wrong version" unless Selenite::VERSION == "VERSION"
 raise "not game mode" unless Selenite::Game.game_mode?
+api = Selenite.raylib_native.enable!
+raise "native API incomplete" unless api::API["functions"].size == 600
+raise "native records broken" unless api.ColorFromHSV(120, 1, 1).to_a == [0, 255, 0, 255]
 raise "digest missing" unless Digest::SHA256.hexdigest("ruby").size == 64
 raise "zlib missing" unless Zlib::Inflate.inflate(Zlib::Deflate.deflate("ruby")) == "ruby"
 game = Selenite::Game.new(audio: false)
@@ -272,11 +373,23 @@ puts "RUBY_STORAGE_OK"
         assert invalid_save.read_text() == "invalid json"
         print("PASS: relocated runtime, Ruby-only CLI, bytecode compilation without source, corruption rejection, native extensions, storage, revenants, BSP")
 
-        organizer = runtime / "run.sh"
+        organizer = runtime / "selenite"
         if organizer.is_file():
+            result = run([str(organizer), "--version"], environment=environment, directory=workspace)
+            assert result.stdout.strip() == f"selenite {version}"
+            assert (runtime / "examples/projects/starter/selenite-project.json").is_file()
+            application = workspace / "portable application project"
+            run([str(organizer), "--new-project", str(application), "--app"], environment=environment, directory=workspace)
+            original = (application / "app.rb").read_bytes()
+            run([str(organizer), "--new-project", str(application)], environment=environment, directory=workspace, success=False)
+            assert (application / "app.rb").read_bytes() == original
+            for count in (1, 2):
+                result = run([str(organizer), "--project", str(application)], environment=environment, directory=workspace)
+                assert f"application run: {count}" in result.stdout
+            print("PASS: relocated IDE launcher, project scaffolding, configured application runs and native raylib records")
             result = run([str(organizer), "--help"], environment=environment, directory=workspace)
             assert result.stdout.startswith(f"Selenite {version}")
-            assert package_info["binaries"] == ["selenite", "selenite-game"]
+            assert package_info["binaries"] == ["selenite", "selenite-game", "mic_freq/mic_freq"]
             terminal_environment = {**environment, "SHELL": "/bin/sh", "SELENITE_TERMINAL_TEST": "inherited"}
             result = run([str(organizer), "--terminal", "-c",
                           'printf "%s|%s" "$SELENITE_TERMINAL_TEST" "$1"; exit 17',
@@ -328,6 +441,16 @@ puts "RUBY_STORAGE_OK"
 
             if organizer.is_file():
                 native_inventory(repository, organizer, workspace, environment, artifacts)
+                native_mic_freq(repository, runtime, workspace, environment, artifacts)
+                for size in ("420x300", "1920x1080"):
+                    shot = (artifacts / f"ide-{size}.png").resolve()
+                    run([str(organizer), "--ide"], environment={**environment,
+                        "SELENITE_EDITOR_FRAMES": "6", "SELENITE_EDITOR_SIZE": size,
+                        "SELENITE_EDITOR_SCREENSHOT": str(shot)}, directory=workspace)
+                    with Image.open(shot) as image:
+                        assert image.size == tuple(map(int, size.split("x")))
+                        assert sum(ImageStat.Stat(image.convert("RGB")).stddev) > 20
+                print("PASS: relocated project IDE renders compact and desktop layouts")
                 note = workspace / "editor-note.md"
                 note.write_text("# Title\n\n```ruby\nclass Foo\nend\n```\n\n- [x] item\n")
                 shot = (artifacts / "editor-markdown.png").resolve()

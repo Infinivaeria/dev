@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "name": "selenite-game",
+  "version": "12.0.0-rc.1",
+  "binaries": [
+    "selenite-game"
+  ],
+  "scripting": true,
+  "ruby_version": "4.0.9",
+  "ruby_platform": "x86_64-linux",
+  "components": {},
+  "capabilities": {
+    "ide": false,
+    "projects": true,
+    "project_checks": true,
+    "suite_menu": false,
+    "scale_menu": false,
+    "quick_open": false,
+    "terminal_tabs": false,
+    "asset_diagnostics": false,
+    "audio_presets": false,
+    "embedded_terminal": false,
+    "mic_freq": false,
+    "native_raylib_functions": 600
+  }
+}

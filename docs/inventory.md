@@ -38,6 +38,21 @@ every stack operation.
 
 ## The inventory panel
 
+The separate File List window includes a Missing filter (M) for broken file
+links across nested grids. Refresh rechecks links after files move or return.
+Its Scale and Suite controls expose shared F9/F8 menus.
+File List also has case-insensitive filename/path search (Ctrl+F), a file-type
+filter, and Name/Type/Location sorting. These filters combine with Missing.
+Enter or Down leaves search and selects the first result; arrows navigate the
+filtered list. Copy Path (Ctrl+C) copies the selected asset's path. Folder
+(Ctrl+O) opens its containing directory, including for a missing asset whose
+folder still exists. Refresh reloads the grid and rechecks file availability.
+The Shortcut button creates a desktop launcher for the selected file or folder.
+In the organizer, right-click a file/folder cell for Create Desktop Shortcut;
+Desktop shortcut for workspace saves the current profile/grid before linking it.
+Suite > Desktop Shortcuts creates individual tool, project and grid launchers,
+or all available suite tools at once. Personal launchers are never overwritten.
+
 Press **B**, click the **Items** toolbar button, or right-click → **Grid
 inventory…**. The panel lists the current grid's items, each with **+**,
 **−** and delete buttons and a metadata summary. Type commands in the entry

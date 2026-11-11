@@ -19,6 +19,9 @@ const MAX_USER_SCALE: f32 = 3.0;
 const USER_SCALE_STEP: f32 = 0.1;
 /// Window-size scaling keeps growing up to this factor, so maximized windows on large displays stay readable.
 const MAX_WINDOW_SCALE: f32 = 6.0;
+/// Measured toolbar footprint at scale 1 (button area in px²) and the window share zoom may let it use.
+const TOOLBAR_AREA: f32 = 65_000.0;
+const TOOLBAR_SHARE: f32 = 0.25;
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/DejaVuSans.ttf");
 /// Glyph atlas resolution; larger sizes are upscaled, smaller ones use mipmaps.
@@ -27,6 +30,7 @@ const ATLAS_FONT_SIZE: i32 = 96;
 thread_local! {
     static FONT: Cell<Option<ffi::Font>> = const { Cell::new(None) };
     static USER_SCALE: Cell<f32> = const { Cell::new(1.0) };
+    static TOOLBAR_LIMIT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Loads the embedded UI font. Must be called once per process after the
@@ -192,7 +196,7 @@ fn wrap_with(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> Vec<S
 }
 
 fn fit_with(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
-    if measure(text) <= max_width {
+    if measure(text) <= max_width + 0.01 {
         return text.to_owned();
     }
     let chars: Vec<char> = text.chars().collect();
@@ -215,11 +219,18 @@ fn fit_with(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String
 
 /// Overall UI scale factor for a window of the given size.
 pub fn scale(screen_width: i32, screen_height: i32) -> f32 {
-    scale_for(
-        screen_width as f32,
-        screen_height as f32,
-        USER_SCALE.with(Cell::get),
-    )
+    let (width, height) = (screen_width as f32, screen_height as f32);
+    let scaled = scale_for(width, height, USER_SCALE.with(Cell::get));
+    if TOOLBAR_LIMIT.with(Cell::get) {
+        limit_for_toolbar(width, height, scaled)
+    } else {
+        scaled
+    }
+}
+
+/// Windows with a toolbar stop zooming once the wrapped toolbar would crowd out the content.
+pub fn limit_to_toolbar() {
+    TOOLBAR_LIMIT.with(|cell| cell.set(true));
 }
 
 fn scale_for(width: f32, height: f32, user_scale: f32) -> f32 {
@@ -229,11 +240,21 @@ fn scale_for(width: f32, height: f32, user_scale: f32) -> f32 {
     window * BASE_BOOST * user_scale
 }
 
+/// The wrapped toolbar needs about TOOLBAR_AREA * scale² / width pixels of height; the
+/// default (zoom 1) scale is always allowed, extra zoom only while the toolbar fits.
+fn limit_for_toolbar(width: f32, height: f32, scaled: f32) -> f32 {
+    let default = scale_for(width, height, 1.0);
+    let fit = (TOOLBAR_SHARE * width * height / TOOLBAR_AREA)
+        .max(0.0)
+        .sqrt();
+    scaled.min(fit.max(default))
+}
+
 fn clamp_user_scale(value: f32) -> f32 {
     if !value.is_finite() {
         return 1.0;
     }
-    (value.clamp(MIN_USER_SCALE, MAX_USER_SCALE) * 10.0).round() / 10.0
+    (value.clamp(MIN_USER_SCALE, MAX_USER_SCALE) * 100.0).round() / 100.0
 }
 
 /// The user's Ctrl +/- zoom multiplier (1.0 by default).
@@ -246,6 +267,74 @@ pub fn user_scale() -> f32 {
 #[allow(dead_code)]
 pub fn set_user_scale(value: f32) {
     USER_SCALE.with(|cell| cell.set(clamp_user_scale(value)));
+}
+
+#[derive(Default)]
+pub(crate) struct ScaleMenu {
+    pub open: bool,
+    toolbar_enabled: Option<bool>,
+}
+
+impl ScaleMenu {
+    fn geometry(width: i32, height: i32) -> (Rectangle, Vec<Rectangle>) {
+        let row = (height as f32 / 9.0).clamp(20.0, 40.0);
+        let menu_width = (width as f32 - 16.0).clamp(1.0, 400.0);
+        let bounds = Rectangle::new((width as f32 - menu_width) / 2.0, (height as f32 - row * 7.0) / 2.0, menu_width, row * 7.0);
+        let rows = (0..6).map(|index| Rectangle::new(bounds.x + 8.0, bounds.y + row * (index + 1) as f32, bounds.width - 16.0, row - 1.0)).collect();
+        (bounds, rows)
+    }
+
+    fn toolbar_toggle(bounds: Rectangle, row_height: f32) -> Rectangle {
+        let width = bounds.width * 0.42;
+        Rectangle::new(bounds.x + bounds.width - width - 8.0, bounds.y, width, row_height)
+    }
+
+    pub fn update(&mut self, rl: &RaylibHandle) -> bool {
+        if rl.is_key_pressed(KeyboardKey::KEY_F9) { self.open = !self.open; }
+        if !self.open { return false; }
+        let path = crate::settings::Settings::path_in(&crate::profiles::default_base_dir());
+        let mut settings = crate::settings::Settings::load(&path);
+        self.toolbar_enabled = Some(settings.toolbar_enabled);
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.open = false; return true; }
+        if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+            let (bounds, rows) = Self::geometry(rl.get_screen_width(), rl.get_screen_height());
+            let mouse = rl.get_mouse_position();
+            if Self::toolbar_toggle(bounds, rows[0].height).check_collision_point_rec(mouse) {
+                settings.toolbar_enabled = !settings.toolbar_enabled;
+                if settings.save(&path).is_ok() { self.toolbar_enabled = Some(settings.toolbar_enabled); }
+            } else if let Some(index) = rows.iter().position(|row| row.check_collision_point_rec(mouse)) {
+                if index == 5 { self.open = false; }
+                else {
+                    set_user_scale([0.75, 1.0, 1.25, 1.5, 2.0][index]);
+                    let _ = crate::settings::save_ui_scale(user_scale());
+                }
+            } else if !bounds.check_collision_point_rec(mouse) { self.open = false; }
+        }
+        true
+    }
+
+    pub fn draw<D: RaylibDraw>(&self, d: &mut D, width: i32, height: i32) {
+        if !self.open { return; }
+        let (bounds, rows) = Self::geometry(width, height);
+        let font = (rows[0].height * 0.45).clamp(9.0, 18.0);
+        d.draw_rectangle(0, 0, width, height, Color::new(0, 0, 0, 170));
+        d.draw_rectangle_rec(bounds, Color::new(28, 29, 35, 255));
+        let toggle = Self::toolbar_toggle(bounds, rows[0].height);
+        let title = fit("Interface Scale", font, toggle.x - bounds.x - 20.0);
+        draw_text_in(d, &title, Rectangle::new(bounds.x, bounds.y, toggle.x - bounds.x, rows[0].height), 12.0, font, Color::RAYWHITE);
+        let box_size = (rows[0].height * 0.5).clamp(10.0, 18.0);
+        let checkbox = Rectangle::new(toggle.x, toggle.y + (toggle.height - box_size) / 2.0, box_size, box_size);
+        d.draw_rectangle_lines_ex(checkbox, 1.0, Color::RAYWHITE);
+        if self.toolbar_enabled.unwrap_or(true) {
+            d.draw_rectangle_rec(Rectangle::new(checkbox.x + 3.0, checkbox.y + 3.0, checkbox.width - 6.0, checkbox.height - 6.0), Color::SKYBLUE);
+        }
+        draw_text_in(d, "Toolbar", toggle, box_size + 6.0, font, Color::RAYWHITE);
+        for (index, row) in rows.iter().enumerate() {
+            let selected = index < 5 && (user_scale() - [0.75, 1.0, 1.25, 1.5, 2.0][index.min(4)]).abs() < 0.01;
+            d.draw_rectangle_rec(*row, if selected { Color::new(50, 80, 95, 255) } else { Color::new(38, 40, 48, 255) });
+            draw_text_in(d, ["75%", "100%", "125%", "150%", "200%", "Close"][index], *row, 12.0, font, Color::RAYWHITE);
+        }
+    }
 }
 
 /// Ctrl + mouse wheel zooms the UI like Ctrl +/-. Returns the new scale when it changed.
@@ -347,6 +436,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn scale_menu_options_fit_small_and_large_windows() {
+        for (width, height) in [(240, 140), (420, 300), (1100, 760), (3840, 2160)] {
+            let (bounds, rows) = ScaleMenu::geometry(width, height);
+            assert!(bounds.x >= 0.0 && bounds.y >= 0.0);
+            assert!(bounds.x + bounds.width <= width as f32);
+            assert!(bounds.y + bounds.height <= height as f32);
+            for (index, row) in rows.iter().enumerate() {
+                assert!(row.x >= bounds.x && row.x + row.width <= bounds.x + bounds.width);
+                assert!(row.y + row.height <= bounds.y + bounds.height);
+                for other in &rows[index + 1..] { assert!(!row.check_collision_recs(*other)); }
+            }
+        }
+    }
+
+    #[test]
     fn scale_grows_with_window_and_user_multiplier() {
         let base = scale_for(BASE_WIDTH, BASE_HEIGHT, 1.0);
         assert!((base - BASE_BOOST).abs() < f32::EPSILON);
@@ -368,8 +472,22 @@ mod tests {
     }
 
     #[test]
+    fn saved_zoom_cannot_bury_the_window_under_the_toolbar() {
+        for (width, height) in [(960.0, 720.0), (1920.0, 1080.0), (6010.0, 3318.0)] {
+            let base = scale_for(width, height, 1.0);
+            let zoomed = limit_for_toolbar(width, height, scale_for(width, height, MAX_USER_SCALE));
+            assert!(zoomed >= base, "zoom never shrinks the default");
+            let toolbar_height = TOOLBAR_AREA * zoomed * zoomed / width;
+            assert!(zoomed == base || toolbar_height <= height * TOOLBAR_SHARE * 1.001);
+        }
+        assert!(limit_for_toolbar(960.0, 720.0, scale_for(960.0, 720.0, 2.3)) < 2.0);
+    }
+
+    #[test]
     fn user_scale_is_clamped_rounded_and_survives_bad_input() {
-        assert_eq!(clamp_user_scale(1.04), 1.0);
+        assert_eq!(clamp_user_scale(1.04), 1.04);
+        assert_eq!(clamp_user_scale(0.75), 0.75);
+        assert_eq!(clamp_user_scale(1.25), 1.25);
         assert_eq!(clamp_user_scale(0.01), MIN_USER_SCALE);
         assert_eq!(clamp_user_scale(99.0), MAX_USER_SCALE);
         assert_eq!(clamp_user_scale(f32::NAN), 1.0);
@@ -405,6 +523,14 @@ mod tests {
         assert_eq!(fit_with("short", 100.0, measure), "short");
         assert_eq!(fit_with("a_very_long_name.mp3", 60.0, measure), "a_ver…");
         assert_eq!(fit_with("abc", 5.0, measure), "");
+    }
+
+    #[test]
+    fn fit_preserves_short_button_labels_at_float_rounding_boundaries() {
+        let measure = |text: &str| text.chars().count() as f32 * 10.0;
+        assert_eq!(fit_with("In", 20.0_f32.next_down(), measure), "In");
+        assert_eq!(fit_with("Out", 30.0_f32.next_down(), measure), "Out");
+        assert_eq!(fit_with("In", 5.0, measure), "");
     }
 
     #[test]

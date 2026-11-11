@@ -853,6 +853,246 @@ pub fn ruby_matching_indent(lines: &[String], row: usize) -> Option<usize> {
     None
 }
 
+const PROMPT_MARKS: &[char] = &['$', '%', '#', '>', '❯', '➜', 'λ', '»', '›'];
+const ERROR_WORDS: &[&str] = &[
+    "error",
+    "errors",
+    "fatal",
+    "failed",
+    "failure",
+    "panic",
+    "panicked",
+    "denied",
+    "exception",
+    "traceback",
+    "critical",
+    "cannot",
+    "abort",
+    "aborted",
+];
+const WARNING_WORDS: &[&str] = &["warning", "warnings", "warn", "deprecated", "caution"];
+const SUCCESS_WORDS: &[&str] = &["ok", "pass", "passed", "success", "successful", "succeeded"];
+const URL_SCHEMES: &[&str] = &["http://", "https://", "ftp://", "file://"];
+
+fn push_span(spans: &mut Vec<Span>, start: usize, end: usize, token: Token) {
+    if end > start {
+        spans.push(Span { start, end, token });
+    }
+}
+
+/// `ls -l` mode strings such as `-rwxr-xr-x`, which must not read as flags.
+fn is_mode_string(token: &[char]) -> bool {
+    token.len() == 10
+        && matches!(token[0], '-' | 'd' | 'l')
+        && token[1..].iter().all(|c| "rwxsStT-".contains(*c))
+}
+
+fn word_end(chars: &[char], start: usize) -> usize {
+    let mut end = start;
+    while end < chars.len() && is_ident(chars[end]) {
+        end += 1;
+    }
+    end
+}
+
+fn token_end(chars: &[char], start: usize) -> usize {
+    let mut end = start;
+    while end < chars.len() && !chars[end].is_whitespace() && !"\"'`<>".contains(chars[end]) {
+        end += 1;
+    }
+    end
+}
+
+/// Drops sentence punctuation that follows a path or URL.
+fn trim_trailing(chars: &[char], start: usize, mut end: usize) -> usize {
+    while end > start && ".,;:!?)]}".contains(chars[end - 1]) {
+        end -= 1;
+    }
+    end
+}
+
+/// Highlights one line of terminal text: shell prompts and commands, quoted
+/// strings, flags, variables, paths, URLs, numbers and error/warning/success words.
+pub fn highlight_terminal_line(line: &str) -> Vec<Span> {
+    let chars: Vec<char> = line.chars().collect();
+    let n = chars.len();
+    let mut spans = Vec::new();
+    let mut index = 0;
+
+    // A prompt is a short whitespace-free prefix ending in a mark and a space.
+    let prompt = (0..n)
+        .take_while(|&i| !chars[i].is_whitespace())
+        .find(|&i| {
+            PROMPT_MARKS.contains(&chars[i])
+                && chars.get(i + 1) == Some(&' ')
+                && !(i == 0 && chars[i] == '#')
+        });
+    if let Some(mark) = prompt {
+        push_span(&mut spans, mark, mark + 1, Token::Marker);
+        index = mark + 1;
+        let mut first = true;
+        loop {
+            while index < n && chars[index] == ' ' {
+                index += 1;
+            }
+            let end = token_end(&chars, index);
+            let word: String = chars[index..end].iter().collect();
+            let command_like = chars
+                .get(index)
+                .is_some_and(|c| is_ident_start(*c) || matches!(c, '.' | '/' | '~'));
+            if !command_like {
+                break;
+            }
+            if first && word == "sudo" {
+                push_span(&mut spans, index, end, Token::Keyword);
+                index = end;
+                first = false;
+                continue;
+            }
+            push_span(&mut spans, index, end, Token::Function);
+            index = end;
+            break;
+        }
+    }
+
+    while index < n {
+        let c = chars[index];
+        let previous = index.checked_sub(1).map(|i| chars[i]);
+        let token_start = previous.is_none_or(|p| {
+            p.is_whitespace() || matches!(p, '=' | '(' | '[' | ',' | ':' | '"' | '\'')
+        });
+
+        if c == '#'
+            && previous.is_none_or(char::is_whitespace)
+            && chars
+                .get(index + 1)
+                .is_none_or(|next| next.is_whitespace() || *next == '#')
+        {
+            push_span(&mut spans, index, n, Token::Comment);
+            break;
+        }
+        if token_start
+            && URL_SCHEMES
+                .iter()
+                .any(|scheme| starts_with(&chars[index..], scheme))
+        {
+            let end = trim_trailing(&chars, index, token_end(&chars, index));
+            push_span(&mut spans, index, end, Token::Link);
+            index = end.max(index + 1);
+            continue;
+        }
+        if matches!(c, '"' | '`') || (c == '\'' && previous.is_none_or(|p| !p.is_alphanumeric())) {
+            let mut close = index + 1;
+            while close < n && chars[close] != c {
+                close += if chars[close] == '\\' && c == '"' {
+                    2
+                } else {
+                    1
+                };
+            }
+            if close < n {
+                push_span(&mut spans, index, close + 1, Token::String);
+                index = close + 1;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+        if c == '$' {
+            let next = chars.get(index + 1).copied();
+            let end = match next {
+                Some('{') => chars[index..]
+                    .iter()
+                    .position(|c| *c == '}')
+                    .map_or(index + 1, |close| index + close + 1),
+                Some(next) if is_ident_start(next) => word_end(&chars, index + 1),
+                Some('?' | '!' | '#' | '@' | '*') => index + 2,
+                _ => index + 1,
+            };
+            push_span(&mut spans, index, end, Token::Variable);
+            index = end.max(index + 1);
+            continue;
+        }
+        if token_start && c == '-' {
+            let end = token_end(&chars, index);
+            let flag_start = if chars.get(index + 1) == Some(&'-') {
+                index + 2
+            } else {
+                index + 1
+            };
+            if chars.get(flag_start).is_some_and(|c| c.is_alphabetic())
+                && !is_mode_string(&chars[index..end])
+            {
+                let mut flag_end = flag_start;
+                while flag_end < end
+                    && (chars[flag_end].is_alphanumeric() || matches!(chars[flag_end], '-' | '_'))
+                {
+                    flag_end += 1;
+                }
+                push_span(&mut spans, index, flag_end, Token::Builtin);
+                index = flag_end;
+                continue;
+            }
+        }
+        if token_start && matches!(c, '/' | '.' | '~' | 'a'..='z' | 'A'..='Z' | '0'..='9' | '_') {
+            let end = trim_trailing(&chars, index, token_end(&chars, index));
+            let token = &chars[index..end];
+            let rooted = starts_with(token, "/")
+                || starts_with(token, "./")
+                || starts_with(token, "../")
+                || starts_with(token, "~/");
+            let rooted = rooted && token.get(1).is_some_and(|next| !next.is_whitespace());
+            let relative = token.contains(&'/')
+                && !token.contains(&'=')
+                && token.iter().rposition(|c| *c == '/').is_some_and(|slash| {
+                    slash + 1 == token.len() || token[slash + 1..].contains(&'.')
+                })
+                && c.is_alphanumeric();
+            if (rooted || relative) && token.len() > 1 {
+                push_span(&mut spans, index, end, Token::Symbol);
+                index = end;
+                continue;
+            }
+        }
+        if c.is_ascii_digit() && previous.is_none_or(|p| !is_ident(p)) {
+            let mut end = scan_number(&chars, index);
+            while chars.get(end) == Some(&'.')
+                && chars.get(end + 1).is_some_and(char::is_ascii_digit)
+            {
+                end = scan_number(&chars, end + 1);
+            }
+            let rest = word_end(&chars, end);
+            if rest - end <= 2 {
+                push_span(&mut spans, index, rest, Token::Number);
+            }
+            index = rest.max(index + 1);
+            continue;
+        }
+        if is_ident_start(c) {
+            let end = word_end(&chars, index);
+            if previous.is_none_or(|p| !is_ident(p)) {
+                let word: String = chars[index..end].iter().collect::<String>().to_lowercase();
+                let token = if ERROR_WORDS.contains(&word.as_str()) {
+                    Some(Token::Variable)
+                } else if WARNING_WORDS.contains(&word.as_str()) {
+                    Some(Token::Number)
+                } else if SUCCESS_WORDS.contains(&word.as_str()) {
+                    Some(Token::String)
+                } else {
+                    None
+                };
+                if let Some(token) = token {
+                    push_span(&mut spans, index, end, token);
+                }
+            }
+            index = end;
+            continue;
+        }
+        index += 1;
+    }
+    spans
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1036,5 +1276,102 @@ mod tests {
         assert_eq!(ruby_matching_indent(&lines, 4), Some(4));
         assert_eq!(ruby_matching_indent(&lines[..1], 1), Some(0));
         assert_eq!(ruby_matching_indent(&[], 0), None);
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    fn marked(line: &str) -> Vec<(String, Token)> {
+        let chars: Vec<char> = line.chars().collect();
+        highlight_terminal_line(line)
+            .into_iter()
+            .map(|span| (chars[span.start..span.end].iter().collect(), span.token))
+            .collect()
+    }
+
+    fn has(line: &str, text: &str, token: Token) -> bool {
+        marked(line).contains(&(text.to_owned(), token))
+    }
+
+    #[test]
+    fn prompts_and_commands() {
+        let spans = marked("me@box:~/dev$ git commit -m \"fix it\" # why");
+        assert_eq!(spans[0], ("$".to_owned(), Token::Marker));
+        assert_eq!(spans[1], ("git".to_owned(), Token::Function));
+        assert!(spans.contains(&("-m".to_owned(), Token::Builtin)));
+        assert!(spans.contains(&("\"fix it\"".to_owned(), Token::String)));
+        assert!(spans.contains(&("# why".to_owned(), Token::Comment)));
+        let sudo = marked("$ sudo apt update");
+        assert_eq!(sudo[1], ("sudo".to_owned(), Token::Keyword));
+        assert_eq!(sudo[2], ("apt".to_owned(), Token::Function));
+        assert!(marked("# just a comment")[0].1 == Token::Comment);
+        assert!(has("root@host:/# ls", "ls", Token::Function));
+    }
+
+    #[test]
+    fn paths_urls_variables_and_numbers() {
+        assert!(has("cat /etc/hosts now", "/etc/hosts", Token::Symbol));
+        assert!(has(
+            "see src/main.rs:12:3, ok",
+            "src/main.rs:12:3",
+            Token::Symbol
+        ));
+        assert!(!marked("and/or TCP/IP")
+            .iter()
+            .any(|(_, t)| *t == Token::Symbol));
+        assert!(has(
+            "go to https://example.com/a.",
+            "https://example.com/a",
+            Token::Link
+        ));
+        assert!(has("echo $HOME ${USER}", "$HOME", Token::Variable));
+        assert!(has("echo $HOME ${USER}", "${USER}", Token::Variable));
+        assert!(has("took 12ms for 3.14 items", "12ms", Token::Number));
+        assert!(has("took 12ms for 3.14 items", "3.14", Token::Number));
+        assert!(has("version 1.2.3", "1.2.3", Token::Number));
+        assert!(!marked("commit 3f2a9c1")
+            .iter()
+            .any(|(_, t)| *t == Token::Number));
+    }
+
+    #[test]
+    fn status_words_flags_and_false_positives() {
+        assert!(has("Error: boom", "Error", Token::Variable));
+        assert!(has("warning: unused", "warning", Token::Number));
+        assert!(has("test result: ok.", "ok", Token::String));
+        assert!(has("run --release -v", "--release", Token::Builtin));
+        assert!(marked("-rwxr-xr-x 1 me me 4096 file")
+            .iter()
+            .all(|(t, _)| t != "-rwxr-xr-x"));
+        assert!(marked("don't stop, it's fine")
+            .iter()
+            .all(|(_, t)| *t != Token::String));
+        assert!(marked("issue #123 fixed")
+            .iter()
+            .all(|(_, t)| *t != Token::Comment));
+        assert!(marked("").is_empty());
+    }
+
+    #[test]
+    fn spans_are_ordered_and_inside_the_line() {
+        for line in [
+            "$ echo \"a $B c\" 'd' --x=/tmp/y 1.5 https://a.b/c # z",
+            "plain words only",
+            "é日本 $ x",
+            "\"unterminated string",
+            "$ ",
+        ] {
+            let length = line.chars().count();
+            let mut end = 0;
+            for span in highlight_terminal_line(line) {
+                assert!(
+                    span.start >= end && span.end > span.start && span.end <= length,
+                    "{line}"
+                );
+                end = span.end;
+            }
+        }
     }
 }

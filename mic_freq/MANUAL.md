@@ -2,6 +2,13 @@
 
 ## Requirements
 
+In the full Selenite extraction package, run `./run-mic-freq.sh` from its root.
+It launches `mic_freq/mic_freq` and uses adjacent `mic_freq/assets` by default.
+Use `./run-mic-freq.sh /path/to/avatar --capture` to override the artwork.
+Rust and development headers are only needed to build from source, not to run
+the extracted executable. The host still supplies graphics, ALSA and microphone
+permissions. The dedicated game-only package does not contain this studio.
+
 - A microphone input device for voice animation. Manual poses and the demo avatar work without one.
 - Rust nightly, `cmake`, `clang`; on Linux: `libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 
@@ -21,7 +28,7 @@ Optional `idle_blink.png`, `talking_blink.png`, and `loud_blink.png` are full-fr
 |-----|--------|
 | Up / Down | Raise / lower the noise gate by 2 dB |
 | R | Reload avatar images |
-| C | Toggle clean capture / studio controls |
+| C | Toggle clean capture / studio controls; click the clean canvas to return |
 | M | Mute microphone animation (forces idle) |
 | 0 | Automatic microphone-driven pose |
 | 1 / 2 / 3 | Force idle / talking / loud pose |
@@ -57,7 +64,7 @@ The image choice depends on microphone *loudness*, not the words you say or the 
 
 Click **Calibrate noise gate** and remain quiet for three seconds. The gate is set 6 dB above the highest measured room-noise level, within the supported range. Avoid tapping the microphone during calibration. Then speak normally and fine-tune the gate and loud threshold. Calibration requires a working microphone and is not saved until it finishes.
 
-See [OBS setup](README.md#obs-setup) for capture and chroma-key steps. Clean capture hides all UI and errors, including microphone and reload failures. Return to the studio with **C** to diagnose a problem. The window has no native transparent-background mode; PNG alpha is composited onto the chosen background.
+See [OBS setup](README.md#obs-setup) for capture and chroma-key steps. Clean capture hides all UI and errors, including microphone and reload failures. Return to the studio with **C** or by clicking the clean canvas to diagnose a problem. The window has no native transparent-background mode; PNG alpha is composited onto the chosen background.
 
 ## Preferences and CLI
 

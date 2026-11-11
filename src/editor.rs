@@ -82,15 +82,42 @@ pub fn is_text_path(path: &Path) -> bool {
     )
 }
 
-/// First `note.md`, `note-2.md`, … that does not exist in `directory`.
-pub fn unique_note_path(directory: &Path) -> PathBuf {
-    let mut candidate = directory.join("note.md");
+/// First `<stem>.<extension>`, `<stem>-2.<extension>`, … that does not exist in `directory`.
+fn unique_path(directory: &Path, stem: &str, extension: &str) -> PathBuf {
+    let mut candidate = directory.join(format!("{stem}.{extension}"));
     let mut number = 2;
     while candidate.exists() {
-        candidate = directory.join(format!("note-{number}.md"));
+        candidate = directory.join(format!("{stem}-{number}.{extension}"));
         number += 1;
     }
     candidate
+}
+
+/// First `note.md`, `note-2.md`, … that does not exist in `directory`.
+pub fn unique_note_path(directory: &Path) -> PathBuf {
+    unique_path(directory, "note", "md")
+}
+
+/// First `untitled.txt`, `untitled-2.txt`, … that does not exist in `directory`.
+pub fn unique_text_path(directory: &Path) -> PathBuf {
+    unique_path(directory, "untitled", "txt")
+}
+
+pub fn unique_ruby_path(directory: &Path) -> PathBuf {
+    unique_path(directory, "game", "rb")
+}
+
+/// Creates an empty file at `path` unless it already exists.
+pub fn create_empty_if_missing(path: &Path) -> io::Result<()> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Creates `path` with a title heading unless it already exists.
@@ -849,11 +876,26 @@ thread_local! {
     static MONO: Cell<Option<ffi::Font>> = const { Cell::new(None) };
 }
 
-fn load_mono_font() {
+pub(crate) fn load_mono_font(extended: bool) {
     let mut codepoints: Vec<i32> = (32..=126).chain(160..=591).collect();
     codepoints.extend([
         0x2026, 0x2013, 0x2014, 0x2022, 0x2190, 0x2191, 0x2192, 0x2193, 0x203A,
     ]);
+    if extended {
+        // Greek, Cyrillic, punctuation, arrows, maths, box drawing, blocks, shapes and braille.
+        codepoints.extend(
+            (0x370..=0x4FF)
+                .chain(0x2000..=0x206F)
+                .chain(0x2190..=0x22FF),
+        );
+        codepoints.extend(
+            (0x2500..=0x25FF)
+                .chain(0x2800..=0x28FF)
+                .chain(0xE0A0..=0xE0A3),
+        );
+        codepoints.sort_unstable();
+        codepoints.dedup();
+    }
     let file_type = CString::new(".ttf").expect("static string has no NUL");
     // SAFETY: the window and GL context exist (this runs after `raylib::init`),
     // and every pointer is valid for the duration of the calls.
@@ -898,7 +940,7 @@ fn c_text(text: &str) -> CString {
     CString::new(text.replace('\0', "")).expect("NUL bytes were removed")
 }
 
-fn measure_mono(text: &str, size: f32) -> f32 {
+pub(crate) fn measure_mono(text: &str, size: f32) -> f32 {
     if text.is_empty() {
         return 0.0;
     }
@@ -908,7 +950,14 @@ fn measure_mono(text: &str, size: f32) -> f32 {
     unsafe { ffi::MeasureTextEx(font, text.as_ptr(), size, mono_spacing(size, custom)).x }
 }
 
-fn draw_mono<D: RaylibDraw>(_d: &mut D, text: &str, x: f32, y: f32, size: f32, color: Color) {
+pub(crate) fn draw_mono<D: RaylibDraw>(
+    _d: &mut D,
+    text: &str,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+) {
     if text.is_empty() || size < 1.0 {
         return;
     }
@@ -928,7 +977,7 @@ fn draw_mono<D: RaylibDraw>(_d: &mut D, text: &str, x: f32, y: f32, size: f32, c
     }
 }
 
-fn capture_screen(path: &str) -> bool {
+pub(crate) fn capture_screen(path: &str) -> bool {
     let path = c_text(path);
     // SAFETY: called between BeginDrawing and EndDrawing; the image is freed here.
     unsafe {
@@ -976,6 +1025,7 @@ struct Geometry {
     min_pane: f32,
     width: f32,
     height: f32,
+    overlay_height: f32,
 }
 
 struct Panes {
@@ -1069,7 +1119,56 @@ struct Editor {
     /// The preview link under the mouse.
     hover_link: Option<String>,
     cursor: MouseCursor,
+    menu: Option<bool>,
+    file_dialog: Option<FileDialog>,
+    workspace_request: Option<PathBuf>,
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum EditCommand { New, Open, NewGameProject, NewAppProject, OpenProject, Workspace, Save, SaveAs, Reload, Close, Undo, Redo, Cut, Copy, Paste, SelectAll, Find, Replace }
+
+#[derive(Clone, Copy, PartialEq)]
+enum FileAction { New, Open, NewGameProject, NewAppProject, OpenProject, SaveAs, Workspace }
+
+struct FileDialog {
+    action: FileAction,
+    text: String,
+    selected: bool,
+    message: String,
+    discard_confirmed: bool,
+    overwrite_confirmed: bool,
+}
+
+struct FileDialogGeometry {
+    bounds: Rectangle,
+    field: Rectangle,
+    buttons: [Rectangle; 2],
+    font: f32,
+    padding: f32,
+}
+
+const FILE_COMMANDS: &[(&str, EditCommand)] = &[
+    ("New...           Ctrl+N", EditCommand::New),
+    ("Open...          Ctrl+O", EditCommand::Open),
+    ("New Game Project...", EditCommand::NewGameProject),
+    ("New Application Project...", EditCommand::NewAppProject),
+    ("Open Project...", EditCommand::OpenProject),
+    ("Add Workspace...", EditCommand::Workspace),
+    ("Save             Ctrl+S", EditCommand::Save),
+    ("Save As... Ctrl+Shift+S", EditCommand::SaveAs),
+    ("Reload", EditCommand::Reload),
+    ("Close            Ctrl+Q", EditCommand::Close),
+];
+const EDIT_COMMANDS: &[(&str, EditCommand)] = &[
+    ("Undo             Ctrl+Z", EditCommand::Undo),
+    ("Redo             Ctrl+Y", EditCommand::Redo),
+    ("Cut              Ctrl+X", EditCommand::Cut),
+    ("Copy             Ctrl+C", EditCommand::Copy),
+    ("Paste            Ctrl+V", EditCommand::Paste),
+    ("Select All       Ctrl+A", EditCommand::SelectAll),
+    ("Find...          Ctrl+F", EditCommand::Find),
+    ("Replace...       Ctrl+H", EditCommand::Replace),
+];
 
 /// The find / replace bar: fields, options and the matches it found.
 struct Find {
@@ -1093,9 +1192,15 @@ fn point_in(rect: Rectangle, point: Vector2) -> bool {
         && point.y < rect.y + rect.height
 }
 
+fn split_fraction(mouse_x: f32, left: f32, width: f32, minimum: f32) -> f32 {
+    let width = width.max(1.0);
+    let low = (minimum / width).clamp(0.0, 0.5);
+    ((mouse_x - left) / width).clamp(low, 1.0 - low)
+}
+
 /// Key repeat driven by our own clock, so a held key behaves the same everywhere.
 #[derive(Default)]
-struct KeyRepeat {
+pub(crate) struct KeyRepeat {
     next: Vec<(KeyboardKey, f64)>,
 }
 
@@ -1103,7 +1208,7 @@ impl KeyRepeat {
     const DELAY: f64 = 0.4;
     const INTERVAL: f64 = 0.035;
 
-    fn fire(&mut self, rl: &RaylibHandle, key: KeyboardKey, now: f64) -> bool {
+    pub(crate) fn fire(&mut self, rl: &RaylibHandle, key: KeyboardKey, now: f64) -> bool {
         let slot = self.next.iter().position(|(held, _)| *held == key);
         if rl.is_key_pressed(key) {
             match slot {
@@ -1185,6 +1290,9 @@ impl Editor {
             find: None,
             hover_link: None,
             cursor: MouseCursor::MOUSE_CURSOR_DEFAULT,
+            menu: None,
+            file_dialog: None,
+            workspace_request: None,
         })
     }
 
@@ -1242,6 +1350,207 @@ impl Editor {
         Ok(())
     }
 
+    fn save_as(&mut self, path: &Path, overwrite: bool, now: f64) -> Result<(), String> {
+        if path.exists() && !overwrite {
+            return Err("File exists. Confirm again to replace it".to_owned());
+        }
+        if path.is_dir() { return Err("Choose a file, not a directory".to_owned()); }
+        let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+        let mut bytes = if self.bom { vec![0xef, 0xbb, 0xbf] } else { Vec::new() };
+        bytes.extend_from_slice(self.buffer.text().as_bytes());
+        write_atomic(&target, &bytes).map_err(|error| error.to_string())?;
+        self.path = path.to_owned();
+        self.loaded = fs::metadata(&target).and_then(|meta| meta.modified()).ok();
+        self.language = Language::from_path(path);
+        self.states = vec![LineState::Normal];
+        self.preview = None;
+        self.buffer.mark_saved();
+        self.armed_overwrite = false;
+        self.armed_quit = false;
+        self.say(format!("Saved {}", path.display()), now);
+        Ok(())
+    }
+
+    fn command(&mut self, command: EditCommand, rl: &mut RaylibHandle, now: f64) {
+        self.menu = None;
+        match command {
+            EditCommand::New | EditCommand::Open | EditCommand::NewGameProject | EditCommand::NewAppProject | EditCommand::OpenProject | EditCommand::Workspace | EditCommand::SaveAs | EditCommand::Reload => {
+                let action = match command {
+                    EditCommand::New => FileAction::New,
+                    EditCommand::SaveAs => FileAction::SaveAs,
+                    EditCommand::Workspace => FileAction::Workspace,
+                    EditCommand::NewGameProject => FileAction::NewGameProject,
+                    EditCommand::NewAppProject => FileAction::NewAppProject,
+                    EditCommand::OpenProject => FileAction::OpenProject,
+                    _ => FileAction::Open,
+                };
+                let text = if command == EditCommand::New {
+                    unique_path(self.path.parent().unwrap_or(Path::new(".")), "untitled", "rb")
+                } else if command == EditCommand::NewGameProject || command == EditCommand::NewAppProject {
+                    crate::project::Project::suggest_directory(self.path.parent().unwrap_or(Path::new(".")), if command == EditCommand::NewAppProject { crate::project::Kind::App } else { crate::project::Kind::Game })
+                } else if command == EditCommand::Open || command == EditCommand::Workspace || command == EditCommand::OpenProject {
+                    self.path.parent().unwrap_or(Path::new(".")).join("")
+                } else { self.path.clone() };
+                self.file_dialog = Some(FileDialog { action, text: text.to_string_lossy().into_owned(),
+                    selected: true, message: String::new(), discard_confirmed: false, overwrite_confirmed: false });
+            }
+            EditCommand::Save => if let Err(error) = self.save(false, now) { self.say(error, now); },
+            EditCommand::Close => {
+                if !self.buffer.is_dirty() || self.armed_quit {
+                    self.discard = true;
+                    self.quit = true;
+                } else {
+                    self.armed_quit = true;
+                    self.say("Unsaved changes. Save first, or choose Close again to discard", now);
+                }
+            }
+            EditCommand::Undo => { self.buffer.undo(); }
+            EditCommand::Redo => { self.buffer.redo(); }
+            EditCommand::Cut | EditCommand::Copy => {
+                let text = if self.buffer.has_selection() { self.buffer.selected_text() }
+                    else { format!("{}\n", self.buffer.lines[self.buffer.row]) };
+                if rl.set_clipboard_text(&text).is_ok() && command == EditCommand::Cut {
+                    if !self.buffer.has_selection() { self.buffer.select_line(self.buffer.row); }
+                    self.buffer.backspace();
+                }
+            }
+            EditCommand::Paste => if let Ok(text) = rl.get_clipboard_text() { self.buffer.insert_text(&text); },
+            EditCommand::SelectAll => self.buffer.select_all(),
+            EditCommand::Find => self.open_find(false),
+            EditCommand::Replace => self.open_find(true),
+        }
+        self.follow_caret = true;
+        self.blink_from = now;
+    }
+
+    fn submit_file_dialog(&mut self, now: f64) {
+        let Some(mut dialog) = self.file_dialog.take() else { return };
+        let path = PathBuf::from(&dialog.text);
+        let result = if dialog.text.trim().is_empty() {
+            Err("Enter a file path".to_owned())
+        } else if dialog.action == FileAction::Workspace {
+            if path.is_dir() { self.workspace_request = Some(path); Ok(()) }
+            else { Err("Choose an existing workspace directory".to_owned()) }
+        } else if dialog.action != FileAction::SaveAs && self.buffer.is_dirty() && !dialog.discard_confirmed {
+            dialog.discard_confirmed = true;
+            Err("Unsaved changes. Confirm again to discard, or Cancel and save".to_owned())
+        } else if dialog.action == FileAction::SaveAs && path.exists() && !dialog.overwrite_confirmed {
+            dialog.overwrite_confirmed = true;
+            Err("File exists. Confirm again to replace it".to_owned())
+        } else if dialog.action == FileAction::SaveAs {
+            self.save_as(&path, dialog.overwrite_confirmed, now)
+        } else if matches!(dialog.action, FileAction::NewGameProject | FileAction::NewAppProject | FileAction::OpenProject) {
+            let project = match dialog.action {
+                FileAction::OpenProject => crate::project::Project::load(&path),
+                FileAction::NewAppProject => crate::project::Project::create(&path, crate::project::Kind::App),
+                _ => crate::project::Project::create(&path, crate::project::Kind::Game),
+            };
+            match project.and_then(|project| Self::open(&project.entry()).map(|editor| (project, editor))) {
+                Ok((project, mut editor)) => {
+                    editor.workspace_request = Some(project.root);
+                    *self = editor;
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        } else if dialog.action == FileAction::Open && !path.is_file() {
+            Err("Choose an existing file".to_owned())
+        } else if dialog.action == FileAction::New && path.exists() {
+            Err("File already exists. Use Open instead".to_owned())
+        } else {
+            match Self::open(&path) {
+                Ok(editor) => { *self = editor; Ok(()) }
+                Err(error) => Err(error),
+            }
+        };
+        if let Err(error) = result { dialog.message = error; self.file_dialog = Some(dialog); }
+    }
+
+    fn file_dialog_geometry(width: f32, height: f32, ui_font: f32) -> FileDialogGeometry {
+        let unit = (ui_font / 14.0)
+            .min((width - 16.0).max(1.0) / 280.0)
+            .min((height - 16.0).max(1.0) / 180.0);
+        let padding = (12.0 * unit).max(4.0);
+        let font = (14.0 * unit).max(8.0);
+        let dialog_width = (680.0 * unit).min(width - padding * 2.0);
+        let dialog_height = 180.0 * unit;
+        let bounds = Rectangle::new((width - dialog_width) / 2.0, (height - dialog_height) / 2.0, dialog_width, dialog_height);
+        let field = Rectangle::new(bounds.x + padding, bounds.y + padding + font * 1.6, bounds.width - padding * 2.0, font * 2.0);
+        let button_width = 90.0 * unit;
+        let button_y = bounds.y + bounds.height - padding - font * 2.0;
+        let buttons = [0, 1].map(|index| Rectangle::new(bounds.x + padding + index as f32 * (button_width + padding), button_y, button_width, font * 2.0));
+        FileDialogGeometry { bounds, field, buttons, font, padding }
+    }
+
+    fn controls(&mut self, rl: &mut RaylibHandle, geo: &Geometry, now: f64, ctrl: bool, shift: bool) -> bool {
+        if self.file_dialog.is_some() {
+            if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.file_dialog = None; return true; }
+            let dialog = self.file_dialog.as_mut().unwrap();
+            let previous = dialog.text.clone();
+            if ctrl && rl.is_key_pressed(KeyboardKey::KEY_A) { dialog.selected = true; }
+            if ctrl && rl.is_key_pressed(KeyboardKey::KEY_V) {
+                if let Ok(text) = rl.get_clipboard_text() {
+                    if dialog.selected { dialog.text.clear(); dialog.selected = false; }
+                    dialog.text.push_str(text.trim_end_matches(['\r', '\n']));
+                }
+            }
+            while let Some(character) = rl.get_char_pressed() {
+                if !ctrl && !character.is_control() {
+                    if dialog.selected { dialog.text.clear(); dialog.selected = false; }
+                    dialog.text.push(character);
+                }
+            }
+            if self.keys.fire(rl, KeyboardKey::KEY_BACKSPACE, now) {
+                if dialog.selected { dialog.text.clear(); dialog.selected = false; }
+                else { dialog.text.pop(); }
+            }
+            if dialog.text != previous { dialog.discard_confirmed = false; dialog.overwrite_confirmed = false; dialog.message.clear(); }
+            let dialog_geo = Self::file_dialog_geometry(geo.width, geo.overlay_height, geo.ui_font);
+            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                let mouse = rl.get_mouse_position();
+                if point_in(dialog_geo.buttons[0], mouse) {
+                    self.submit_file_dialog(now);
+                } else if point_in(dialog_geo.buttons[1], mouse) {
+                    self.file_dialog = None;
+                }
+            } else if rl.is_key_pressed(KeyboardKey::KEY_ENTER) { self.submit_file_dialog(now); }
+            return true;
+        }
+        if ctrl {
+            let command = if rl.is_key_pressed(KeyboardKey::KEY_N) { Some(if shift { EditCommand::NewGameProject } else { EditCommand::New }) }
+                else if rl.is_key_pressed(KeyboardKey::KEY_O) { Some(if shift { EditCommand::OpenProject } else { EditCommand::Open }) }
+                else if shift && rl.is_key_pressed(KeyboardKey::KEY_S) { Some(EditCommand::SaveAs) }
+                else if rl.is_key_pressed(KeyboardKey::KEY_Q) { Some(EditCommand::Close) }
+                else { None };
+            if let Some(command) = command { self.command(command, rl, now); return true; }
+        }
+        if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+            let mouse = rl.get_mouse_position();
+            let button_width = geo.ui_font * 3.5;
+            if mouse.y < geo.bar_h && mouse.x < button_width * 2.0 {
+                let edit = mouse.x >= button_width;
+                self.menu = if self.menu == Some(edit) { None } else { Some(edit) };
+                return true;
+            }
+            if let Some(edit) = self.menu.take() {
+                let commands = if edit { EDIT_COMMANDS } else { FILE_COMMANDS };
+                let width = (geo.ui_font * 24.0).min(geo.width - 8.0);
+                let left = if edit { button_width.min(geo.width - width) } else { 0.0 };
+                let row_height = ((geo.overlay_height - geo.bar_h - 8.0) / commands.len() as f32).min(geo.ui_font * 2.0);
+                if mouse.x >= left && mouse.x < left + width && mouse.y >= geo.bar_h {
+                    let index = ((mouse.y - geo.bar_h) / row_height) as usize;
+                    if let Some((_, command)) = commands.get(index) { self.command(*command, rl, now); }
+                }
+                return true;
+            }
+        }
+        if self.menu.is_some() {
+            if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.menu = None; }
+            return true;
+        }
+        false
+    }
+
     fn ensure_states(&mut self, row: usize) {
         if let Some(changed) = self.buffer.take_changed_from() {
             self.states.truncate(changed + 1);
@@ -1262,7 +1571,10 @@ impl Editor {
     }
 
     fn geometry(&self, width: i32, height: i32) -> Geometry {
-        let scale = ui::scale(width, height);
+        self.geometry_at_scale(width, height, ui::scale(width, height))
+    }
+
+    fn geometry_at_scale(&self, width: i32, height: i32, scale: f32) -> Geometry {
         let font = (13.5 * scale).round().max(8.0);
         let ui_font = (14.0 * scale).round().max(8.0);
         let line_h = (font * 1.5).round();
@@ -1318,6 +1630,7 @@ impl Editor {
             min_pane,
             width,
             height,
+            overlay_height: height,
         }
     }
 
@@ -1351,6 +1664,7 @@ impl Editor {
             KeyboardKey::KEY_RIGHT_SHIFT,
         );
         let alt = down(rl, KeyboardKey::KEY_LEFT_ALT, KeyboardKey::KEY_RIGHT_ALT);
+        if self.controls(rl, geo, now, ctrl, shift) { return; }
         let revision = self.buffer.revision;
         let position = (self.buffer.row, self.buffer.col);
         let mut interacted = false;
@@ -1553,8 +1867,9 @@ impl Editor {
             }
             if self.divider_drag {
                 if held {
-                    let low = geo.min_pane / geo.width;
-                    self.split = (mouse.x / geo.width).clamp(low, 1.0 - low);
+                    let left = geo.editor.map_or(0.0, |rect| rect.x);
+                    let right = geo.preview.map_or(geo.width, |rect| rect.x + rect.width);
+                    self.split = split_fraction(mouse.x, left, right - left, geo.min_pane);
                 } else {
                     self.divider_drag = false;
                 }
@@ -2015,6 +2330,56 @@ impl Editor {
         self.draw_bars(d, geo, now);
     }
 
+    fn draw_controls<D: RaylibDraw>(&self, d: &mut D, geo: &Geometry) {
+        let size = geo.ui_font;
+        let button_width = size * 3.5;
+        for (index, label) in ["File", "Edit"].iter().enumerate() {
+            let left = index as f32 * button_width;
+            if self.menu == Some(index == 1) {
+                d.draw_rectangle(left as i32, 0, button_width as i32, geo.bar_h as i32, FIELD_BG);
+            }
+            ui::draw_text(d, label, left + size * 0.6, (geo.bar_h - size) / 2.0, size, TEXT);
+        }
+        if let Some(edit) = self.menu {
+            let commands = if edit { EDIT_COMMANDS } else { FILE_COMMANDS };
+            let width = (size * 24.0).min(geo.width - 8.0);
+            let left = if edit { button_width.min(geo.width - width) } else { 0.0 };
+            let row_height = ((geo.overlay_height - geo.bar_h - 8.0) / commands.len() as f32).min(size * 2.0);
+            d.draw_rectangle(left as i32, geo.bar_h as i32, width as i32, (row_height * commands.len() as f32) as i32, FIELD_BG);
+            for (row, (label, _)) in commands.iter().enumerate() {
+                let font = size.min(row_height * 0.7);
+                let text = ui::fit(label, font, width - 16.0);
+                ui::draw_text(d, &text, left + 8.0, geo.bar_h + row as f32 * row_height + (row_height - font) / 2.0, font, TEXT);
+            }
+        }
+        if let Some(dialog) = &self.file_dialog {
+            d.draw_rectangle(0, 0, geo.width as i32, geo.overlay_height as i32, Color::new(0, 0, 0, 170));
+            let dialog_geo = Self::file_dialog_geometry(geo.width, geo.overlay_height, geo.ui_font);
+            let rect = dialog_geo.bounds;
+            let font = dialog_geo.font;
+            let padding = dialog_geo.padding;
+            d.draw_rectangle_rec(rect, BAR_BG);
+            d.draw_rectangle_lines_ex(rect, 1.0, DIVIDER_ACTIVE);
+            let title = match dialog.action { FileAction::New => "New File", FileAction::Open => "Open File", FileAction::SaveAs => "Save As", FileAction::Workspace => "Add Workspace Folder", FileAction::NewGameProject => "New Game Project", FileAction::NewAppProject => "New Application Project", FileAction::OpenProject => "Open Project" };
+            ui::draw_text(d, title, rect.x + padding, rect.y + padding, font, TEXT);
+            let field = dialog_geo.field;
+            d.draw_rectangle_rec(field, FIELD_BG);
+            if dialog.selected { d.draw_rectangle_rec(field, SELECTION); }
+            let mut first = 0;
+            while measure_mono(&dialog.text[first..], font) > field.width - padding && first < dialog.text.len() {
+                first += dialog.text[first..].chars().next().unwrap().len_utf8();
+            }
+            draw_mono(d, &dialog.text[first..], field.x + padding / 2.0, field.y + (field.height - font) / 2.0, font, TEXT);
+            let message = ui::fit(&dialog.message, font * 0.85, rect.width - padding * 2.0);
+            ui::draw_text(d, &message, rect.x + padding, field.y + field.height + padding, font * 0.85, WARNING);
+            for (index, label) in ["Confirm", "Cancel"].iter().enumerate() {
+                let button = dialog_geo.buttons[index];
+                d.draw_rectangle_rec(button, FIELD_BG);
+                ui::draw_text(d, label, button.x + padding, button.y + (button.height - font) / 2.0, font, TEXT);
+            }
+        }
+    }
+
     fn draw_editor<D: RaylibDraw>(&mut self, d: &mut D, geo: &Geometry, rect: Rectangle, now: f64) {
         let (font, line_h, char_w) = (geo.font, geo.line_h, geo.char_w);
         let pad = line_h * 0.25;
@@ -2037,12 +2402,8 @@ impl Editor {
 
         d.draw_rectangle_rec(rect, BG);
         {
-            let mut clip = d.begin_scissor_mode(
-                text_rect.x as i32,
-                text_rect.y as i32,
-                text_rect.width as i32,
-                text_rect.height as i32,
-            );
+            let (x, y, width, height) = crate::rendering::scissor_rect(text_rect);
+            let mut clip = d.begin_scissor_mode(x, y, width, height);
             for row in first..last {
                 let y = row_y(row);
                 let line = &self.buffer.lines[row];
@@ -2142,12 +2503,8 @@ impl Editor {
             }
         }
         {
-            let mut clip = d.begin_scissor_mode(
-                rect.x as i32,
-                rect.y as i32,
-                geo.gutter as i32,
-                rect.height as i32,
-            );
+            let (x, y, width, height) = crate::rendering::scissor_rect(Rectangle::new(rect.x, rect.y, geo.gutter, rect.height));
+            let mut clip = d.begin_scissor_mode(x, y, width, height);
             clip.draw_rectangle(
                 rect.x as i32,
                 rect.y as i32,
@@ -2225,12 +2582,8 @@ impl Editor {
         let scroll = self.preview_scroll;
         d.draw_rectangle_rec(rect, PREVIEW_BG);
         let Some(cache) = &self.preview else { return };
-        let mut clip = d.begin_scissor_mode(
-            rect.x as i32,
-            rect.y as i32,
-            rect.width as i32,
-            rect.height as i32,
-        );
+        let (x, y, width, height) = crate::rendering::scissor_rect(rect);
+        let mut clip = d.begin_scissor_mode(x, y, width, height);
         let (origin_x, origin_y) = preview_origin(geo, rect, scroll);
         for item in &cache.layout.items {
             match item {
@@ -2451,9 +2804,10 @@ impl Editor {
         let right = format!("{}{view}", self.language.name());
         let width = ui::measure(&right, size);
         let show_right = geo.width > width + ui::measure("MMMMMM", size) + pad * 3.0;
-        let title_room = geo.width - pad * 2.0 - if show_right { width + pad } else { 0.0 };
+        let title_left = size * 7.0 + pad;
+        let title_room = geo.width - title_left - pad - if show_right { width + pad } else { 0.0 };
         let title = ui::fit(&title, size, title_room);
-        ui::draw_text(d, &title, pad, (geo.bar_h - size) / 2.0, size, TEXT);
+        ui::draw_text(d, &title, title_left, (geo.bar_h - size) / 2.0, size, TEXT);
         if show_right {
             ui::draw_text(
                 d,
@@ -2522,13 +2876,36 @@ fn write_atomic(target: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Opens the editor window for `path` (created on first save if missing).
 pub fn run(path: &Path) -> Result<(), String> {
+    run_window(path, false, None)
+}
+
+pub fn run_ide(path: &Path, grid: Option<&Path>) -> Result<(), String> {
+    #[cfg(not(feature = "scripting"))]
+    {
+        let _ = (path, grid);
+        Err("The IDE requires a build with --features scripting".to_owned())
+    }
+    #[cfg(feature = "scripting")]
+    run_window(path, true, grid)
+}
+
+fn run_window(path: &Path, ide_mode: bool, grid: Option<&Path>) -> Result<(), String> {
     let mut editor = Editor::open(path)?;
+    #[cfg(feature = "scripting")]
+    let mut ide = if ide_mode { Some(crate::ide::Workspace::new(path, grid)?) } else { None };
+    #[cfg(not(feature = "scripting"))]
+    let _ = (ide_mode, grid);
     let frame_limit: Option<u32> = env::var("SELENITE_EDITOR_FRAMES")
         .ok()
         .and_then(|value| value.parse().ok());
     let (width, height) = env::var("SELENITE_EDITOR_SIZE")
         .ok()
         .and_then(|value| parse_size(&value))
+        .or_else(|| {
+            #[cfg(feature = "scripting")]
+            if let Some(ide) = &ide { return Some(ide.window_size()); }
+            None
+        })
         .unwrap_or((1100, 760));
     let (mut rl, thread) = raylib::init()
         .size(width, height)
@@ -2542,14 +2919,24 @@ pub fn run(path: &Path) -> Result<(), String> {
         ui::fit_window_to_display(&mut rl, width, height);
     }
     ui::set_user_scale(crate::settings::saved_ui_scale());
+    if ide_mode { ui::limit_to_toolbar(); }
     ui::load_font(&thread);
-    load_mono_font();
-    let mut title_dirty = false;
+    load_mono_font(false);
+    let mut window_title = String::new();
     let mut frames = 0u32;
     let mut applied_cursor = MouseCursor::MOUSE_CURSOR_DEFAULT;
+    let mut renderer = crate::rendering::Renderer::default();
+    let mut scale_menu = ui::ScaleMenu::default();
+    let mut suite_menu = crate::suite::Menu::default();
+    #[cfg(feature = "scripting")]
+    let mut context_path = editor.path.clone();
 
     while !rl.window_should_close() {
         let now = rl.get_time();
+        let suite_input = suite_menu.update(&mut rl, &thread, Some(&editor.path), grid);
+        if suite_input { scale_menu.open = false; }
+        let scale_input = suite_input || scale_menu.update(&rl);
+        if rl.is_window_resized() { editor.follow_caret = true; }
         if let Some(scale) = ui::handle_scale_keys(&rl).or_else(|| ui::handle_scale_wheel(&rl)) {
             let _ = crate::settings::save_ui_scale(scale);
             editor.follow_caret = true;
@@ -2568,8 +2955,83 @@ pub fn run(path: &Path) -> Result<(), String> {
                 rl.maximize_window();
             }
         }
-        let geo = editor.geometry(rl.get_screen_width(), rl.get_screen_height());
-        editor.update(&mut rl, &geo, now);
+        #[allow(unused_mut)]
+        let mut editor_height = rl.get_screen_height();
+        #[allow(unused_mut)]
+        let mut panel_input = false;
+        #[cfg(feature = "scripting")]
+        if let Some(ide) = &mut ide {
+            ide.resize(rl.get_screen_width(), rl.get_screen_height());
+            let run = if !scale_input && editor.file_dialog.is_none() && editor.menu.is_none() {
+                ide.update(&mut rl, now)
+            } else { ide.session.poll(); false };
+            if ide.take_scale_request() { scale_menu.open = true; }
+            editor_height = ide.editor_height(rl.get_screen_height());
+            panel_input = ide.session.focused || ide.dragging() || ide.captures_input();
+            if run {
+                match editor.save(false, now) {
+                    Ok(()) => {
+                        if let Err(error) = ide.session.run(&editor.path) { ide.session.print(&error); }
+                    }
+                    Err(error) => ide.session.print(&error),
+                }
+            }
+        }
+        #[allow(unused_mut)]
+        let mut sidebar_width = 0.0;
+        #[allow(unused_mut)]
+        let mut editor_offset = 0.0;
+        #[cfg(feature = "scripting")]
+        if let Some(ide) = &ide {
+            sidebar_width = ide.sidebar_width(rl.get_screen_width());
+            editor_offset = ide.editor_offset();
+        }
+        let mut geo = if ide_mode {
+            editor.geometry_at_scale(rl.get_screen_width() - sidebar_width as i32, editor_height, ui::scale(rl.get_screen_width(), rl.get_screen_height()))
+        } else {
+            editor.geometry(rl.get_screen_width(), editor_height)
+        };
+        if sidebar_width > 0.0 {
+            for rect in [&mut geo.editor, &mut geo.preview, &mut geo.divider, &mut geo.find_bar].into_iter().flatten() {
+                rect.x += sidebar_width;
+            }
+            geo.width = rl.get_screen_width() as f32;
+        }
+        if editor_offset > 0.0 {
+            for rect in [&mut geo.editor, &mut geo.preview, &mut geo.divider, &mut geo.find_bar].into_iter().flatten() {
+                rect.y += editor_offset;
+            }
+            geo.height += editor_offset;
+        }
+        geo.overlay_height = rl.get_screen_height() as f32;
+        #[cfg(feature = "scripting")]
+        if let Some(ide) = &mut ide {
+            let mut requested_file = ide.take_file_request();
+            if !scale_input && editor.file_dialog.is_none() && editor.menu.is_none() && !ide.captures_input() {
+                let (consumed, path) = ide.sidebar_input(&mut rl, geo.bar_h + editor_offset, geo.height - geo.status_h);
+                panel_input |= consumed;
+                requested_file = requested_file.or(path);
+            }
+            if let Some(path) = requested_file {
+                editor.file_dialog = Some(FileDialog { action: FileAction::Open, text: path.to_string_lossy().into_owned(), selected: true, message: String::new(), discard_confirmed: false, overwrite_confirmed: false });
+                editor.submit_file_dialog(now);
+            }
+            if let Some(directory) = editor.workspace_request.take() {
+                if let Err(error) = ide.set_workspace(&directory) { editor.say(error, now); }
+            }
+        }
+        if editor.file_dialog.is_some() || editor.menu.is_some() { panel_input = false; }
+        let file_shortcut = (rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL))
+            && [KeyboardKey::KEY_N, KeyboardKey::KEY_O, KeyboardKey::KEY_S, KeyboardKey::KEY_Q].iter().any(|key| rl.is_key_pressed(*key));
+        if file_shortcut { panel_input = false; }
+        if !panel_input && !scale_input { editor.update(&mut rl, &geo, now); }
+        #[cfg(feature = "scripting")]
+        if editor.path != context_path {
+            if let Some(ide) = &mut ide {
+                if let Err(error) = ide.session.set_path(&editor.path) { ide.session.print(&error); }
+            }
+            context_path = editor.path.clone();
+        }
         if editor.cursor != applied_cursor {
             rl.set_mouse_cursor(editor.cursor);
             applied_cursor = editor.cursor;
@@ -2577,26 +3039,36 @@ pub fn run(path: &Path) -> Result<(), String> {
         if editor.quit {
             break;
         }
-        if editor.buffer.is_dirty() != title_dirty {
-            title_dirty = editor.buffer.is_dirty();
-            rl.set_window_title(&thread, &editor.title());
+        let title = editor.title();
+        if title != window_title {
+            rl.set_window_title(&thread, &title);
+            window_title = title;
         }
         let mut finished = false;
         {
-            let mut d = rl.begin_drawing(&thread);
+            let mut d = renderer.begin(&mut rl, &thread)?;
             d.clear_background(BG);
+            #[cfg(feature = "scripting")]
+            if let Some(ide) = &ide { ide.draw_sidebar(&mut d, geo.bar_h + editor_offset, geo.height - geo.status_h, &editor.path); }
             editor.draw(&mut d, &geo, now);
+            #[cfg(feature = "scripting")]
+            if let Some(ide) = &ide { ide.draw(&mut d, now); }
+            editor.draw_controls(&mut d, &geo);
+            #[cfg(feature = "scripting")]
+            if let Some(ide) = &ide { ide.draw_picker(&mut d); }
+            scale_menu.draw(&mut d, geo.width as i32, geo.overlay_height as i32);
+            suite_menu.draw(&mut d, geo.width as i32, geo.overlay_height as i32);
             frames += 1;
             if frame_limit.is_some_and(|limit| frames >= limit) {
-                if let Ok(target) = env::var("SELENITE_EDITOR_SCREENSHOT") {
-                    if !capture_screen(&target) {
-                        eprintln!("selenite: could not save screenshot to {target}");
-                    }
-                }
                 finished = true;
             }
         }
         if finished {
+            if let Ok(target) = env::var("SELENITE_EDITOR_SCREENSHOT") {
+                if !capture_screen(&target) {
+                    eprintln!("selenite: could not save screenshot to {target}");
+                }
+            }
             editor.discard = true;
             break;
         }
@@ -2609,6 +3081,8 @@ pub fn run(path: &Path) -> Result<(), String> {
     if editor.buffer.is_dirty() && !editor.discard {
         editor.save(true, 0.0)?;
     }
+    #[cfg(feature = "scripting")]
+    if let Some(ide) = &mut ide { ide.save_layout(rl.get_screen_width(), rl.get_screen_height())?; }
     Ok(())
 }
 
@@ -2616,8 +3090,91 @@ pub fn run(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn file_dialog_scales_with_the_full_window_and_keeps_controls_separate() {
+        for (width, height, font) in [(420.0, 300.0, 13.0), (1100.0, 760.0, 18.0), (3840.0, 2160.0, 53.0), (420.0, 300.0, 42.0)] {
+            let dialog = Editor::file_dialog_geometry(width, height, font);
+            assert!(dialog.bounds.x >= 0.0 && dialog.bounds.y >= 0.0);
+            assert!(dialog.bounds.x + dialog.bounds.width <= width);
+            assert!(dialog.bounds.y + dialog.bounds.height <= height);
+            assert!(dialog.bounds.y + dialog.padding + dialog.font < dialog.field.y);
+            for button in dialog.buttons {
+                assert!(button.x >= dialog.bounds.x && button.x + button.width <= dialog.bounds.x + dialog.bounds.width);
+                assert!(button.y > dialog.field.y + dialog.field.height + dialog.padding + dialog.font * 0.85);
+                assert!(button.y + button.height < dialog.bounds.y + dialog.bounds.height);
+            }
+            assert!(!dialog.buttons[0].check_collision_recs(dialog.buttons[1]));
+        }
+    }
+
+    #[test]
+    fn divider_coordinates_exclude_the_ide_sidebar() {
+        assert_eq!(split_fraction(550.0, 0.0, 1100.0, 200.0), 0.5);
+        assert_eq!(split_fraction(676.5, 253.0, 847.0, 200.0), 0.5);
+        assert_eq!(split_fraction(-500.0, 253.0, 847.0, 200.0), 200.0 / 847.0);
+        assert_eq!(split_fraction(0.0, 0.0, 100.0, 200.0), 0.5);
+    }
+
+    #[test]
+    fn save_as_preserves_source_and_requires_overwrite_confirmation() {
+        let directory = std::env::temp_dir().join(format!("selenite-save-as-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.rb");
+        let target = directory.join("copy.rb");
+        fs::write(&source, "puts 1").unwrap();
+        fs::write(&target, "original target").unwrap();
+        let mut editor = Editor::open(&source).unwrap();
+        editor.buffer.select_all();
+        editor.buffer.insert_text("puts 2");
+        assert!(editor.save_as(&target, false, 0.0).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original target");
+        editor.save_as(&target, true, 0.0).unwrap();
+        assert_eq!(fs::read_to_string(source).unwrap(), "puts 1");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "puts 2");
+        assert_eq!(editor.path, target);
+        assert!(!editor.buffer.is_dirty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn opening_a_file_requires_explicit_discard_of_dirty_buffer() {
+        let directory = std::env::temp_dir().join(format!("selenite-open-confirm-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let target = directory.join("other.rb");
+        fs::write(&target, "puts 3").unwrap();
+        let mut editor = Editor::open(&directory.join("new.rb")).unwrap();
+        editor.buffer.insert_text("unsaved");
+        editor.file_dialog = Some(FileDialog { action: FileAction::Open, text: target.to_string_lossy().into_owned(), selected: true, message: String::new(), discard_confirmed: false, overwrite_confirmed: false });
+        editor.submit_file_dialog(0.0);
+        assert_eq!(editor.buffer.text(), "unsaved");
+        assert!(editor.file_dialog.as_ref().unwrap().discard_confirmed);
+        editor.submit_file_dialog(0.0);
+        assert_eq!(editor.path, target);
+        assert_eq!(editor.buffer.text(), "puts 3");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     fn buffer(text: &str) -> Buffer {
         Buffer::new(text)
+    }
+
+    #[test]
+    fn new_text_files_get_unique_empty_paths() {
+        let directory = env::temp_dir().join(format!("selenite-untitled-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let first = unique_text_path(&directory);
+        assert_eq!(first, directory.join("untitled.txt"));
+        create_empty_if_missing(&first).unwrap();
+        fs::write(&first, "kept").unwrap();
+        create_empty_if_missing(&first).unwrap();
+        assert_eq!(fs::read_to_string(&first).unwrap(), "kept");
+        assert_eq!(
+            unique_text_path(&directory),
+            directory.join("untitled-2.txt")
+        );
+        assert_eq!(unique_note_path(&directory), directory.join("note.md"));
+        assert!(is_text_path(&first));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

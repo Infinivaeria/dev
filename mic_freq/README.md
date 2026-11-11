@@ -1,8 +1,31 @@
+# Named Voice Presets
+
+Use the Presets button or F2 to save and load named voice/presentation settings.
+Presets keep the active microphone and avatar folder unchanged. Escape closes
+the dialog without exiting the studio.
+
+```sh
+mic_freq --save-preset "Quiet room"
+mic_freq --list-presets
+mic_freq --preset "Quiet room"
+```
+
+Save/list commands do not need a display or microphone. Presets live beside the
+studio settings in a `presets` directory.
+
 # mic_freq
 
-An offline PNGTuber studio built with **raylib** and **cpal**. Microphone volume selects idle, talking, or loud talking artwork. Each pose bounces smoothly: gentle idle breathing, talking hops, and stronger loud-talking hops. No speech recognition, recording, internet connection, or frequency matching is involved.
+mic_freq is a **Selenite product**: an offline PNGTuber studio built with **raylib** and **cpal**. Microphone volume selects idle, talking, or loud talking artwork. Each pose bounces smoothly: gentle idle breathing, talking hops, and stronger loud-talking hops. No speech recognition, recording, internet connection, or frequency matching is involved.
 
 ## Run
+
+The full Selenite extraction package includes this executable, adjacent artwork,
+and these guides. After extracting the suite, use `./run-mic-freq.sh`; add
+`--capture` for OBS or pass your own avatar folder and `--device "NAME"`.
+Build that combined package from the repository root with
+`./package.sh --output dist-v11 --verify`. The game-only `--game` package does
+not include the companion executable. No compilation is required after extracting
+the full package; a compatible Linux graphics/audio environment is still needed.
 
 From the repository root:
 
@@ -32,7 +55,7 @@ PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transpare
 - **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.
 - **Next input / reconnect** cycles available microphones and the system default. Capture failure does not close the app; manual poses still work.
 - Drop one avatar folder or pose image into the window to switch sets. **R** reloads edited artwork. Failed reloads preserve the current set.
-- Background swatches select green, magenta, or dark. **Clean capture** hides every control, meter, and error message. Press **C** to return.
+- Background swatches select green, magenta, or dark. **Clean capture** hides every control, meter, and error message. Press **C** or click the canvas to return.
 
 The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Smoothing and 4 dB hysteresis reduce flicker.
 

@@ -175,6 +175,8 @@ module Selenite
           Selenite.copy_text(str)              put text on the clipboard
           Selenite.terminal(file = nil, *args, dir: nil)   open a terminal; file runs with args
           Selenite.edit(path)                  open a file in the text editor (Ruby/Markdown aware)
+          Selenite.ide(path)                   open the integrated IDE sharing this grid save
+          Selenite.raylib_native.enable!       all 600 raylib functions (game process; native C lifetime rules)
           Selenite.profile, profiles, create_profile(n), switch_profile(n)
           Selenite.on(:activate|:paste|:drop|:download|:save|:profile|:track|:inventory) { |*args| }
         Rust helpers

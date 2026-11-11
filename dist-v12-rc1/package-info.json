@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "name": "selenite",
+  "version": "12.0.0-rc.1",
+  "binaries": [
+    "selenite",
+    "selenite-game",
+    "mic_freq/mic_freq"
+  ],
+  "scripting": true,
+  "ruby_version": "4.0.9",
+  "ruby_platform": "x86_64-linux",
+  "components": {
+    "mic_freq": {
+      "version": "0.2.0",
+      "binary": "mic_freq/mic_freq",
+      "launcher": "run-mic-freq.sh",
+      "assets": "mic_freq/assets"
+    }
+  },
+  "capabilities": {
+    "ide": true,
+    "projects": true,
+    "project_checks": true,
+    "suite_menu": true,
+    "scale_menu": true,
+    "quick_open": true,
+    "terminal_tabs": true,
+    "asset_diagnostics": true,
+    "audio_presets": true,
+    "embedded_terminal": true,
+    "mic_freq": true,
+    "native_raylib_functions": 600
+  }
+}

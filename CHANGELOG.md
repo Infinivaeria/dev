@@ -1,5 +1,111 @@
 # Changelog
 
+## 12.0.0-rc.1 (2026-11-10)
+
+### Added
+
+- Rust/Magnus executable builds with embedded, runtime-verified Ruby bytecode,
+  Ruby/Bash bootstrappers, a bundled build SDK, supporting assets and reproducible
+  Cargo projects. Supports app/game/project/.rbc inputs and preserves ARGV/exit codes.
+
+- In-app Suite > Change Icon image browser with drag/drop, validated preview,
+  Apply/Reset, saved window icons and managed shortcut updates. New shortcuts
+  inherit the selected icon; invalid images and refused updates preserve it.
+
+- Direct executable startup with executable-relative library lookup and native
+  Ruby/PartitionedArray setup. Shell launchers are optional; shortcuts and Run
+  tasks prefer native executables. Relocated tests remove wrappers entirely.
+
+- In-app desktop shortcut creation through Suite > Desktop Shortcuts, organizer
+  context menus and Asset Manager, for tools, files/folders, projects and grids.
+  Launchers preserve custom icons and protect unmanaged files; Linux desktop
+  directory detection and special-character quoting are covered by tests.
+
+- Shared F8 suite navigation and recent project folders.
+- F9 scale presets with exact 75%/125% values, smaller default organizer
+  buttons, saved toolbar visibility (F10), and click disabling (F7).
+- Independent terminal tabs in standalone and IDE terminals, with new/close
+  controls, keyboard switching, background output and session cleanup.
+- Movable top/bottom IDE dock with persisted position; Ctrl+P project Quick Open.
+- Non-executing `--check-project` validation in both runtimes, with Ruby syntax
+  checks and missing-asset diagnostics. File List gains a Missing filter.
+- Asset Manager search, composable type/missing filters, name/type/location
+  sorting, path copying and containing-folder access, with an F8 suite entry.
+- Audio Studio 0.2.0 named voice presets through F2 and headless preset commands.
+
+### Fixed
+
+- IDE path replacement and mouse Confirm/Cancel at compact and large sizes.
+- Narrow toolbar labels, disabled hit targets and terminal Clear behavior.
+- GUI regression process cleanup and focus/input handling on slow displays.
+- Distributor regressions now verify preservation of user projects and assets.
+
+This is a release candidate. Existing grid and project schemas are unchanged.
+
+## 11.0.0 (2026-11-04)
+
+### Added
+
+- Automatic inclusion of all source Markdown documentation for Selenite and its
+  mic_freq product, including nested guides, with preserved paths and a verified
+  SHA-256 documentation manifest. Generated output and temporary copies are excluded.
+
+- The full `package.sh` extraction bundle now builds and ships the `mic_freq`
+  PNGTuber Studio executable, adjacent avatar assets, `run-mic-freq.sh`, companion
+  version metadata and relocated startup/rendering verification.
+- `distribute.sh` copies and extracts the full suite under the current user's
+  home directory, with staged extraction, checksums, component validation and
+  dry-run support. Existing Selenite installations are replaced completely,
+  including old projects and stale files; unrelated directories are protected.
+
+- Game/application projects with validated `selenite-project.json` manifests,
+  safe scaffolding (`--new-project DIR [--app]`), project opening/running, File
+  menu wizards, configured entry-point execution and project-local save paths.
+- Portable `run-ide.sh` launcher with a bundled starter project, package capability
+  metadata, and `package.sh --output DIR` for versioned distribution folders.
+
+- Integrated Selenite IDE (`--ide FILE.rb [--grid FILE.json]`, organizer IDE
+  button, Ruby-cell menu, and `Selenite.ide(path)`), with File/Edit menus,
+  workspace/file browsers, embedded PTY terminal, Ruby console, program output,
+  run/stop controls, resizable persisted layout and bundled tutorial Help.
+- Complete generated native raylib 6 public API: 600 functions, 35 records and
+  305 enum constants through `Selenite.raylib_native`. Managed game bindings
+  remain available. Native calls require explicit opt-in and C ownership rules.
+- Shared GPU framebuffer rendering for the text editor and IDE, including
+  framebuffer-aware clipping and responsive sidebar/dock panes.
+
+### Changed
+
+- The organizer, integrated IDE and dedicated game runtime identify as 11.0.0.
+- IDE fonts, controls, dialogs, Help, terminal and pane layouts scale with the
+  whole window. Compact dock controls wrap; resizing a pane does not resize text.
+- Existing grid saves and profiles remain compatible; no data migration is needed.
+
+## 8.0.0
+
+### Added
+
+- `selenite --version` / `-V`.
+- `selenite --with-terminal` starts the grid window and Selenite's terminal
+  window together, with an optional profile or grid file.
+- A **Run in Terminal** toolbar button runs the selected script cell in
+  Selenite's terminal window; the cell menu entry is now **Run in Selenite
+  terminal**.
+- The organizer remembers its window size and maximized state between sessions
+  (`window_size`, `window_maximized` in `settings.json`).
+
+### Fixed
+
+- A large saved Ctrl +/- zoom could make the toolbar fill the whole window, and
+  maximizing multiplied it further. The organizer and File List now stop
+  zooming once the wrapped toolbar would take over 25% of the window.
+
+### Changed
+
+- First final release of the 7.0.0 release-candidate feature set (text editor,
+  native terminal window, Asset Inventory, scaling) as version 8.0.0. Save
+  formats are unchanged and remain compatible.
+
 ## 7.0.0-rc.1
 
 ### Added
@@ -21,6 +127,14 @@
   `--terminal-run FILE [ARGS]` (shebang, Ruby, Python, JS or Bash), Run in
   terminal and Terminal in grid folder cell actions, `Selenite.terminal`, and
   `SELENITE_*` variables inside terminals.
+- A native raylib terminal window (`selenite --terminal-window`, Linux and
+  macOS) replaces launching an external terminal emulator: a pseudo-terminal
+  with an xterm-compatible emulator (colours, alternate screen, mouse reporting,
+  bracketed paste, scrollback, selection and clipboard, clickable links),
+  Ctrl +/- and Ctrl+wheel zoom with the character grid following zoom and window
+  size, and syntax highlighting of plain output (Ctrl+Shift+H toggles it).
+- New text file here / New text file inside cell actions create an empty
+  `untitled.txt` in a cell, on top of a stack, or in a nested grid and edit it.
 - Scaling: windows keep scaling up to 6x when maximized, new windows follow the
   display DPI and are kept on the monitor, the Ctrl +/- zoom is saved as
   `ui_scale`, Ctrl+wheel zooms the editor, and the Ruby console grows with the

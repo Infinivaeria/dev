@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
+static unsigned int input_delay = 1;
+
 /* Sends keystrokes to the window owned by a process:
  *   x11_key_driver PID wait:MS | type:TEXT | key:[ctrl+|shift+|alt+]NAME | close ... */
 
@@ -67,16 +69,16 @@ static void tap(Display *display, Window window, KeySym symbol, unsigned int mod
     for (int index = 0; index < count; index++) {
         send_key(display, window, XKeysymToKeycode(display, held[index]), KeyPress, state);
         state |= masks[index];
-        usleep(40000);
+        usleep(40000 * input_delay);
     }
     send_key(display, window, code, KeyPress, state);
-    usleep(50000);
+    usleep(50000 * input_delay);
     send_key(display, window, code, KeyRelease, state);
-    usleep(40000);
+    usleep(40000 * input_delay);
     for (int index = count - 1; index >= 0; index--) {
         state &= ~masks[index];
         send_key(display, window, XKeysymToKeycode(display, held[index]), KeyRelease, state | masks[index]);
-        usleep(30000);
+        usleep(30000 * input_delay);
     }
 }
 
@@ -160,6 +162,27 @@ static void type_character(Display *display, Window window, unsigned char c) {
     tap(display, window, symbol, modifiers);
 }
 
+static int capture_icon(Display *display, Window window, const char *path) {
+    Atom actual_type;
+    int format;
+    unsigned long count, remaining;
+    unsigned char *property = NULL;
+    Atom icon = XInternAtom(display, "_NET_WM_ICON", False);
+    if (XGetWindowProperty(display, window, icon, 0, 1024 * 1024, False,
+                           AnyPropertyType, &actual_type, &format, &count, &remaining, &property) != Success) return 11;
+    FILE *output = fopen(path, "w");
+    if (!output) { if (property) XFree(property); return 9; }
+    unsigned long *pixels = (unsigned long *)property;
+    if (property && format == 32 && count >= 2 && pixels[0] > 0 && pixels[1] > 0
+        && pixels[0] <= 8192 && pixels[1] <= 8192 && count >= pixels[0] * pixels[1] + 2) {
+        unsigned long center = pixels[2 + (pixels[1] / 2) * pixels[0] + pixels[0] / 2];
+        fprintf(output, "%lu %lu %08lx\n", pixels[0], pixels[1], center & 0xffffffffUL);
+    } else fprintf(output, "none\n");
+    fclose(output);
+    if (property) XFree(property);
+    return 0;
+}
+
 static int ignore_error(Display *display, XErrorEvent *event) {
     (void)display;
     (void)event;
@@ -168,6 +191,7 @@ static int ignore_error(Display *display, XErrorEvent *event) {
 
 int main(int argc, char **argv) {
     if (argc < 3) return 2;
+    if (getenv("SELENITE_TEST_SLOW_INPUT")) input_delay = 4;
     XSetErrorHandler(ignore_error);
     Display *display = XOpenDisplay(NULL);
     if (!display) return 3;
@@ -178,6 +202,10 @@ int main(int argc, char **argv) {
         if (!target) usleep(50000);
     }
     if (!target) return 4;
+    XRaiseWindow(display, target);
+    XSetInputFocus(display, target, RevertToParent, CurrentTime);
+    XSync(display, False);
+    usleep(100000);
     for (int index = 2; index < argc; index++) {
         const char *command = argv[index];
         if (strncmp(command, "wait:", 5) == 0) {
@@ -214,8 +242,17 @@ int main(int argc, char **argv) {
             int x1, y1, x2, y2;
             if (sscanf(command + 5, "%d,%d,%d,%d", &x1, &y1, &x2, &y2) != 4) return 10;
             drag(display, target, x1, y1, x2, y2);
+        } else if (strncmp(command, "resize:", 7) == 0) {
+            unsigned int width, height;
+            if (sscanf(command + 7, "%u,%u", &width, &height) != 2 || width == 0 || height == 0) return 10;
+            XResizeWindow(display, target, width, height);
+            XSync(display, False);
+            usleep(120000);
         } else if (strncmp(command, "capture:", 8) == 0) {
             int status = capture(display, target, command + 8);
+            if (status) return status;
+        } else if (strncmp(command, "icon:", 5) == 0) {
+            int status = capture_icon(display, target, command + 5);
             if (status) return status;
         } else if (strcmp(command, "close") == 0) {
             XEvent event;

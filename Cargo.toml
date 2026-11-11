@@ -1,9 +1,9 @@
 [package]
 name = "selenite"
-version = "7.0.0-rc.1"
+version = "12.0.0-rc.1"
 edition = "2021"
 rust-version = "1.88"
-description = "Infinite, pannable, zoomable, recursively-nestable multimedia file grid"
+description = "GPU-rendered multimedia workspace, Ruby IDE and raylib game development suite"
 license = "MIT"
 
 [[bin]]
@@ -26,6 +26,9 @@ image = "0.25"
 magnus = { git = "https://github.com/matsadler/magnus", rev = "c08ca65b527e2cff2b347c46d3f8a029e17ca665", version = "0.10", features = ["embed"], optional = true }
 arboard = "3.6.1"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "rustls"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [workspace]
 resolver = "2"

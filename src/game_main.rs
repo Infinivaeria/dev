@@ -1,17 +1,24 @@
 #![allow(dead_code)]
 
 mod download;
+#[cfg(selenite_embedded)]
+mod embedded;
 mod game;
 mod game_cli;
 mod grid_inventory;
 mod music;
 mod persistence;
 mod plugins;
+mod portable;
 mod profiles;
+mod project;
+mod raylib_api;
 mod scripting;
 mod search;
+mod settings;
 mod ui;
 
+#[cfg_attr(selenite_embedded, allow(unused_imports))]
 use std::{
     env, fs, process,
     sync::{Arc, Mutex},
@@ -26,6 +33,10 @@ fn timestamp() -> u128 {
 }
 
 fn main() {
+    if let Err(error) = portable::initialize() {
+        eprintln!("selenite-game: {error}");
+        process::exit(1);
+    }
     if let Err(error) = run() {
         eprintln!("selenite-game: {error}");
         process::exit(1);
@@ -33,9 +44,24 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    match game_cli::parse(&env::args_os().collect::<Vec<_>>())? {
+    #[cfg(selenite_embedded)]
+    std::process::exit(embedded::run()?);
+    #[cfg(not(selenite_embedded))]
+    run_command()
+}
+
+#[cfg(not(selenite_embedded))]
+fn run_command() -> Result<(), String> {
+    let arguments = env::args_os().collect::<Vec<_>>();
+    let command = game_cli::parse(&arguments)?;
+    if arguments.get(1).is_some_and(|argument| argument == "--project") {
+        let project = project::Project::load(std::path::Path::new(&arguments[2]))?;
+        env::set_current_dir(&project.root).map_err(|error| error.to_string())?;
+    }
+    match command {
         game_cli::GameCommand::Help => println!("{}", game_cli::usage()),
         game_cli::GameCommand::Version => println!("selenite-game {}", env!("CARGO_PKG_VERSION")),
+        game_cli::GameCommand::CheckProject(directory) => println!("{}", serde_json::to_string_pretty(&project::check_project(&directory)?).map_err(|error| error.to_string())?),
         game_cli::GameCommand::Compile {
             source,
             output,

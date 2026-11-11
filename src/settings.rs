@@ -28,6 +28,14 @@ pub struct Settings {
     pub copy_files: bool,
     /// Ctrl +/- zoom multiplier shared by every Selenite window.
     pub ui_scale: f32,
+    pub toolbar_scale: f32,
+    pub toolbar_visible: bool,
+    pub toolbar_enabled: bool,
+    pub recent_projects: Vec<PathBuf>,
+    pub application_icon: Option<PathBuf>,
+    /// Organizer window size (width, height) when last closed unmaximized.
+    pub window_size: Option<(i32, i32)>,
+    pub window_maximized: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +49,13 @@ impl Default for Settings {
             disabled_plugins: Vec::new(),
             copy_files: true,
             ui_scale: 1.0,
+            toolbar_scale: 0.85,
+            toolbar_visible: true,
+            toolbar_enabled: true,
+            recent_projects: Vec::new(),
+            application_icon: None,
+            window_size: None,
+            window_maximized: false,
         }
     }
 }
@@ -95,6 +110,15 @@ impl Settings {
         } else {
             Self::default().ui_scale
         };
+        self.toolbar_scale = if self.toolbar_scale.is_finite() {
+            self.toolbar_scale.clamp(0.5, 1.5)
+        } else {
+            Self::default().toolbar_scale
+        };
+        self.recent_projects.truncate(12);
+        self.window_size = self.window_size.filter(|(width, height)| {
+            (320..=16_384).contains(width) && (240..=16_384).contains(height)
+        });
         self
     }
 }
@@ -112,6 +136,16 @@ pub fn save_ui_scale(scale: f32) -> Result<(), String> {
         return Ok(());
     }
     settings.ui_scale = scale;
+    settings.save(&path)
+}
+
+pub fn remember_project(directory: &Path) -> Result<(), String> {
+    let directory = directory.canonicalize().map_err(|error| error.to_string())?;
+    let path = Settings::path_in(&crate::profiles::default_base_dir());
+    let mut settings = Settings::load(&path);
+    settings.recent_projects.retain(|entry| entry != &directory);
+    settings.recent_projects.insert(0, directory);
+    settings.recent_projects.truncate(12);
     settings.save(&path)
 }
 
@@ -147,6 +181,13 @@ mod tests {
         assert!(loaded.copy_files, "older settings files default to copying");
         assert_eq!(loaded.volume, 1.0);
         assert_eq!(loaded.ui_scale, 1.0, "older settings files default to 100%");
+        assert_eq!(loaded.toolbar_scale, 0.85);
+        assert!(loaded.toolbar_visible);
+        assert!(loaded.toolbar_enabled);
+        fs::write(&path, r#"{"toolbar_scale": 9.0, "toolbar_visible": false}"#).unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.toolbar_scale, 1.5);
+        assert!(!loaded.toolbar_visible);
 
         fs::write(&path, r#"{"ui_scale": 9.0}"#).unwrap();
         assert_eq!(Settings::load(&path).ui_scale, 3.0);
@@ -154,6 +195,17 @@ mod tests {
         assert_eq!(Settings::load(&path).ui_scale, 0.5);
         fs::write(&path, r#"{"ui_scale": 1.5}"#).unwrap();
         assert_eq!(Settings::load(&path).ui_scale, 1.5);
+
+        fs::write(
+            &path,
+            r#"{"window_size": [1280, 800], "window_maximized": true}"#,
+        )
+        .unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.window_size, Some((1280, 800)));
+        assert!(loaded.window_maximized);
+        fs::write(&path, r#"{"window_size": [1, 99999]}"#).unwrap();
+        assert_eq!(Settings::load(&path).window_size, None);
 
         fs::write(&path, "not json").unwrap();
         assert_eq!(Settings::load(&path), Settings::default());

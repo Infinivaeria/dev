@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "excluded_source_directories": [
+    "dist-v12-rc1",
+    "target"
+  ],
+  "documents": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "90398da26cb64361d16a63aebabcecad332860a737163a03e6a87f5533dbf40b"
+    },
+    {
+      "path": "README.md",
+      "sha256": "c935039e721a31c49f18ac5d8ec9ab440b513972f2a0b77ae26af17c32123d02"
+    },
+    {
+      "path": "docs/game-storage.md",
+      "sha256": "69415271a402b1ebbb89f2a54a43ad50391758e7b4d58d9ffd590e11530f57fd"
+    },
+    {
+      "path": "docs/game-tutorial.md",
+      "sha256": "45bcdd218ce7ff9d2924840f1959f974a981fa2b0f64031c69a6c9edc6161023"
+    },
+    {
+      "path": "docs/game.md",
+      "sha256": "263bf5b16b4a928ff12f625e47a9c4b94784c7f616eb074fbfe8d704422da446"
+    },
+    {
+      "path": "docs/ide.md",
+      "sha256": "eb58288b811b36fde243b024baea8e3cf287b513ad69ada10488a18e93d2965e"
+    },
+    {
+      "path": "docs/inventory.md",
+      "sha256": "1db5f4b2ba8c444698c0db553d5bd37355e20f29df95edab043f177a412fc806"
+    },
+    {
+      "path": "docs/manual.md",
+      "sha256": "4c4d39bfa0f495ae22f3f244a2fbf5541ba4e4a10e21eaa38655890031c210bc"
+    },
+    {
+      "path": "docs/networking.md",
+      "sha256": "faea50449590765cc6f616aa3c6947d58586b964d9d0e9b3b03f52246aeccded"
+    },
+    {
+      "path": "docs/packaging.md",
+      "sha256": "108baab5c700b1379e6042f838e6aedf86f125c55ae81ff80fd4bdbde596f890"
+    },
+    {
+      "path": "docs/plugins.md",
+      "sha256": "bab8026ce00eda6c457a1c4815e17345ce54b5b0f5c104fb6bbd8effdba83112"
+    },
+    {
+      "path": "docs/projects.md",
+      "sha256": "223fb95dfe97f2e53e0fb6020651822f78b1502c99b69693314637623cde59b8"
+    },
+    {
+      "path": "docs/raylib-api.md",
+      "sha256": "29e9b7580f089b92364f277045c0dd2410bb2bdfdfb318fe06a6b9eb13384c14"
+    },
+    {
+      "path": "docs/raylib-native.md",
+      "sha256": "763523db35b7c345deb4ae69b955491923d79af0c808787df36ecee821401827"
+    },
+    {
+      "path": "docs/selenite-game.md",
+      "sha256": "e3c7c303541f3c483db6f155951fdb8a4854773c5e42f5d8b196c72d4051cc09"
+    },
+    {
+      "path": "examples/second-life/README.md",
+      "sha256": "046e29d68d8ee79561fc1b43508b20a02a6ef0abb0b0321ae8076276755ab2bf"
+    },
+    {
+      "path": "mic_freq/MANUAL.md",
+      "sha256": "bb6ee8e694ec7f943f15ae447c38c181252b02c6f83285eaf8eab75bbc0e8870"
+    },
+    {
+      "path": "mic_freq/README.md",
+      "sha256": "5e1562b4aa6d265abb837fcfded6d9bb50a6c82f934f52f02c61ea4054c877c6"
+    },
+    {
+      "path": "partitioned_array/HTTPS_FCMPA_README.md",
+      "sha256": "8f4d58202b8e7208a3950e97e3fabfb829cf3c7f8d30fb8e88744b5de0247def"
+    },
+    {
+      "path": "partitioned_array/README.md",
+      "sha256": "fc566d5c6cf357b22c51e05ee005d01fe5655dc2dc33eab7f4bd2f66d9ce811e"
+    },
+    {
+      "path": "partitioned_array/README_https.md",
+      "sha256": "8f4d58202b8e7208a3950e97e3fabfb829cf3c7f8d30fb8e88744b5de0247def"
+    }
+  ]
+}

@@ -56,6 +56,46 @@ impl Settings {
         std::fs::rename(temporary, path)?;
         Ok(())
     }
+
+    fn preset_path(settings: &Path, name: &str) -> Result<PathBuf, Box<dyn Error>> {
+        if name.trim().is_empty() || name.len() > 64 || !name.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, ' ' | '-' | '_')) {
+            return Err("Preset names must contain 1-64 letters, numbers, spaces, '-' or '_'".into());
+        }
+        Ok(settings.parent().unwrap_or(Path::new(".")).join("presets").join(format!("{name}.json")))
+    }
+
+    pub fn presets(settings: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+        let directory = settings.parent().unwrap_or(Path::new(".")).join("presets");
+        if !directory.exists() { return Ok(Vec::new()); }
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() && entry.path().extension().is_some_and(|extension| extension == "json") {
+                if let Some(name) = entry.path().file_stem().and_then(|name| name.to_str()) {
+                    if Self::preset_path(settings, name).is_ok() { names.push(name.to_owned()); }
+                }
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    pub fn save_preset(&self, settings: &Path, name: &str) -> Result<(), Box<dyn Error>> {
+        let mut preset = self.clone();
+        preset.device = None;
+        preset.assets = None;
+        preset.save(&Self::preset_path(settings, name)?)
+    }
+
+    pub fn load_preset(&mut self, settings: &Path, name: &str) -> Result<(), Box<dyn Error>> {
+        let path = Self::preset_path(settings, name)?;
+        if !path.is_file() { return Err(format!("Preset does not exist: {name}").into()); }
+        let mut preset = Self::load(&path)?;
+        preset.device = self.device.clone();
+        preset.assets = self.assets.clone();
+        *self = preset;
+        Ok(())
+    }
 }
 
 fn finite_clamp(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
@@ -110,6 +150,25 @@ impl BlinkState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_presets_restore_voice_controls_without_switching_devices_or_assets() {
+        let directory = std::env::temp_dir().join(format!("mic-freq-presets-{}", std::process::id()));
+        let config = directory.join("settings.json");
+        let mut settings = Settings { gate_db: -60.0, mirror: true, device: Some("Current microphone".into()), assets: Some("current avatar".into()), ..Settings::default() };
+        settings.save_preset(&config, "Quiet room").unwrap();
+        assert_eq!(Settings::presets(&config).unwrap(), vec!["Quiet room"]);
+        settings.gate_db = -30.0;
+        settings.mirror = false;
+        settings.load_preset(&config, "Quiet room").unwrap();
+        assert_eq!(settings.gate_db, -60.0);
+        assert!(settings.mirror);
+        assert_eq!(settings.device.as_deref(), Some("Current microphone"));
+        assert_eq!(settings.assets, Some("current avatar".into()));
+        assert!(settings.save_preset(&config, "../escape").is_err());
+        assert!(settings.load_preset(&config, "Missing").is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn settings_round_trip_and_clamp_out_of_range_values() {

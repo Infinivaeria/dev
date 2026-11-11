@@ -65,6 +65,7 @@ pub enum AppRequest {
     ReloadPlugins,
     /// Open a file in the text editor window.
     Edit(String),
+    Ide(String),
     /// Open a terminal window, optionally running `file` with `args` or starting in `directory`.
     Terminal {
         file: Option<String>,
@@ -292,6 +293,13 @@ impl ScriptEngine {
             .map_err(|error| error.to_string())
     }
 
+    pub fn check_file(&self, source: &Path) -> Result<(), String> {
+        let ruby = Ruby::get().map_err(|_| "Ruby VM not initialized".to_owned())?;
+        let compiler = ruby.eval::<Value>("RubyVM::InstructionSequence").map_err(|error| error.to_string())?;
+        compiler.funcall::<_, _, Value>("compile_file", (source.display().to_string(),))
+            .map(|_| ()).map_err(|error| format!("{}: {error}", source.display()))
+    }
+
     pub fn eval_file_captured(&self, path: &Path) -> (String, String) {
         if let Err(error) = crate::game_cli::validate_ruby_path(path) {
             return (String::new(), format!("error: {error}"));
@@ -300,6 +308,14 @@ impl ScriptEngine {
             return (String::new(), "error: Ruby VM not initialized".to_owned());
         };
         capture(&ruby, || self.eval_file(path))
+    }
+
+    #[cfg(selenite_embedded)]
+    pub fn execute_binary(&self, bytes: &[u8], directory: &Path, arguments: &[String]) -> (String, Result<i32, String>) {
+        let Ok(ruby) = Ruby::get() else { return (String::new(), Err("Ruby VM not initialized".into())); };
+        capture(&ruby, || bytecode_module(&ruby)
+            .and_then(|module| module.funcall::<_, _, i32>("execute_binary", (ruby.str_from_slice(bytes), directory.to_string_lossy().as_ref(), arguments.to_vec())))
+            .map_err(|error| error.to_string()))
     }
 
     /// Whether any Ruby hook is registered for `event`.
@@ -555,6 +571,7 @@ fn register_api(ruby: &Ruby) -> Result<(), Error> {
     module.define_singleton_method("reload_plugins", function!(app_reload_plugins, 0))?;
     module.define_singleton_method("__terminal", function!(app_terminal, 3))?;
     module.define_singleton_method("edit", function!(app_edit, 1))?;
+    module.define_singleton_method("ide", function!(app_ide, 1))?;
     module.define_singleton_method("file_info", function!(sel_file_info, 1))?;
     module.define_singleton_method("image_size", function!(sel_image_size, 1))?;
     module.define_singleton_method("checksum", function!(sel_checksum, 1))?;
@@ -1202,6 +1219,11 @@ fn app_edit(path: String) -> bool {
     true
 }
 
+fn app_ide(path: String) -> bool {
+    push_request(AppRequest::Ide(path));
+    true
+}
+
 fn app_terminal(file: Option<String>, args: Vec<String>, directory: Option<String>) -> bool {
     push_request(AppRequest::Terminal {
         file,
@@ -1441,6 +1463,7 @@ mod tests {
         );
         assert_eq!(engine.eval("Selenite.terminal"), "true");
         assert_eq!(engine.eval("Selenite.edit('notes.md')"), "true");
+        assert_eq!(engine.eval("Selenite.ide('game.rb')"), "true");
         assert_eq!(
             engine.drain_requests(),
             vec![
@@ -1455,6 +1478,7 @@ mod tests {
                     directory: None,
                 },
                 AppRequest::Edit("notes.md".to_owned()),
+                AppRequest::Ide("game.rb".to_owned()),
             ]
         );
         assert_eq!(engine.eval("g = Selenite.grid; g.push(20, 0, 'one.txt'); g.push(20, 0, 'two.txt'); g.extract_item(20, 0, 1)"), "[21, 0]");

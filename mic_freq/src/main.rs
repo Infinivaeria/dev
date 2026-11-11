@@ -1,4 +1,7 @@
 use mic_freq::audio::MicCapture;
+#[path = "../../src/portable.rs"]
+#[allow(dead_code)]
+mod portable;
 use mic_freq::studio::{self, BlinkState, Settings};
 use mic_freq::voice::{self, AvatarMotion, AvatarState, VoiceState};
 use raylib::prelude::*;
@@ -191,6 +194,9 @@ struct Options {
     capture: bool,
     list_devices: bool,
     help: bool,
+    preset: Option<String>,
+    save_preset: Option<String>,
+    list_presets: bool,
 }
 
 fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options, Box<dyn Error>> {
@@ -201,6 +207,11 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
             Some("--help" | "-h") => options.help = true,
             Some("--capture") => options.capture = true,
             Some("--list-devices") => options.list_devices = true,
+            Some("--list-presets") => options.list_presets = true,
+            Some("--preset" | "--save-preset") => {
+                let name = args.next().ok_or("preset option requires a name")?.into_string().map_err(|_| "preset name must be UTF-8")?;
+                if arg == "--preset" { options.preset = Some(name); } else { options.save_preset = Some(name); }
+            }
             Some("--device") => {
                 options.device = Some(
                     args.next()
@@ -221,6 +232,79 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
 
 fn open_mic(settings: &Settings) -> Result<MicCapture, Box<dyn Error>> {
     MicCapture::start_device(WINDOW_SAMPLES * 2, settings.device.as_deref())
+}
+
+#[derive(Default)]
+struct PresetMenu {
+    open: bool,
+    name: String,
+    names: Vec<String>,
+    offset: usize,
+    message: String,
+}
+
+impl PresetMenu {
+    fn bounds(width: f32, height: f32) -> Rectangle {
+        Rectangle::new((width - 620.0) / 2.0, (height - 420.0) / 2.0, 620.0, 420.0)
+    }
+
+    fn update(&mut self, rl: &mut RaylibHandle, mouse: Vector2, bounds: Rectangle, config: &Path, settings: &mut Settings) -> bool {
+        if rl.is_key_pressed(KeyboardKey::KEY_F2) { self.open = !self.open; }
+        if !self.open { return false; }
+        self.names = Settings::presets(config).unwrap_or_default();
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.open = false; return false; }
+        let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+        if ctrl && rl.is_key_pressed(KeyboardKey::KEY_A) { self.name.clear(); }
+        while let Some(character) = rl.get_char_pressed() {
+            if !ctrl && !character.is_control() && self.name.chars().count() < 64 { self.name.push(character); }
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE) { self.name.pop(); }
+        self.offset = (self.offset as isize - rl.get_mouse_wheel_move() as isize).clamp(0, self.names.len().saturating_sub(6) as isize) as usize;
+        let mut action = rl.is_key_pressed(KeyboardKey::KEY_ENTER).then_some(1);
+        if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+            for index in 0..3 {
+                let rect = Rectangle::new(bounds.x + 16.0 + index as f32 * 196.0, bounds.y + 88.0, 188.0, 34.0);
+                if rect.check_collision_point_rec(mouse) { action = Some(index); }
+            }
+            for (slot, name) in self.names.iter().skip(self.offset).take(6).enumerate() {
+                let rect = Rectangle::new(bounds.x + 16.0, bounds.y + 136.0 + slot as f32 * 36.0, bounds.width - 32.0, 34.0);
+                if rect.check_collision_point_rec(mouse) { self.name = name.clone(); }
+            }
+        }
+        match action {
+            Some(0) => match settings.save_preset(config, &self.name) {
+                Ok(()) => self.message = format!("Saved {}", self.name),
+                Err(error) => self.message = error.to_string(),
+            },
+            Some(1) => match settings.load_preset(config, &self.name) {
+                Ok(()) => { self.message = format!("Loaded {}", self.name); return true; }
+                Err(error) => self.message = error.to_string(),
+            },
+            Some(2) => self.open = false,
+            _ => {},
+        }
+        false
+    }
+
+    fn draw(&self, d: &mut impl RaylibDraw, bounds: Rectangle, width: f32, height: f32, mouse: Vector2) {
+        if !self.open { return; }
+        d.draw_rectangle(0, 0, width as i32, height as i32, Color::new(0, 0, 0, 170));
+        d.draw_rectangle_rec(bounds, Color::new(28, 29, 35, 255));
+        d.draw_text("Voice Presets", bounds.x as i32 + 16, bounds.y as i32 + 12, 22, Color::RAYWHITE);
+        let field = Rectangle::new(bounds.x + 16.0, bounds.y + 44.0, bounds.width - 32.0, 32.0);
+        d.draw_rectangle_rec(field, Color::new(40, 42, 48, 255));
+        let name: String = self.name.chars().skip(self.name.chars().count().saturating_sub(48)).collect();
+        d.draw_text(&name, field.x as i32 + 8, field.y as i32 + 6, 18, Color::RAYWHITE);
+        for (index, label) in ["Save", "Load", "Close"].into_iter().enumerate() {
+            button(d, Rectangle::new(bounds.x + 16.0 + index as f32 * 196.0, bounds.y + 88.0, 188.0, 34.0), label, false, mouse);
+        }
+        for (slot, name) in self.names.iter().skip(self.offset).take(6).enumerate() {
+            let label: String = name.chars().take(48).collect();
+            button(d, Rectangle::new(bounds.x + 16.0, bounds.y + 136.0 + slot as f32 * 36.0, bounds.width - 32.0, 34.0), &label, *name == self.name, mouse);
+        }
+        let message: String = self.message.chars().take(64).collect();
+        d.draw_text(&message, bounds.x as i32 + 16, (bounds.y + bounds.height - 32.0) as i32, 16, Color::GOLD);
+    }
 }
 
 fn control_rect(panel: f32, top: f32) -> Rectangle {
@@ -298,12 +382,14 @@ fn framed_avatar(width: f32, height: f32, tw: f32, th: f32, scale: f32, bounce: 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    portable::initialize().map_err(std::io::Error::other)?;
     let options = options(std::env::args_os().skip(1))?;
     if options.help {
         println!(
             "mic_freq [avatar-folder] [--device NAME] [--capture] [--list-devices]\n\
             C: clean capture  M: mute  0/1/2/3: auto/idle/talking/loud\n\
-            Up/Down: gate  B: bounce  X: mirror  R: reload  Esc: quit\n\
+            Up/Down: gate  B: bounce  X: mirror  R: reload  F2: presets  Esc: quit\n\
+            --preset NAME  --save-preset NAME  --list-presets\n\
             Drop an avatar folder or pose image to switch sets. Settings save automatically."
         );
         return Ok(());
@@ -320,6 +406,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         error = Some(format!("Settings: {failure}"));
         Settings::default()
     });
+    if options.list_presets {
+        for name in Settings::presets(&config_path)? { println!("{name}"); }
+        return Ok(());
+    }
+    if let Some(name) = options.preset { settings.load_preset(&config_path, &name)?; }
+    if let Some(name) = options.save_preset {
+        settings.save_preset(&config_path, &name)?;
+        println!("Saved preset: {name}");
+        return Ok(());
+    }
     if let Some(device) = options.device {
         settings.device = Some(device);
     }
@@ -361,8 +457,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut save_delay: Option<f32> = None;
     let mut active_slider = None;
     let mut samples = Vec::with_capacity(WINDOW_SAMPLES);
+    let mut presets = PresetMenu::default();
 
-    while !rl.window_should_close() && !rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+    while !rl.window_should_close() {
         let dt = rl.get_frame_time();
         let (width, height) = (rl.get_screen_width().max(1), rl.get_screen_height().max(1));
         let (w, h) = (width as f32, height as f32);
@@ -370,10 +467,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         let panel = w / ui - 278.0;
         let position = rl.get_mouse_position();
         let mouse = Vector2::new(position.x / ui, position.y / ui);
-        let clicked = !capture && rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
+        let mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
+        let presets_were_open = presets.open;
+        if !capture && mouse_clicked && Rectangle::new(panel, 56.0, 258.0, 28.0).check_collision_point_rec(mouse) { presets.open = true; }
+        let mut changed = presets.update(&mut rl, mouse, PresetMenu::bounds(w / ui, h / ui), &config_path, &mut settings);
+        let preset_active = presets.open || presets_were_open;
+        if !preset_active && rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { break; }
+        if presets.open { capture = false; active_slider = None; }
+        let clicked = !capture && mouse_clicked;
         let hit = |top| clicked && control_rect(panel, top).check_collision_point_rec(mouse);
-        let mut changed = false;
-        if rl.is_key_pressed(KeyboardKey::KEY_C) || hit(748.0) {
+        if !preset_active {
+        let mut capture_key_pressed = false;
+        while let Some(key) = rl.get_key_pressed() {
+            capture_key_pressed |= key == KeyboardKey::KEY_C;
+        }
+        if capture_key_pressed
+            || rl.is_key_pressed(KeyboardKey::KEY_C)
+            || hit(748.0)
+            || (capture && mouse_clicked)
+        {
             capture = !capture;
         }
         if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(410.0) {
@@ -503,6 +615,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
+        }
 
         samples.clear();
         if let Some(input) = &mic {
@@ -604,7 +717,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Color::new(25, 27, 31, 255),
             );
             d.draw_text("PNGTuber Studio", panel as i32, 24, 24, Color::RAYWHITE);
-            d.draw_text("mic_freq", panel as i32, 58, 16, Color::GRAY);
+            button(&mut d, Rectangle::new(panel, 56.0, 258.0, 28.0), "Presets", false, mouse);
             d.draw_text(
                 state.label(),
                 panel as i32,
@@ -723,6 +836,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
                 }
             }
+            presets.draw(&mut d, PresetMenu::bounds(w / ui, h / ui), w / ui, h / ui, mouse);
         }
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::BLACK);

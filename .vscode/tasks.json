@@ -1591,6 +1591,395 @@
 			"command": "python3 tests/network_runtime_smoke.py --graphics",
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Build suite",
+			"type": "process",
+			"command": "cargo",
+			"args": [
+				"build",
+				"--workspace",
+				"--all-targets",
+				"--features",
+				"scripting"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "Selenite: Package suite",
+			"type": "process",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/package.sh",
+				"--verify"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Selenite: Package game runtime",
+			"type": "process",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/package.sh",
+				"--game",
+				"--verify"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Selenite: Distribute suite",
+			"type": "process",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/distribute.sh"
+			],
+			"detail": "Install/update the packaged suite using the existing non-destructive distributor.",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"dependsOn": "Selenite: Package suite",
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run organizer",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"detail": "Uses the portable workspace package. Run Package suite after changing source.",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run IDE",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--ide",
+				"${input:seleniteProject}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run Terminal",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--terminal-window"
+			],
+			"detail": "Open the raylib-rendered terminal with independent shell tabs.",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run asset manager",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--inventory",
+				"${input:seleniteGrid}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run game",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite-game",
+			"args": [
+				"${input:seleniteGame}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Run Audio Studio",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/mic_freq/mic_freq",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: New game project",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--new-project",
+				"${input:seleniteNewProject}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: New application project",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--new-project",
+				"${input:seleniteNewProject}",
+				"--app"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Check project",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": [
+				"--check-project",
+				"${input:seleniteProject}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Install application shortcuts",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"${workspaceFolder}/tools/desktop_shortcuts.py",
+				"--root",
+				"${input:seleniteInstallFolder}"
+			],
+			"detail": "Register organizer, IDE, Terminal and Audio Studio in the Linux application menu.",
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Install desktop shortcuts",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"${workspaceFolder}/tools/desktop_shortcuts.py",
+				"--root",
+				"${input:seleniteInstallFolder}",
+				"--desktop"
+			],
+			"detail": "Also create desktop launchers. The desktop may require Allow Launching.",
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Change shortcut icon",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"${workspaceFolder}/tools/desktop_shortcuts.py",
+				"--update-icon",
+				"--icon",
+				"${input:seleniteIcon}"
+			],
+			"detail": "Change icons on existing managed Linux shortcuts without changing their launch commands.",
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Reset shortcut icon",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"${workspaceFolder}/tools/desktop_shortcuts.py",
+				"--update-icon"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Regression tests (native GPU)",
+			"type": "shell",
+			"command": "export LD_LIBRARY_PATH=\"$(ruby -rrbconfig -e 'puts [RbConfig::CONFIG[\"libdir\"], ENV[\"LD_LIBRARY_PATH\"]].compact.reject(&:empty?).join(\":\")')\" && cargo test --workspace --all-targets --features scripting --no-fail-fast -- --test-threads=1",
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"SELENITE_TEST_SLOW_INPUT": "1"
+				}
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "test"
+		},
+		{
+			"label": "Selenite: Regression tests (software GUI)",
+			"type": "shell",
+			"command": "export LD_LIBRARY_PATH=\"$(ruby -rrbconfig -e 'puts [RbConfig::CONFIG[\"libdir\"], ENV[\"LD_LIBRARY_PATH\"]].compact.reject(&:empty?).join(\":\")')\" && cargo test --workspace --all-targets --features scripting --no-fail-fast -- --test-threads=1",
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"__GLX_VENDOR_LIBRARY_NAME": "mesa",
+					"LIBGL_ALWAYS_SOFTWARE": "1",
+					"SELENITE_TEST_SLOW_INPUT": "1"
+				}
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "Selenite: Portable graphics smoke",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"-c",
+				"import pathlib,subprocess,tomllib; root=pathlib.Path.cwd(); version=tomllib.loads((root/'Cargo.toml').read_text())['package']['version']; subprocess.run(['python3','tests/game_runtime_smoke.py','--archive',str(root/f'selenite-{version}-portable.tar.gz'),'--graphics'],check=True)"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"__GLX_VENDOR_LIBRARY_NAME": "mesa",
+					"LIBGL_ALWAYS_SOFTWARE": "1",
+					"SELENITE_TEST_SLOW_INPUT": "1"
+				}
+			},
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Selenite: Portable network smoke",
+			"type": "process",
+			"command": "python3",
+			"args": [
+				"${workspaceFolder}/tests/network_runtime_smoke.py",
+				"--graphics"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"__GLX_VENDOR_LIBRARY_NAME": "mesa",
+					"LIBGL_ALWAYS_SOFTWARE": "1"
+				}
+			},
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Selenite: Verify release",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Selenite: Regression tests (software GUI)",
+				"Selenite: Package suite",
+				"Selenite: Package game runtime",
+				"Selenite: Portable graphics smoke",
+				"Selenite: Portable network smoke"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "Selenite: Validate task configuration",
+			"type": "process",
+			"command": "python3",
+			"options": {"cwd": "${workspaceFolder}"},
+			"args": [
+				"-c",
+				"import json,pathlib,re; root=pathlib.Path.cwd(); path=root/'.vscode/tasks.json'; data=json.loads(path.read_text()); labels=[task['label'] for task in data['tasks']]; assert len(labels)==len(set(labels)), 'Duplicate task label'; known=set(labels); inputs={item['id'] for item in data.get('inputs',[])}; tasks=[task for task in data['tasks'] if task['label'].startswith('Selenite: ')]; assert set(re.findall(r'\\$\\{input:([^}]+)\\}',path.read_text()))<=inputs, 'Unknown task input'; dependencies=[dependency for task in tasks for dependency in ([task['dependsOn']] if isinstance(task.get('dependsOn'),str) else task.get('dependsOn',[]))]; assert set(dependencies)<=known, 'Unknown task dependency'; print('Validated', len(tasks), 'Selenite tasks and', len(inputs), 'prompts')"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Selenite: Build Rust executable",
+			"type": "process",
+			"command": "${workspaceFolder}/dist/selenite",
+			"args": ["--build-executable", "${input:seleniteExecutableInput}", "--output", "${input:seleniteExecutableOutput}", "${input:seleniteExecutableMode}"],
+			"options": {"cwd": "${workspaceFolder}", "env": {"CARGO_TARGET_DIR": "${workspaceFolder}/target"}},
+			"detail": "Compile an entry to Ruby bytecode and embed it in a Rust/Magnus executable. Output must be a new directory.",
+			"problemMatcher": ["$rustc"],
+			"group": "build"
+		},
+		{
+			"label": "Selenite: Rust executable smoke test",
+			"type": "process",
+			"command": "python3",
+			"args": ["${workspaceFolder}/tests/executable_build_smoke.py", "--selenite", "${workspaceFolder}/dist/selenite", "--graphics"],
+			"options": {"cwd": "${workspaceFolder}", "env": {"__GLX_VENDOR_LIBRARY_NAME": "mesa", "LIBGL_ALWAYS_SOFTWARE": "1"}},
+			"problemMatcher": [],
+			"group": "test"
+		}
+	],
+	"inputs": [
+		{
+			"id": "seleniteProject",
+			"type": "promptString",
+			"description": "Project folder (or Ruby source for Run IDE)",
+			"default": "dist/examples/projects/starter"
+		},
+		{
+			"id": "seleniteNewProject",
+			"type": "promptString",
+			"description": "New or empty project folder",
+			"default": "projects/new-project"
+		},
+		{
+			"id": "seleniteGrid",
+			"type": "promptString",
+			"description": "Existing grid JSON file",
+			"default": "bin/raygrid.json"
+		},
+		{
+			"id": "seleniteGame",
+			"type": "promptString",
+			"description": "Ruby game source or bytecode",
+			"default": "examples/games/starter.rb"
+		},
+		{
+			"id": "seleniteInstallFolder",
+			"type": "promptString",
+			"description": "Full installed/extracted suite folder",
+			"default": "~/selenite"
+		},
+		{
+			"id": "seleniteIcon",
+			"type": "promptString",
+			"description": "Absolute PNG, SVG or XPM icon file path"
+		},
+		{
+			"id": "seleniteExecutableInput", "type": "promptString", "description": "Ruby source, Selenite bytecode or project folder", "default": "examples/executables/hello.rb"
+		},
+		{
+			"id": "seleniteExecutableOutput", "type": "promptString", "description": "New output folder", "default": "build/my-executable"
+		},
+		{
+			"id": "seleniteExecutableMode", "type": "pickString", "description": "Executable mode", "options": ["--app", "--game"], "default": "--app"
 		}
 	]
 }

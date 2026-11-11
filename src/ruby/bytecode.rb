@@ -1,6 +1,7 @@
 require "json"
 require "digest"
 require "tempfile"
+require "stringio"
 
 module Selenite
   module Bytecode
@@ -55,8 +56,11 @@ module Selenite
     end
 
     def self.read(path)
-      File.open(path, "rb") do |file|
-        raise Error, "not Selenite .rbc bytecode: #{path}" unless file.read(MAGIC.bytesize) == MAGIC
+      File.open(path, "rb") { |file| read_stream(file) }
+    end
+
+    def self.read_stream(file)
+        raise Error, "not Selenite .rbc bytecode" unless file.read(MAGIC.bytesize) == MAGIC
         length_bytes = file.read(4)
         raise Error, "truncated .rbc header" unless length_bytes&.bytesize == 4
         length = length_bytes.unpack1("N")
@@ -73,9 +77,21 @@ module Selenite
           raise Error, ".rbc checksum or size mismatch; recompile the damaged file"
         end
         payload
-      end
     rescue JSON::ParserError, EncodingError
       raise Error, "invalid .rbc metadata"
+    end
+
+    def self.evaluate_binary(bytes, directory, arguments = [])
+      sequence = RubyVM::InstructionSequence.load_from_binary(read_stream(StringIO.new(bytes.b)))
+      ARGV.replace(arguments)
+      Dir.chdir(directory) { sequence.eval }
+    end
+
+    def self.execute_binary(bytes, directory, arguments = [])
+      evaluate_binary(bytes, directory, arguments)
+      0
+    rescue SystemExit => error
+      error.status
     end
 
     def self.load(path)

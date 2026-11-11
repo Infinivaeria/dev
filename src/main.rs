@@ -1,6 +1,8 @@
 mod camera;
+mod desktop;
 mod download;
 mod editor;
+mod executable_builder;
 #[cfg(feature = "scripting")]
 mod game;
 #[allow(dead_code)]
@@ -8,6 +10,9 @@ mod game_cli;
 mod grid_inventory;
 mod help;
 mod history;
+mod icon;
+#[cfg(feature = "scripting")]
+mod ide;
 mod imaging;
 mod inventory;
 mod item_panel;
@@ -16,15 +21,24 @@ mod music;
 mod panels;
 mod persistence;
 mod plugins;
+mod portable;
 mod profiles;
+mod project;
 mod rendering;
+#[cfg(feature = "scripting")]
+mod raylib_api;
 #[cfg(feature = "scripting")]
 mod scripting;
 mod search;
 mod selection;
 mod settings;
 mod stack_panel;
+mod suite;
 mod syntax;
+#[cfg(unix)]
+mod term_emu;
+#[cfg(unix)]
+mod terminal;
 mod ui;
 mod view3d;
 
@@ -118,7 +132,10 @@ enum ToolbarAction {
     GridFolder,
     Console,
     Terminal,
+    RunTerminal,
     Notes,
+    Editor,
+    Ide,
     Home,
     View3d,
     Labels,
@@ -129,6 +146,11 @@ enum ToolbarAction {
     CancelDownloads,
     Refresh,
     Back,
+    ButtonSize,
+    HideToolbar,
+    ScaleOptions,
+    Suite,
+    ToggleToolbar,
 }
 
 impl ToolbarAction {
@@ -153,8 +175,11 @@ impl ToolbarAction {
             Self::AssetInventory => "Manage this grid's assets. Drop multiple files onto a row to stack them, or onto blank inventory space to create a new asset cell.",
             Self::GridFolder => "Open this grid's own folder in your file manager (O). Every grid gets a folder when first used; files added to the grid are copied into its assets/ subfolder, along with pasted images and downloads.",
             Self::Console => "Toggle the embedded Ruby console (` key). Type Selenite.help for the API.",
-            Self::Terminal => "Open a system terminal with your shell. Commands run with your normal user permissions.",
+            Self::Terminal => "Open Terminal, Selenite's raylib-rendered terminal with independent shell tabs, scrollback and clipboard support. Commands run with your normal user permissions.",
+            Self::RunTerminal => "Run the selected script (Bash, Ruby, Python, JS or any #! file) in Selenite's terminal window. The terminal stays open afterwards. Also in the cell's right-click menu as Run in Selenite terminal.",
             Self::Notes => "Edit this grid's Markdown notes (notes.md in its grid folder) in the text editor.",
+            Self::Editor => "Edit the selected text or Ruby file in the text editor (an empty cell gets a new note). Right-click this button to put a new note in the selected cell, or the next free cell on its row, and edit it.",
+            Self::Ide => "Open the Selenite IDE with file/workspace browsers, terminal, Ruby console, run controls and tutorial Help. Select Ruby source, or an empty cell to create a starter game. The IDE shares this profile's grid save.",
             Self::Home => "Reset pan and zoom (and the 3D camera) back to the origin.",
             Self::View3d => help::VIEW_3D_TIP,
             Self::Labels => help::LABELS_TIP,
@@ -165,6 +190,11 @@ impl ToolbarAction {
             Self::CancelDownloads => "Cancel all running downloads (Esc).",
             Self::Refresh => "Reload from disk.",
             Self::Back => "Leave this nested grid (Backspace).",
+            Self::ButtonSize => "Cycle toolbar button size: 75%, 85%, 100%, 125%. Saved separately from UI and grid zoom.",
+            Self::HideToolbar => "Hide toolbar buttons. Press F10 to show or hide them again.",
+            Self::ScaleOptions => "Choose interface and button scale for Selenite windows (F9).",
+            Self::Suite => "Open suite tools, create projects and reopen recent projects (F8).",
+            Self::ToggleToolbar => "Enable or disable toolbar clicks (F7). Visibility is controlled separately with F10.",
         }
     }
 }
@@ -200,6 +230,7 @@ fn wrap_toolbar_items(
     let mut rects = Vec::with_capacity(widths.len());
     let (mut x, mut y) = (margin, margin);
     for &width in widths {
+        let width = width.min((screen_width - margin * 2.0).max(1.0));
         if x > margin && x + width > screen_width - margin {
             x = margin;
             y += item_height + spacing;
@@ -266,6 +297,8 @@ enum MenuItem {
     Info,
     CopyFile,
     CopyPath,
+    DesktopShortcut,
+    GridShortcut,
     ShowInFolder,
     Paste,
     NewGrid,
@@ -290,8 +323,13 @@ enum MenuItem {
     NestedGridNotes,
     /// Edit a file cell in the text editor.
     EditText,
+    OpenIde,
     /// Create a Markdown note in an empty cell and edit it.
     NewNote,
+    /// Create an empty text file on top of the cell's stack and edit it.
+    NewTextFile,
+    /// Create an empty text file inside a nested grid and edit it.
+    NewTextFileInside,
     /// Open a nested grid cell's own folder.
     NestedGridFolder,
     /// Run a Ruby cell as a game in its own window (`selenite --game`).
@@ -313,6 +351,8 @@ impl MenuItem {
             Self::Info => "Info",
             Self::CopyFile => "Copy file",
             Self::CopyPath => "Copy path",
+            Self::DesktopShortcut => "Create Desktop Shortcut",
+            Self::GridShortcut => "Desktop shortcut for workspace",
             Self::ShowInFolder => "Show in folder",
             Self::Paste => "Paste here",
             Self::NewGrid => "New grid here",
@@ -328,10 +368,13 @@ impl MenuItem {
             Self::GridNotes => "Grid notes",
             Self::NestedGridNotes => "Edit its grid notes",
             Self::EditText => "Edit text",
+            Self::OpenIde => "Open in Selenite IDE",
             Self::NewNote => "New note here",
+            Self::NewTextFile => "New text file here",
+            Self::NewTextFileInside => "New text file inside",
             Self::NestedGridFolder => "Open its grid folder",
             Self::RunGame => "Run as game",
-            Self::RunTerminal => "Run in terminal",
+            Self::RunTerminal => "Run in Selenite terminal",
             Self::ExportGame => "Export standalone game",
             Self::Plugin(_) => "Plugin",
         }
@@ -341,11 +384,18 @@ impl MenuItem {
     /// items; `multi` is set when other cells are selected too.
     fn for_cell(kind: Option<CellKind>, stack_len: usize, multi: bool) -> Vec<Self> {
         let mut items = match kind {
-            None => vec![Self::Open, Self::Paste, Self::NewGrid, Self::NewNote],
+            None => vec![
+                Self::Open,
+                Self::Paste,
+                Self::NewGrid,
+                Self::NewNote,
+                Self::NewTextFile,
+            ],
             Some(CellKind::Grid) => vec![
                 Self::Open,
                 Self::NestedGridFolder,
                 Self::NestedGridNotes,
+                Self::NewTextFileInside,
                 Self::Info,
             ],
             Some(kind) => {
@@ -357,15 +407,17 @@ impl MenuItem {
                     items.push(Self::QueueAudio);
                 }
                 if kind == CellKind::RubyScript {
-                    items.extend([Self::RunGame, Self::ExportGame]);
+                    items.extend([Self::OpenIde, Self::RunGame, Self::ExportGame]);
                 }
                 if matches!(kind, CellKind::File | CellKind::RubyScript) {
                     items.push(Self::RunTerminal);
                 }
                 items.extend([
+                    Self::NewTextFile,
                     Self::Info,
                     Self::CopyFile,
                     Self::CopyPath,
+                    Self::DesktopShortcut,
                     Self::ShowInFolder,
                     Self::Paste,
                 ]);
@@ -387,6 +439,7 @@ impl MenuItem {
             items.extend([Self::HideLabels, Self::Delete]);
         }
         items.push(Self::GridFolder);
+        items.push(Self::GridShortcut);
         items.push(Self::GridTerminal);
         items.push(Self::GridNotes);
         items.push(Self::Items);
@@ -487,6 +540,8 @@ struct App {
     profile: Option<String>,
     profile_panel: Option<ProfilePanel>,
     help_open: bool,
+    scale_menu: ui::ScaleMenu,
+    suite_menu: suite::Menu,
     help_scroll: f32,
     hover: Option<(ToolbarAction, f64)>,
     downloads: Vec<PendingDownload>,
@@ -503,6 +558,12 @@ struct App {
     minimap_drag: bool,
     status_seen: (Option<String>, f64),
     title_dirty: bool,
+    /// Last unmaximized window size, saved on exit.
+    normal_window: Option<(i32, i32)>,
+    /// `--with-terminal`: open Selenite's terminal window once the app has started.
+    terminal_on_start: bool,
+    /// Set once, on exit, so window geometry is saved only when the session ends.
+    window_maximized: Option<bool>,
     clipboard: Option<arboard::Clipboard>,
     settings: Settings,
     settings_path: PathBuf,
@@ -512,18 +573,19 @@ struct App {
     /// Scroll offset of the plugin manager; `None` while it is closed.
     plugin_panel: Option<f32>,
     plugin_timers: Vec<PluginTimer>,
-    /// Games started with "Run as game" that are still running.
+    /// Games and IDE sessions started by this organizer that are still running.
     games: Vec<GameRun>,
     #[cfg(feature = "scripting")]
     script_engine: Option<scripting::ScriptEngine>,
 }
 
-/// A `selenite --game` child process and the save file it may change.
+/// A game or IDE child process and the save file it may change.
 struct GameRun {
     child: std::process::Child,
     name: String,
     json_path: PathBuf,
     modified: Option<std::time::SystemTime>,
+    kind: &'static str,
 }
 
 /// What the mouse is dragging on the music player bar.
@@ -582,6 +644,8 @@ impl App {
             profile: None,
             profile_panel: None,
             help_open: false,
+            scale_menu: ui::ScaleMenu::default(),
+            suite_menu: suite::Menu::default(),
             help_scroll: 0.0,
             hover: None,
             downloads: Vec::new(),
@@ -598,6 +662,9 @@ impl App {
             minimap_drag: false,
             status_seen: (None, 0.0),
             title_dirty: true,
+            normal_window: None,
+            terminal_on_start: false,
+            window_maximized: None,
             clipboard: None,
             settings,
             settings_path,
@@ -664,17 +731,38 @@ impl App {
             return;
         }
         let mut next = self.settings.clone();
+        let saved = Settings::load(&self.settings_path);
+        next.recent_projects = saved.recent_projects;
+        next.toolbar_enabled = saved.toolbar_enabled;
+        next.application_icon = saved.application_icon;
         next.minimap = self.minimap_open;
         next.volume = self.player.volume();
         next.shuffle = self.player.playlist.shuffle();
         next.repeat = self.player.playlist.repeat;
         next.ui_scale = ui::user_scale();
+        if let Some(maximized) = self.window_maximized {
+            next.window_size = self.normal_window.or(next.window_size);
+            next.window_maximized = maximized;
+        }
         let path_on_disk = self.settings_path.is_file();
         if next != self.settings || !path_on_disk && next != Settings::default() {
             self.settings = next;
             if let Err(error) = self.settings.save(&self.settings_path) {
                 self.status = Some(format!("Error saving settings: {error}"));
             }
+        }
+    }
+
+    /// Applies the window size and maximized state saved by the last session.
+    fn restore_window(&mut self, rl: &mut RaylibHandle) {
+        if let Some((width, height)) = self.settings.window_size {
+            let monitor = raylib::core::window::get_current_monitor();
+            let max_width = (raylib::core::window::get_monitor_width(monitor) - 80).max(480);
+            let max_height = (raylib::core::window::get_monitor_height(monitor) - 80).max(320);
+            rl.set_window_size(width.clamp(480, max_width), height.clamp(320, max_height));
+        }
+        if self.settings.window_maximized {
+            rl.maximize_window();
         }
     }
 
@@ -700,14 +788,23 @@ impl App {
         rl.set_exit_key(None);
         rl.set_window_min_size(480, 320);
         ui::fit_window_to_display(&mut rl, WINDOW_WIDTH, WINDOW_HEIGHT);
+        self.restore_window(&mut rl);
         ui::set_user_scale(self.settings.ui_scale);
+        ui::limit_to_toolbar();
         ui::load_font(&thread);
         let mut renderer = rendering::Renderer::default();
         self.run_profile_init();
+        if self.terminal_on_start {
+            match self.terminal_launch().open() {
+                Ok(()) => self.status = Some("Opened terminal".to_owned()),
+                Err(error) => self.status = Some(format!("Error: {error}")),
+            }
+        }
 
         let mut rendered = Ok(());
+        let mut maximized = false;
         while !rl.window_should_close() {
-            if let Err(error) = self.update(&mut rl) {
+            if let Err(error) = self.update(&mut rl, &thread) {
                 self.status = Some(format!("Error: {error}"));
             }
             self.poll_downloads();
@@ -722,6 +819,10 @@ impl App {
             if self.title_dirty {
                 rl.set_window_title(&thread, &self.window_title());
                 self.title_dirty = false;
+            }
+            maximized = rl.is_window_maximized();
+            if !maximized && !rl.is_window_fullscreen() && !rl.is_window_minimized() {
+                self.normal_window = Some((rl.get_screen_width(), rl.get_screen_height()));
             }
             rendered = self.draw(&mut rl, &thread, &mut renderer);
             if rendered.is_err() {
@@ -743,20 +844,34 @@ impl App {
             Ok(())
         };
         self.player_drag = None;
+        self.window_maximized = Some(maximized);
         self.persist_settings();
         // Shut Ruby down and free GPU textures while the window (and the GL
         // context/driver) is still alive; doing it afterwards segfaults.
         #[cfg(feature = "scripting")]
         drop(self.script_engine.take());
         self.thumbnails.clear();
+        self.suite_menu.clear_resources();
         self.player.shutdown();
         drop(renderer);
         drop(rl);
         saved.and(rendered)
     }
 
-    fn update(&mut self, rl: &mut RaylibHandle) -> Result<(), String> {
+    fn update(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) -> Result<(), String> {
         self.sync_selection();
+        let suite_source = self.selected.and_then(|(col, row)| lock(&self.grid).file_at(col, row).map(Path::to_owned));
+        if self.suite_menu.update(rl, thread, suite_source.as_deref(), Some(&self.json_path)) {
+            self.scale_menu.open = false;
+            return Ok(());
+        }
+        if self.scale_menu.update(rl) { return Ok(()); }
+        if rl.is_key_pressed(KeyboardKey::KEY_F7) {
+            self.perform_toolbar_action(ToolbarAction::ToggleToolbar)?;
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_F10) {
+            self.perform_toolbar_action(ToolbarAction::HideToolbar)?;
+        }
         if let Some(scale) = ui::handle_scale_keys(rl) {
             self.status = Some(format!(
                 "UI scale {:.0}% (Ctrl +/- to adjust, Ctrl 0 to reset)",
@@ -864,6 +979,22 @@ impl App {
         }
         if self.minimap_click(rl) {
             return Ok(());
+        }
+        if matches!(self.mode, Mode::Main)
+            && rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT)
+        {
+            let mouse = rl.get_mouse_position();
+            let on_editor = self.toolbar_layout(rl).buttons.iter().any(|button| {
+                button.enabled
+                    && button.action == ToolbarAction::Editor
+                    && point_in_rect(mouse, button.rect)
+            });
+            if on_editor {
+                if let Err(error) = self.new_note_in_selection() {
+                    self.status = Some(format!("Error: {error}"));
+                }
+                return Ok(());
+            }
         }
         if self.view_3d {
             self.handle_3d_input(rl, typing)?;
@@ -1708,6 +1839,9 @@ impl App {
             AppRequest::Edit(path) => {
                 spawn_editor(Path::new(&path))?;
                 self.status = Some(format!("Editing {path}"));
+            }
+            AppRequest::Ide(path) => {
+                self.run_ide(Path::new(&path))?;
             }
             AppRequest::Terminal {
                 file,
@@ -3535,13 +3669,16 @@ impl App {
             }
             ToolbarAction::Terminal => {
                 self.terminal_launch().open()?;
-                self.status = Some("Opened terminal".to_owned());
+                self.status = Some("Opened Terminal".to_owned());
                 Ok(())
             }
+            ToolbarAction::RunTerminal => self.run_selection_in_terminal(),
             ToolbarAction::Notes => {
                 let grid = Arc::clone(&self.grid);
                 self.open_grid_notes(&grid, "Grid notes")
             }
+            ToolbarAction::Editor => self.edit_selection(),
+            ToolbarAction::Ide => self.ide_selection(),
             ToolbarAction::Home => {
                 self.reset_view();
                 Ok(())
@@ -3578,6 +3715,31 @@ impl App {
             ToolbarAction::Back => {
                 self.exit_grid();
                 Ok(())
+            }
+            ToolbarAction::ButtonSize => {
+                self.settings.toolbar_scale = [0.75, 0.85, 1.0, 1.25]
+                    .into_iter()
+                    .find(|scale| *scale > self.settings.toolbar_scale + 0.01)
+                    .unwrap_or(0.75);
+                self.settings.save(&self.settings_path)
+            }
+            ToolbarAction::HideToolbar => {
+                self.settings.toolbar_visible = !self.settings.toolbar_visible;
+                self.hover = None;
+                self.settings.save(&self.settings_path)
+            }
+            ToolbarAction::ScaleOptions => {
+                self.scale_menu.open = true;
+                Ok(())
+            }
+            ToolbarAction::Suite => {
+                self.suite_menu.open = true;
+                Ok(())
+            }
+            ToolbarAction::ToggleToolbar => {
+                self.settings.toolbar_enabled = !self.settings.toolbar_enabled;
+                self.hover = None;
+                self.settings.save(&self.settings_path)
             }
         }
     }
@@ -4550,6 +4712,8 @@ impl App {
                         | MenuItem::Paste
                         | MenuItem::NewGrid
                         | MenuItem::NewNote
+                        | MenuItem::NewTextFile
+                        | MenuItem::NewTextFileInside
                         | MenuItem::Delete
                         | MenuItem::CycleStack
                         | MenuItem::RemoveTop
@@ -4651,6 +4815,16 @@ impl App {
                     .unwrap_or_else(|| PathBuf::from("."));
                 open_with_system(&folder)
             }
+            MenuItem::DesktopShortcut => {
+                let path = path.ok_or_else(|| "Select a file or folder first".to_owned())?;
+                self.status = Some(desktop::for_path(&path)?);
+                Ok(())
+            }
+            MenuItem::GridShortcut => {
+                self.save()?;
+                self.status = Some(desktop::create("grid", Some(&self.json_path), None)?);
+                Ok(())
+            }
             MenuItem::Paste => self.edit("Paste", |app| app.paste_clipboard()),
             MenuItem::NewGrid => self.edit("New Grid", |app| app.create_grid_at_selection()),
             MenuItem::Delete => self.edit("Delete", |app| app.delete_selection()),
@@ -4704,18 +4878,13 @@ impl App {
                 self.status = Some(format!("Editing {}", path.display()));
                 Ok(())
             }
-            MenuItem::NewNote => {
-                let note = editor::unique_note_path(&self.asset_directory()?);
-                editor::create_note_if_missing(&note, "Note")
-                    .map_err(|error| format!("could not create the note: {error}"))?;
-                self.edit("New note", |app| {
-                    lock(&app.grid)
-                        .insert_file(col, row, note.clone())
-                        .map_err(|error| error.to_string())?;
-                    app.save()
-                })?;
-                spawn_editor(&note)
+            MenuItem::OpenIde => {
+                let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
+                self.run_ide(&path)
             }
+            MenuItem::NewNote => self.new_note_at(col, row),
+            MenuItem::NewTextFile => self.new_text_file_at(col, row),
+            MenuItem::NewTextFileInside => self.new_text_file_inside(col, row),
             MenuItem::QueueAudio => {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
                 let name = music::track_name(&path);
@@ -4733,15 +4902,7 @@ impl App {
             }
             MenuItem::RunTerminal => {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
-                let path = validate_terminal_file(&path)?;
-                let mut launch = self.terminal_launch();
-                launch
-                    .env
-                    .push(("SELENITE_CELL_FILE", path.clone().into_os_string()));
-                launch.file = Some(path.clone());
-                launch.open()?;
-                self.status = Some(format!("Running {} in terminal", path.display()));
-                Ok(())
+                self.run_in_terminal(&path)
             }
             MenuItem::ExportGame => {
                 let path = path.ok_or_else(|| "this cell has no file".to_owned())?;
@@ -4755,6 +4916,148 @@ impl App {
         }
     }
 
+    /// Creates a note in the empty cell and opens it in the editor.
+    fn new_note_at(&mut self, col: i64, row: i64) -> Result<(), String> {
+        let note = editor::unique_note_path(&self.asset_directory()?);
+        editor::create_note_if_missing(&note, "Note")
+            .map_err(|error| format!("could not create the note: {error}"))?;
+        self.edit("New note", |app| {
+            lock(&app.grid)
+                .insert_file(col, row, note.clone())
+                .map_err(|error| error.to_string())?;
+            app.save()
+        })?;
+        spawn_editor(&note)
+    }
+
+    /// Creates an empty text file on top of the cell's stack (an empty cell just gets it) and edits it.
+    fn new_text_file_at(&mut self, col: i64, row: i64) -> Result<(), String> {
+        let file = editor::unique_text_path(&self.asset_directory()?);
+        editor::create_empty_if_missing(&file)
+            .map_err(|error| format!("could not create the text file: {error}"))?;
+        self.edit("New text file", |app| {
+            lock(&app.grid).push_file(col, row, file.clone());
+            app.save()
+        })?;
+        self.status = Some(format!("Created {}", file.display()));
+        spawn_editor(&file)
+    }
+
+    /// Creates an empty text file in the first free cell of the nested grid at (col, row) and edits it.
+    fn new_text_file_inside(&mut self, col: i64, row: i64) -> Result<(), String> {
+        let nested = lock(&self.grid)
+            .grid_at(col, row)
+            .ok_or_else(|| "this cell is not a grid".to_owned())?;
+        let (assets, _) =
+            persistence::grid_assets_folder(&self.json_path, &nested, &self.root_grid)
+                .map_err(|error| format!("could not create the grid's assets folder: {error}"))?;
+        let file = editor::unique_text_path(&assets);
+        editor::create_empty_if_missing(&file)
+            .map_err(|error| format!("could not create the text file: {error}"))?;
+        {
+            let mut inner = lock(&nested);
+            let free = inner.next_free_in_row(0, 0);
+            inner
+                .insert_file(free, 0, file.clone())
+                .map_err(|error| error.to_string())?;
+        }
+        self.save()?;
+        self.info_cache = None;
+        self.status = Some(format!("Created {} in the nested grid", file.display()));
+        spawn_editor(&file)
+    }
+
+    fn ide_selection(&mut self) -> Result<(), String> {
+        let (col, row) = self.selected.ok_or("select a Ruby source file or an empty cell first")?;
+        let (kind, path) = {
+            let grid = lock(&self.grid);
+            (grid.kind_at(col, row), grid.file_at(col, row).map(Path::to_path_buf))
+        };
+        let path = match (kind, path) {
+            (Some(CellKind::RubyScript), Some(path)) => path,
+            (Some(CellKind::File), Some(path)) if project::is_project_path(&path) => path,
+            (None, _) => {
+                use std::io::Write;
+                let path = editor::unique_ruby_path(&self.asset_directory()?);
+                let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|error| error.to_string())?;
+                file.write_all(b"Selenite::Game.run(title: \"Selenite project\", audio: false) do |game|\n  game.draw_ui do\n    game.text(\"Hello, Selenite!\", 24, 24)\n  end\nend\n").map_err(|error| error.to_string())?;
+                self.edit("New IDE project", |app| {
+                    lock(&app.grid).insert_file(col, row, path.clone()).map_err(|error| error.to_string())?;
+                    app.save()
+                })?;
+                path
+            }
+            _ => return Err("Select Ruby source or an empty cell for the IDE".to_owned()),
+        };
+        self.run_ide(&path)
+    }
+
+    /// Toolbar Editor button: edits the selected file, or starts a note in an empty cell.
+    fn edit_selection(&mut self) -> Result<(), String> {
+        let (col, row) = self
+            .selected
+            .ok_or_else(|| "select a cell first".to_owned())?;
+        let (kind, path) = {
+            let grid = lock(&self.grid);
+            (
+                grid.kind_at(col, row),
+                grid.file_at(col, row).map(Path::to_path_buf),
+            )
+        };
+        match (kind, path) {
+            (None, _) => self.new_note_at(col, row),
+            (Some(CellKind::File | CellKind::RubyScript), Some(path)) => {
+                spawn_editor(&path)?;
+                self.status = Some(format!("Editing {}", path.display()));
+                Ok(())
+            }
+            _ => Err("this cell is not a text or Ruby file".to_owned()),
+        }
+    }
+
+    /// Right-click on the Editor button: a new note in the selected cell, or
+    /// the next free cell on its row when that one is occupied.
+    fn new_note_in_selection(&mut self) -> Result<(), String> {
+        let (col, row) = self
+            .selected
+            .ok_or_else(|| "select a cell first".to_owned())?;
+        let col = lock(&self.grid).next_free_in_row(col, row);
+        self.new_note_at(col, row)
+    }
+
+    /// Runs a script file in Selenite's own terminal window.
+    fn run_in_terminal(&mut self, path: &Path) -> Result<(), String> {
+        let path = validate_terminal_file(path)?;
+        let mut launch = self.terminal_launch();
+        launch
+            .env
+            .push(("SELENITE_CELL_FILE", path.clone().into_os_string()));
+        launch.file = Some(path.clone());
+        launch.open()?;
+        self.status = Some(format!("Running {} in terminal", path.display()));
+        Ok(())
+    }
+
+    /// Toolbar Run in Terminal button: runs the selected cell's script.
+    fn run_selection_in_terminal(&mut self) -> Result<(), String> {
+        let (col, row) = self
+            .selected
+            .ok_or_else(|| "select a script cell first".to_owned())?;
+        let (kind, path) = {
+            let grid = lock(&self.grid);
+            (
+                grid.kind_at(col, row),
+                grid.file_at(col, row).map(Path::to_path_buf),
+            )
+        };
+        match (kind, path) {
+            (Some(CellKind::File | CellKind::RubyScript), Some(path)) => {
+                self.run_in_terminal(&path)
+            }
+            _ => Err("this cell is not a script file".to_owned()),
+        }
+    }
+
     /// A terminal that knows which save and profile this window is editing.
     fn terminal_launch(&self) -> TerminalLaunch {
         let grid = fs::canonicalize(&self.json_path).unwrap_or_else(|_| self.json_path.clone());
@@ -4764,6 +5067,14 @@ impl App {
             launch.env.push(("SELENITE_PROFILE", profile.into()));
         }
         launch
+    }
+
+    fn run_ide(&mut self, script: &Path) -> Result<(), String> {
+        self.save()?;
+        let child = spawn_ide(script, Some(&self.json_path))?;
+        self.games.push(GameRun { child, name: script.file_name().unwrap_or_default().to_string_lossy().into_owned(), json_path: self.json_path.clone(), modified: modified_time(&self.json_path), kind: "IDE" });
+        self.status = Some(format!("Opened Selenite IDE for {}", script.display()));
+        Ok(())
     }
 
     /// Saves, then runs `script` as `selenite --game` in a child process
@@ -4794,6 +5105,7 @@ impl App {
             name,
             json_path: self.json_path.clone(),
             modified: modified_time(&self.json_path),
+            kind: "Game",
         });
         Ok(())
     }
@@ -4808,17 +5120,18 @@ impl App {
                     run.json_path.clone(),
                     run.modified,
                     status.success(),
+                    run.kind,
                 ));
                 false
             }
             Err(_) => false,
         });
-        for (name, json_path, modified, success) in finished {
+        for (name, json_path, modified, success, kind) in finished {
             let changed = modified_time(&json_path) != modified;
             let mut message = if success {
-                format!("Game {name} finished")
+                format!("{kind} {name} finished")
             } else {
-                format!("Game {name} exited with an error (run it with --game in a terminal for details)")
+                format!("{kind} {name} exited with an error (run it with {} in a terminal for details)", if kind == "IDE" { "--ide" } else { "--game" })
             };
             if changed && json_path == self.json_path {
                 match load_or_new_root(&json_path) {
@@ -5666,9 +5979,10 @@ impl App {
                 BUTTON_DISABLED_TEXT
             };
             d.draw_rectangle_rec(button.rect, bg);
+            let label = ui::fit(&button.label, toolbar.font_size, (button.rect.width - toolbar.pad_x * 2.0).max(0.0));
             ui::draw_text_in(
                 &mut d,
-                &button.label,
+                &label,
                 button.rect,
                 toolbar.pad_x,
                 toolbar.font_size,
@@ -5873,6 +6187,8 @@ impl App {
         if self.help_open {
             panels::draw_help(&mut d, screen_width, screen_height, self.help_scroll, mouse);
         }
+        self.scale_menu.draw(&mut d, screen_width, screen_height);
+        self.suite_menu.draw(&mut d, screen_width, screen_height);
         Ok(())
     }
 
@@ -6297,6 +6613,15 @@ impl App {
     }
 
     fn toolbar_layout(&self, rl: &RaylibHandle) -> ToolbarLayout {
+        if !self.settings.toolbar_visible {
+            return ToolbarLayout {
+                buttons: Vec::new(),
+                height: 0.0,
+                font_size: 0.0,
+                pad_x: 0.0,
+                depth_label: None,
+            };
+        }
         // `New Grid` needs an empty selected cell; `Delete` needs an
         // occupied one. Both are disabled with no selection at all.
         let selection_occupied = self
@@ -6308,8 +6633,15 @@ impl App {
             grid.grid_in(col, row).is_some() || !grid.occupied(col, row)
         });
 
-        let specs: Vec<(String, ToolbarAction, bool)> = match self.mode {
+        let mut specs: Vec<(String, ToolbarAction, bool)> = match self.mode {
             Mode::Main => {
+                let script_selected = self.selected.is_some_and(|(col, row)| {
+                    let grid = lock(&self.grid);
+                    matches!(
+                        grid.kind_at(col, row),
+                        Some(CellKind::File | CellKind::RubyScript)
+                    ) && grid.file_at(col, row).is_some()
+                });
                 let profile_label = match &self.profile {
                     Some(name) => format!("Profile: {}", ui::fit(name, 20.0, 160.0)),
                     None => "Profile: (file)".to_owned(),
@@ -6388,7 +6720,18 @@ impl App {
                     ("Find".to_owned(), ToolbarAction::Find, true),
                     ("Ruby".to_owned(), ToolbarAction::Console, true),
                     ("Terminal".to_owned(), ToolbarAction::Terminal, true),
+                    (
+                        "Run in Terminal".to_owned(),
+                        ToolbarAction::RunTerminal,
+                        script_selected,
+                    ),
                     ("Notes".to_owned(), ToolbarAction::Notes, true),
+                    (
+                        "Editor".to_owned(),
+                        ToolbarAction::Editor,
+                        self.selected.is_some(),
+                    ),
+                    ("IDE".to_owned(), ToolbarAction::Ide, self.selected.is_some() && cfg!(feature = "scripting")),
                     ("Home".to_owned(), ToolbarAction::Home, true),
                     (
                         if self.view_3d { "2D View" } else { "3D View" }.to_owned(),
@@ -6470,13 +6813,19 @@ impl App {
             Mode::ImageViewer(_) => Vec::new(),
         };
 
+        if !specs.is_empty() {
+            specs.push(("Suite".to_owned(), ToolbarAction::Suite, true));
+            specs.push(("Scale".to_owned(), ToolbarAction::ScaleOptions, true));
+            specs.push((format!("Size: {:.0}%", self.settings.toolbar_scale * 100.0), ToolbarAction::ButtonSize, true));
+            specs.push(("Hide".to_owned(), ToolbarAction::HideToolbar, true));
+        }
         let screen_width = rl.get_screen_width();
-        let scale = ui::scale(screen_width, rl.get_screen_height());
-        let font_size = 20.0 * scale;
-        let pad_x = 9.0 * scale;
-        let item_height = font_size + 14.0 * scale;
-        let margin = 8.0 * scale;
-        let spacing = 6.0 * scale;
+        let scale = ui::scale(screen_width, rl.get_screen_height()) * self.settings.toolbar_scale;
+        let font_size = 14.0 * scale;
+        let pad_x = 6.0 * scale;
+        let item_height = font_size + 9.0 * scale;
+        let margin = 5.0 * scale;
+        let spacing = 4.0 * scale;
 
         let depth_text = (!self.nav_stack.is_empty())
             .then(|| ui::fit(&self.breadcrumb(), font_size, screen_width as f32 * 0.5));
@@ -6502,7 +6851,7 @@ impl App {
                 label,
                 rect,
                 action,
-                enabled,
+                enabled: enabled && self.settings.toolbar_enabled,
             })
             .collect();
         ToolbarLayout {
@@ -6530,6 +6879,10 @@ enum DrawCell {
 }
 
 fn main() {
+    if let Err(error) = portable::initialize() {
+        eprintln!("selenite: {error}");
+        process::exit(1);
+    }
     if let Err(error) = run() {
         eprintln!("{error}");
         process::exit(1);
@@ -6538,6 +6891,22 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<OsString> = env::args_os().collect();
+    if args.get(1).is_some_and(|arg| arg == "--build-executable") { return executable_builder::run(&args[2..]); }
+    if args.get(1).is_some_and(|arg| arg == "--check-project") {
+        if args.len() != 3 { return Err("--check-project expects one project folder".into()); }
+        #[cfg(feature = "scripting")]
+        {
+            println!("{}", serde_json::to_string_pretty(&project::check_project(Path::new(&args[2]))?).map_err(|error| error.to_string())?);
+            return Ok(());
+        }
+        #[cfg(not(feature = "scripting"))]
+        return Err("Project syntax checks require a scripting-enabled build".into());
+    }
+    #[cfg(unix)]
+    if args.get(1).is_some_and(|arg| arg == "--terminal-window") {
+        let code = terminal::run(&args[2..])?;
+        process::exit(code);
+    }
     if args.get(1).is_some_and(|arg| arg == "--terminal") {
         return run_terminal(&args[2..]);
     }
@@ -6545,9 +6914,25 @@ fn run() -> Result<(), String> {
         let path = args.get(2).ok_or("--terminal-run needs a command file")?;
         return run_terminal_file(Path::new(path), &args[3..]);
     }
+    let mut args = args;
+    let with_terminal = take_with_terminal(&mut args);
+    match parse_mode(&args)? {
+        StartupMode::Grid(_) | StartupMode::Profile(_) => {}
+        _ if with_terminal => {
+            return Err(format!(
+                "--with-terminal only applies to the grid window\n\n{}",
+                usage()
+            ))
+        }
+        _ => {}
+    }
     match parse_mode(&args)? {
         StartupMode::Usage => {
             println!("{}", usage());
+            Ok(())
+        }
+        StartupMode::Version => {
+            println!("selenite {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         StartupMode::ListProfiles => {
@@ -6566,17 +6951,49 @@ fn run() -> Result<(), String> {
         }
         StartupMode::Image(path) => run_image_viewer(&path),
         StartupMode::Edit(path) => editor::run(&path),
+        StartupMode::Ide(path, grid) => {
+            let source = if project::is_project_path(&path) { project::Project::load(&path)?.entry() } else { path };
+            editor::run_ide(&source, grid.as_deref())
+        }
+        StartupMode::NewProject(path, kind) => {
+            let project = project::Project::create(&path, kind)?;
+            println!("Created Selenite project: {}\nEntry: {}", project.root.display(), project.entry().display());
+            Ok(())
+        }
+        StartupMode::Project(path) => {
+            let project = project::Project::load(&path)?;
+            env::set_current_dir(&project.root).map_err(|error| error.to_string())?;
+            match project.manifest.kind {
+                project::Kind::Game => run_game_file(&project.entry(), Target::Grid(project.grid())),
+                project::Kind::App => run_script_file(&project.entry(), Target::Grid(project.grid())),
+            }
+        }
         StartupMode::Inventory(json_path) => inventory::InventoryApp::new(json_path)?.run(),
         StartupMode::Script(script_path, target) => run_script_file(&script_path, target),
         StartupMode::Game(script_path, target) => run_game_file(&script_path, target),
         StartupMode::Compile(source, output, force) => compile_ruby_file(&source, &output, force),
-        StartupMode::Grid(json_path) => App::new(Mode::Main, json_path)?.run(),
+        StartupMode::Grid(json_path) => {
+            let mut app = App::new(Mode::Main, json_path)?;
+            app.terminal_on_start = with_terminal;
+            app.run()
+        }
         StartupMode::Profile(requested) => {
             let store = ProfileStore::open_default();
             let profile = store.startup_profile(requested.as_deref())?;
-            App::with_profile(store, profile)?.run()
+            let mut app = App::with_profile(store, profile)?;
+            app.terminal_on_start = with_terminal;
+            app.run()
         }
     }
+}
+
+/// Removes a leading `--with-terminal` flag, returning whether it was present.
+fn take_with_terminal(args: &mut Vec<OsString>) -> bool {
+    let present = args.get(1).is_some_and(|arg| arg == "--with-terminal");
+    if present {
+        args.remove(1);
+    }
+    present
 }
 
 fn validate_terminal_file(path: &Path) -> Result<PathBuf, String> {
@@ -6744,11 +7161,15 @@ enum StartupMode {
     Inventory(PathBuf),
     Image(PathBuf),
     Edit(PathBuf),
+    Ide(PathBuf, Option<PathBuf>),
+    NewProject(PathBuf, project::Kind),
+    Project(PathBuf),
     Script(PathBuf, Target),
     Game(PathBuf, Target),
     Compile(PathBuf, PathBuf, bool),
     ListProfiles,
     Usage,
+    Version,
 }
 
 fn usage() -> String {
@@ -6758,8 +7179,13 @@ fn usage() -> String {
         "  selenite --profile NAME          open (or create) the profile NAME",
         "  selenite --grid FILE.json        edit a grid file directly, outside any profile",
         "  selenite --list-profiles         list local profiles",
+        "  selenite --with-terminal [--profile NAME | --grid FILE.json | FILE.json]",
+        "                                   open the grid window and Selenite's terminal window together",
+        "  selenite --version               print the version",
         "  selenite --terminal [SHELL ARGS] start your shell in the current terminal",
         "  selenite --terminal-run FILE [ARGS...]  run a Bash or Ruby command file in the terminal",
+        "  selenite --terminal-window [--terminal-run FILE [ARGS...]]",
+        "                                   open Selenite's own terminal window (Unix)",
         "  selenite --script FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
         "                                   run a Ruby script headless against a profile or grid",
         "  selenite --game FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
@@ -6768,6 +7194,12 @@ fn usage() -> String {
         "                                   compile Ruby without running it; bytecode is not encryption",
         "  selenite --image FILE            open the image viewer",
         "  selenite --edit FILE             open the text editor (Ruby and Markdown aware)",
+        "  selenite --ide FILE.rb|PROJECT [--grid FILE.json]  open the programming suite",
+        "  selenite --new-project DIR [--app]  create a game or headless application project",
+        "  selenite --project DIR           run the entry point and mode from its manifest",
+        "  selenite --check-project DIR     check Ruby syntax and assets without running code",
+        "  selenite --build-executable SCRIPT.rb|SCRIPT.rbc|PROJECT --output DIR [--game|--app] [--name NAME]",
+        "                                   build a Rust/Magnus executable with embedded Ruby bytecode",
         "  selenite --inventory FILE.json   open the inventory window",
     ];
     format!(
@@ -6803,11 +7235,37 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
     Ok(match rest.first().copied() {
         None => StartupMode::Profile(None),
         Some("-h" | "--help") => StartupMode::Usage,
+        Some("-V" | "--version") => StartupMode::Version,
         Some("--list-profiles") => StartupMode::ListProfiles,
         Some("--profile") => StartupMode::Profile(Some(value(1, "--profile")?)),
         Some("--grid") => StartupMode::Grid(PathBuf::from(value(1, "--grid")?)),
         Some("--image") => StartupMode::Image(PathBuf::from(value(1, "--image")?)),
         Some("--edit") => StartupMode::Edit(PathBuf::from(value(1, "--edit")?)),
+        Some("--ide") => {
+            if rest.len() == 1 {
+                let path = portable::default_project().ok_or("--ide expects a project/source path when no local or bundled starter project exists")?;
+                return Ok(StartupMode::Ide(path, None));
+            }
+            let path = PathBuf::from(value(1, "--ide")?);
+            if path.extension().and_then(|value| value.to_str()) != Some("rb") && !project::is_project_path(&path) {
+                return Err("--ide expects Ruby .rb source or a Selenite project folder".to_owned());
+            }
+            let grid = match rest.as_slice() {
+                ["--ide", _] => None,
+                ["--ide", _, "--grid", grid] if Path::new(grid).extension().and_then(|value| value.to_str()) == Some("json") => Some(PathBuf::from(grid)),
+                _ => return Err("--ide expects FILE.rb|PROJECT [--grid FILE.json]".to_owned()),
+            };
+            StartupMode::Ide(path, grid)
+        }
+        Some("--new-project") => match rest.as_slice() {
+            ["--new-project", directory] if !directory.starts_with('-') => StartupMode::NewProject(directory.into(), project::Kind::Game),
+            ["--new-project", directory, "--app"] if !directory.starts_with('-') => StartupMode::NewProject(directory.into(), project::Kind::App),
+            _ => return Err("--new-project expects DIR [--app]".to_owned()),
+        },
+        Some("--project") => match rest.as_slice() {
+            ["--project", directory] if !directory.starts_with('-') => StartupMode::Project(directory.into()),
+            _ => return Err("--project expects one project folder".to_owned()),
+        },
         Some("--inventory") => StartupMode::Inventory(PathBuf::from(value(1, "--inventory")?)),
         Some("--script") => StartupMode::Script(PathBuf::from(value(1, "--script")?), target(2)?),
         Some("--game") => StartupMode::Game(PathBuf::from(value(1, "--game")?), target(2)?),
@@ -6819,6 +7277,7 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
             } => StartupMode::Compile(source, output, force),
             _ => unreachable!(),
         },
+        Some(other) if Path::new(other).file_name().is_some_and(|name| name == project::MANIFEST) => StartupMode::Ide(other.into(), None),
         Some(other) if other.ends_with(".json") => StartupMode::Grid(PathBuf::from(other)),
         Some(other) => return Err(format!("unknown argument: {other}\n\n{}", usage())),
     })
@@ -6866,7 +7325,7 @@ fn run_game_file(script_path: &Path, target: Target) -> Result<(), String> {
     game_cli::validate_ruby_path(script_path)?;
     let (engine, _root, _json_path) = script_engine_for(target)?;
     game::enable();
-    let (printed, result) = engine.eval_file_captured(script_path);
+    let (printed, result) = evaluate_program(&engine, script_path);
     game::shutdown();
     print!("{printed}");
     for request in engine.drain_requests() {
@@ -6886,9 +7345,19 @@ fn run_game_file(_script_path: &Path, _target: Target) -> Result<(), String> {
 }
 
 #[cfg(feature = "scripting")]
+fn evaluate_program(engine: &scripting::ScriptEngine, path: &Path) -> (String, String) {
+    if env::var_os("SELENITE_IDE_CHILD").is_some() {
+        engine.eval("$stdout.sync = true; $stderr.sync = true");
+        (String::new(), engine.eval_file(path))
+    } else {
+        engine.eval_file_captured(path)
+    }
+}
+
+#[cfg(feature = "scripting")]
 fn run_script_file(script_path: &Path, target: Target) -> Result<(), String> {
     let (engine, root, json_path) = script_engine_for(target)?;
-    let (printed, result) = engine.eval_file_captured(script_path);
+    let (printed, result) = evaluate_program(&engine, script_path);
     print!("{printed}");
     if result.starts_with("error") {
         return Err(result);
@@ -6897,6 +7366,10 @@ fn run_script_file(script_path: &Path, target: Target) -> Result<(), String> {
         match request {
             scripting::AppRequest::Status(text) => println!("{text}"),
             scripting::AppRequest::Edit(path) => spawn_editor(Path::new(&path))?,
+            scripting::AppRequest::Ide(path) => {
+                lock(&root).save(&json_path).map_err(|error| error.to_string())?;
+                spawn_ide(Path::new(&path), Some(&json_path))?;
+            }
             scripting::AppRequest::Terminal {
                 file,
                 args,
@@ -7199,6 +7672,22 @@ fn spawn_editor(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not start the editor: {error}"))
 }
 
+fn spawn_ide(path: &Path, grid: Option<&Path>) -> Result<std::process::Child, String> {
+        if !cfg!(feature = "scripting") {
+            return Err("The IDE requires a build with --features scripting".to_owned());
+        }
+    if project::is_project_path(path) {
+        project::Project::load(path)?;
+    } else if path.extension().and_then(|value| value.to_str()) != Some("rb") {
+        return Err("The IDE edits .rb source files, not compiled bytecode".to_owned());
+    }
+    let exe = env::current_exe().map_err(|error| error.to_string())?;
+    let mut command = Command::new(exe);
+    command.arg("--ide").arg(path);
+    if let Some(grid) = grid { command.arg("--grid").arg(grid); }
+    command.spawn().map_err(|error| format!("could not start the IDE: {error}"))
+}
+
 fn spawn_mode(mode: Mode, json_path: Option<PathBuf>) -> Result<(), String> {
     let exe = env::current_exe().map_err(|error| error.to_string())?;
     let mut command = Command::new(exe);
@@ -7428,27 +7917,6 @@ fn open_with_system(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not open {}: {error}", path.display()))
 }
 
-#[cfg(target_os = "linux")]
-fn spawn_terminal_emulator(
-    candidates: &[(&str, &[&str])],
-    launch: &[OsString],
-    directory: Option<&Path>,
-) -> Result<process::Child, String> {
-    for (program, flags) in candidates {
-        let mut command = Command::new(program);
-        command.args(*flags).args(launch);
-        if let Some(directory) = directory {
-            command.current_dir(directory);
-        }
-        match command.spawn() {
-            Ok(child) => return Ok(child),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("could not start terminal {program}: {error}")),
-        }
-    }
-    Err("no supported terminal emulator found; install one such as xterm".to_owned())
-}
-
 /// A separate terminal window running `selenite --terminal` or `--terminal-run`.
 #[derive(Default)]
 struct TerminalLaunch {
@@ -7459,28 +7927,17 @@ struct TerminalLaunch {
 }
 
 impl TerminalLaunch {
-    /// Selenite's command line, prefixed with `env` so any emulator passes the variables on.
-    fn command(&self, exe: &Path) -> Vec<OsString> {
-        let mut command: Vec<OsString> = Vec::new();
-        #[cfg(not(windows))]
-        if !self.env.is_empty() {
-            command.push("env".into());
-            for (name, value) in &self.env {
-                let mut assignment = OsString::from(format!("{name}="));
-                assignment.push(value);
-                command.push(assignment);
-            }
-        }
-        command.push(exe.as_os_str().to_owned());
+    /// The in-terminal command Selenite's own terminal window runs.
+    fn arguments(&self) -> Vec<OsString> {
         match &self.file {
             Some(file) => {
-                command.push("--terminal-run".into());
-                command.push(file.as_os_str().to_owned());
-                command.extend(self.args.iter().cloned());
+                let mut arguments: Vec<OsString> =
+                    vec!["--terminal-run".into(), file.as_os_str().to_owned()];
+                arguments.extend(self.args.iter().cloned());
+                arguments
             }
-            None => command.push("--terminal".into()),
+            None => vec!["--terminal".into()],
         }
-        command
     }
 
     fn open(&self) -> Result<(), String> {
@@ -7490,48 +7947,31 @@ impl TerminalLaunch {
             }
         }
         let exe = env::current_exe().map_err(|error| error.to_string())?;
-        let launch = self.command(&exe);
-        #[cfg(target_os = "linux")]
-        let child = spawn_terminal_emulator(
-            &[
-                ("x-terminal-emulator", &["-e"]),
-                ("kgx", &["--"]),
-                ("gnome-terminal", &["--"]),
-                ("konsole", &["-e"]),
-                ("xfce4-terminal", &["-x"]),
-                ("mate-terminal", &["-x"]),
-                ("alacritty", &["-e"]),
-                ("kitty", &["-e"]),
-                ("xterm", &["-e"]),
-            ],
-            &launch,
-            self.directory.as_deref(),
-        )?;
-        #[cfg(target_os = "macos")]
-        let child = Command::new("osascript")
-            .args(["-e", "on run argv\n set commandText to \"cd \" & quoted form of item 2 of argv & \" && exec \" & quoted form of item 1 of argv\n repeat with argumentValue in items 3 thru -1 of argv\n set commandText to commandText & \" \" & quoted form of (contents of argumentValue)\n end repeat\n tell application \"Terminal\"\n activate\n do script commandText\n end tell\n end run"])
-            .arg(&launch[0])
-            .arg(match &self.directory {
-                Some(directory) => directory.clone(),
-                None => env::current_dir().map_err(|error| error.to_string())?,
-            })
-            .args(&launch[1..])
-            .spawn()
-            .map_err(|error| format!("could not start Terminal: {error}"))?;
-        #[cfg(target_os = "windows")]
-        let child = {
-            let mut command = Command::new("cmd");
-            command.args(["/C", "start", ""]).args(&launch);
-            command.envs(self.env.iter().map(|(name, value)| (name, value)));
-            if let Some(directory) = &self.directory {
-                command.current_dir(directory);
-            }
+        // Unix opens Selenite's own terminal window; Windows has no pseudo-terminal support here.
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = Command::new(exe);
+            command.arg("--terminal-window").args(self.arguments());
             command
-                .spawn()
-                .map_err(|error| format!("could not start terminal: {error}"))?
         };
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command
+                .args(["/C", "start", ""])
+                .arg(exe)
+                .args(self.arguments());
+            command
+        };
+        command.envs(self.env.iter().map(|(name, value)| (name, value)));
+        if let Some(directory) = &self.directory {
+            command.current_dir(directory);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("could not start the terminal: {error}"))?;
         std::thread::spawn(move || {
-            let _ = child.wait_with_output();
+            let _ = child.wait();
         });
         Ok(())
     }
@@ -8008,6 +8448,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn toolbar_controls_cycle_sizes_and_restore_hidden_buttons() {
+        let directory = env::temp_dir().join(format!("selenite-toolbar-settings-{}", std::process::id()));
+        let mut app = App::new(Mode::Main, directory.join("grid.json")).unwrap();
+        app.settings_path = settings::Settings::path_in(&directory);
+        app.settings.toolbar_scale = 0.85;
+        app.settings.toolbar_visible = true;
+        app.settings.toolbar_enabled = true;
+        for expected in [1.0, 1.25, 0.75, 0.85] {
+            app.perform_toolbar_action(ToolbarAction::ButtonSize).unwrap();
+            assert_eq!(app.settings.toolbar_scale, expected);
+            assert_eq!(settings::Settings::load(&app.settings_path).toolbar_scale, expected);
+        }
+        app.perform_toolbar_action(ToolbarAction::HideToolbar).unwrap();
+        assert!(!app.settings.toolbar_visible);
+        assert!(!settings::Settings::load(&app.settings_path).toolbar_visible);
+        app.perform_toolbar_action(ToolbarAction::HideToolbar).unwrap();
+        assert!(app.settings.toolbar_visible);
+        app.perform_toolbar_action(ToolbarAction::ToggleToolbar).unwrap();
+        assert!(!app.settings.toolbar_enabled);
+        assert!(!settings::Settings::load(&app.settings_path).toolbar_enabled);
+        assert!(app.settings.toolbar_visible);
+        app.perform_toolbar_action(ToolbarAction::ToggleToolbar).unwrap();
+        assert!(app.settings.toolbar_enabled);
+        for width in [320.0, 420.0, 1100.0, 3840.0] {
+            for scale in [0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 6.0] {
+                let (buttons, _) = wrap_toolbar_items(&[120.0 * scale, 600.0 * scale, 90.0 * scale], width, 24.0 * scale, 5.0 * scale, 4.0 * scale);
+                for (index, button) in buttons.iter().enumerate() {
+                    assert!(button.x >= 0.0 && button.x + button.width <= width);
+                    assert!(button.check_collision_point_rec(Vector2::new(button.x + button.width / 2.0, button.y + button.height / 2.0)));
+                    for other in &buttons[index + 1..] { assert!(!button.check_collision_recs(*other)); }
+                }
+            }
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn asset_inventory_multifile_copies_are_grid_local_saved_and_undoable() {
         let directory = env::temp_dir().join(format!(
             "selenite-asset-inventory-{}-{}",
@@ -8078,6 +8555,36 @@ mod tests {
         app.undo().unwrap();
         assert_eq!(inventory::grid_assets(&lock(&app.grid)).len(), 2);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn run_in_terminal_button_needs_a_selected_script_cell() {
+        let path =
+            env::temp_dir().join(format!("selenite-run-terminal-{}.json", std::process::id()));
+        let mut app = App::new(Mode::Main, path).unwrap();
+        app.selected = None;
+        assert!(app.run_selection_in_terminal().is_err());
+        lock(&app.grid).push_grid(1, 1);
+        app.selected = Some((1, 1));
+        assert!(app
+            .run_selection_in_terminal()
+            .unwrap_err()
+            .contains("not a script"));
+    }
+
+    #[test]
+    fn editor_button_rejects_missing_selection_and_non_text_cells() {
+        let path = env::temp_dir().join(format!(
+            "selenite-editor-button-{}.json",
+            std::process::id()
+        ));
+        let mut app = App::new(Mode::Main, path).unwrap();
+        app.selected = None;
+        assert!(app.edit_selection().is_err());
+        assert!(app.new_note_in_selection().is_err());
+        lock(&app.grid).push_grid(2, 3);
+        app.selected = Some((2, 3));
+        assert!(app.edit_selection().is_err());
     }
 
     #[test]
@@ -8365,7 +8872,9 @@ mod tests {
                 MenuItem::Paste,
                 MenuItem::NewGrid,
                 MenuItem::NewNote,
+                MenuItem::NewTextFile,
                 MenuItem::GridFolder,
+                MenuItem::GridShortcut,
                 MenuItem::GridTerminal,
                 MenuItem::GridNotes,
                 MenuItem::Items
@@ -8375,7 +8884,13 @@ mod tests {
         assert!(nested.contains(&MenuItem::Open));
         assert!(nested.contains(&MenuItem::NestedGridFolder));
         assert!(nested.contains(&MenuItem::NestedGridNotes));
+        assert!(nested.contains(&MenuItem::NewTextFileInside));
+        assert!(!nested.contains(&MenuItem::NewTextFile));
         assert!(!nested.contains(&MenuItem::EditText));
+        for kind in [CellKind::File, CellKind::RubyScript, CellKind::Image] {
+            assert!(MenuItem::for_cell(Some(kind), 1, false).contains(&MenuItem::NewTextFile));
+            assert!(MenuItem::for_cell(Some(kind), 1, false).contains(&MenuItem::DesktopShortcut));
+        }
         for kind in [CellKind::File, CellKind::RubyScript] {
             assert!(MenuItem::for_cell(Some(kind), 1, false).contains(&MenuItem::EditText));
         }
@@ -8508,54 +9023,44 @@ mod tests {
         assert_eq!(parse_shebang(b"#!\n"), None);
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn terminal_emulator_receives_executable_and_falls_back() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = env::temp_dir().join(format!("selenite-terminal-{}", process::id()));
-        fs::create_dir_all(&directory).unwrap();
-        let emulator = directory.join("terminal emulator");
-        fs::write(
-            &emulator,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nprintf '%s\\n' \"$PWD\" > \"$0.cwd\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&emulator, fs::Permissions::from_mode(0o700)).unwrap();
+    fn terminal_launch_builds_the_command_run_in_the_window() {
         let launch = TerminalLaunch {
             file: Some("/a path/command.sh".into()),
             args: vec!["two words".into(), "--flag".into()],
-            env: vec![("SELENITE_GRID", "/a path/save.json".into())],
             ..TerminalLaunch::default()
-        }
-        .command(Path::new("/a path/selenite"));
-        let child = spawn_terminal_emulator(
-            &[
-                ("/no-such-selenite-terminal", &["-e"]),
-                (emulator.to_str().unwrap(), &["-e"]),
-            ],
-            &launch,
-            Some(&directory),
-        )
-        .unwrap();
-        assert!(child.wait_with_output().unwrap().status.success());
+        };
         assert_eq!(
-            fs::read_to_string(directory.join("terminal emulator.args")).unwrap(),
-            "-e\nenv\nSELENITE_GRID=/a path/save.json\n/a path/selenite\n--terminal-run\n/a path/command.sh\ntwo words\n--flag\n"
+            launch.arguments(),
+            [
+                "--terminal-run",
+                "/a path/command.sh",
+                "two words",
+                "--flag"
+            ]
         );
-        assert_eq!(
-            fs::read_to_string(directory.join("terminal emulator.cwd"))
-                .unwrap()
-                .trim(),
-            directory.to_str().unwrap()
-        );
-        assert!(spawn_terminal_emulator(
-            &[("/no-such-selenite-terminal", &[])],
-            &["--terminal".into()],
-            None
-        )
-        .is_err());
-        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(TerminalLaunch::default().arguments(), ["--terminal"]);
+        let missing = TerminalLaunch {
+            directory: Some("/no/such/selenite/folder".into()),
+            ..TerminalLaunch::default()
+        };
+        assert!(missing.open().unwrap_err().contains("is not a folder"));
+    }
+
+    #[test]
+    fn with_terminal_flag_is_only_taken_in_front() {
+        let args = |list: &[&str]| -> Vec<OsString> {
+            std::iter::once("selenite")
+                .chain(list.iter().copied())
+                .map(OsString::from)
+                .collect()
+        };
+        let mut front = args(&["--with-terminal", "--profile", "work"]);
+        assert!(take_with_terminal(&mut front));
+        assert_eq!(front, args(&["--profile", "work"]));
+        let mut absent = args(&["--profile", "--with-terminal"]);
+        assert!(!take_with_terminal(&mut absent));
+        assert_eq!(absent.len(), 3);
     }
 
     #[test]

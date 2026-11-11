@@ -1,20 +1,114 @@
 # Selenite
 
-**Version 7.0.0-rc.1 (release candidate)**. See [CHANGELOG.md](CHANGELOG.md).
+**Version 12.0.0-rc.1**. See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
-pannable, zoomable multimedia file grid with recursively nestable sub-grids, all packed
-into a single native executable.
+pannable, zoomable multimedia file grid with recursively nestable sub-grids,
+an integrated Ruby IDE, and a complete native raylib programming API in one suite.
 
 ## Instruction manual
 
 See the [complete Selenite instruction manual](docs/manual.md) for setup, step-by-step workflows, all window controls, profiles and backups, Ruby, plugins, games, and troubleshooting. It documents the current implementation and clarifies limitations of clipboard copying and exports.
 
+## VS Code Tasks
+
+The packaged executables now initialize their own portable runtime. You can run
+`./selenite`, `./selenite --ide`, `./selenite-game` or `./mic_freq/mic_freq`
+directly from any working directory, without setting Ruby/library environment
+variables or using `run*.sh`. Keep the bundled `lib`, examples and asset folders
+with the executables; moving the complete suite folder is supported, copying a
+Ruby-linked binary alone is not. Existing shell launchers remain compatible.
+
+Desktop shortcuts can also be created directly inside Selenite, without VS Code:
+open **Suite > Desktop Shortcuts** (F8), then choose a tool, the current file,
+project or saved grid. **All Suite Tools** creates the available suite launchers.
+Right-click a file/folder cell and choose **Create Desktop Shortcut**, or select
+an item in Asset Manager and click **Shortcut**. Existing personal shortcuts are
+protected and custom icons on managed shortcuts are preserved. Linux may ask
+you to right-click the new shortcut and choose **Allow Launching**.
+
+Use **Suite > Change Icon** inside Selenite to browse an image, enter its path,
+or drop it into the picker. Preview it, then choose Apply. Reset restores the
+default. Your choice updates managed shortcut icons and this window, and is
+restored by new organizer/IDE/terminal/Asset Manager windows. The image is copied
+into Selenite's settings folder, so moving the original is safe.
+
+Use **Terminal > Run Task** and select a task prefixed with **Selenite:**.
+The new tasks preserve the workspace's existing task history.
+
+- Build suite, package the suite/game runtime, and distribute the suite.
+- Run organizer, IDE, Terminal, Asset Manager, games and Audio Studio.
+- Create game/application projects and check projects without executing Ruby.
+- Install application-menu or desktop shortcuts for an installed full suite.
+- Change/reset Linux shortcut icons using a PNG, SVG or XPM file. This changes
+  managed launcher icons, not the icon resource of an ELF executable.
+- Run native/software-GUI regressions and portable graphics/network checks.
+- Verify release runs regressions, both packages and portable smoke checks in order.
+
+Run **Selenite: Package suite** after changing source before using Run tasks,
+which launch the portable files in `dist`. Shortcut tasks default to `~/selenite`;
+choose another full-suite folder when prompted. Existing unmanaged shortcuts
+are protected. Your desktop may require **Allow Launching** for desktop files.
+
+Remaining requested usability work:
+
+- [ ] Keyboard navigation in interface-scale settings.
+- [ ] One-click reset of Asset Manager filters.
+- [x] In-app icon browsing, preview, Apply/Reset and saved window/shortcut icons.
+
 ## Features
 
-New in rc.4: **selenite-game**, a dedicated Ruby-only game executable, and
-partitioned game storage with BSP worlds, revenant labels, and checkpoints.
+- **Rust executable builds:** `--build-executable` generates a Rust/Magnus
+  executable with verified embedded Ruby bytecode for apps or Selenite games.
+  Ruby and Bash bootstrappers and a reproducible build SDK are included. See
+  [executable builds](docs/executables.md) for requirements and limitations.
+
+- **Suite navigation:** F8 opens the organizer, IDE, terminals, new projects,
+  Audio Studio and recent projects from supported Selenite windows.
+- **Configurable buttons:** F9 opens shared scale presets. The Toolbar checkbox
+  enables/disables organizer button clicks; F7 restores them. F10 hides/shows
+  the toolbar, independently of scaling and enabling. Preferences are saved.
+- **Tabbed terminals:** use + or Ctrl+Shift+T for independent shells, Ctrl+Tab
+  to switch and Ctrl+Shift+W to close. The IDE terminal dock also moves between
+  the top and bottom by dragging its Terminal tab.
+- **Project productivity:** Ctrl+P finds project source files in the IDE.
+  `--check-project DIR` checks Ruby syntax without executing code and reports
+  missing assets. File List's Missing filter finds broken links.
+- **Audio presets:** Audio Studio's Presets button/F2 saves and loads named
+  voice settings without switching microphones or avatar folders.
+
+- **Complete extraction package:** `package.sh` bundles the organizer, IDE, game
+  runtime and `mic_freq` PNGTuber Studio together, with launchers, Ruby libraries,
+  artwork and guides. After extraction use `run.sh`, `run-ide.sh`,
+  `run-game.sh` or `run-mic-freq.sh`. `distribute.sh` copies and safely extracts
+  the full suite under `$HOME/selenite` (or a chosen destination),
+  replacing package files while preserving unmatched user files and existing
+  avatar assets. See
+  [packaging](docs/packaging.md).
+- **Complete product documentation:** both packages automatically include all
+  source Markdown guides, including nested `mic_freq` documentation. The bundled
+  document manifest records their original paths and checksums.
+
+- **Version 11 projects:** create games or applications from the IDE's File menu,
+  or use `selenite --new-project my-game` (`--app` for a headless application).
+  Open with `selenite --ide my-game`; Run uses the configured entry point and
+  grid save even while editing helper files. See [projects](docs/projects.md).
+
+- **Selenite IDE suite:** `selenite --ide game.rb` opens the GPU-rendered editor
+  with File/Edit menus, a resizable file browser and workspace list, embedded
+  terminal, Ruby console, run/stop controls, and tutorial/API Help. Layouts are
+  saved between sessions. Open it from the organizer's IDE button, a Ruby cell's
+  menu, or `Selenite.ide(path)` with the current profile's grid shared. See the
+  [IDE guide](docs/ide.md).
+- **Complete native raylib API:** all 600 functions from the linked raylib public
+  header are callable through `Selenite.raylib_native`, alongside the existing
+  managed game API. See the [native API tutorial](docs/raylib-native.md) and
+  [complete reference](docs/raylib-api.md). Native pointers and resources follow
+  C lifetime rules and require an explicit `enable!` in game mode.
+
+The suite also includes **selenite-game**, a dedicated Ruby-only game executable,
+and partitioned game storage with BSP worlds, revenant labels, and checkpoints.
 
 Selenite itself is still the full organizer: the dimensional (2D + 3D) nested
 grid UI with profiles, inventories, plugins, and exports. `selenite-game` is an
@@ -251,11 +345,14 @@ GitHub for the initial fetch. Scripting requires Ruby 3.1 or newer.
 
 ### Terminal
 
-Click **Terminal** in the main toolbar to open a separate terminal window, or
-run `selenite --terminal` in an existing terminal. This starts your normal
+Click **Terminal** in the main toolbar to open Selenite's own terminal window
+(Linux and macOS), or run `selenite --terminal` in an existing terminal. The
+window is drawn with raylib on a real pseudo-terminal, supports colours, the
+alternate screen, mouse, selection, copy/paste and scrollback, zooms with
+Ctrl +/- or Ctrl+wheel, and highlights plain output (prompts, strings, flags,
+paths, URLs, numbers, errors); Ctrl+Shift+H toggles that. It starts your normal
 shell (`$SHELL`, or `/bin/sh` if unset; `COMSPEC` on Windows), with the current
-directory, environment, terminal input/output, and your normal OS permissions.
-It is not sandboxed. The button requires an installed terminal emulator.
+directory, environment and your normal OS permissions. It is not sandboxed.
 
 ```sh
 selenite --terminal -c 'printf "hello\n" | wc -l'
@@ -268,7 +365,8 @@ bundle includes embedded Ruby libraries, not a standalone Ruby executable.
 For scripts using the Selenite grid API, use `--script` with a scripting build.
 
 To run commands from a grid piece, add a command file to the grid, right-click
-it, and choose **Run in terminal**. Files ending in `.rb` run with the system
+it, and choose **Run in Selenite terminal** (or select it and press the
+**Run in Terminal** toolbar button). Files ending in `.rb` run with the system
 Ruby; other file pieces use the interpreter on their `#!` line, `python3` for
 `.py`, `node` for `.js`, or else Bash (`cmd` on Windows). Terminals receive
 `SELENITE_GRID`, `SELENITE_PROFILE` and `SELENITE_EXE`, and `selenite` is on
@@ -287,7 +385,9 @@ passed directly to the script. The grid action runs the file without arguments.
 ### Text editor and grid notes
 
 `selenite --edit FILE` opens the built-in text editor. In the grid, right-click a
-file cell → **Edit text**, an empty cell → **New note here**, or use the **Notes**
+file cell → **Edit text**, an empty cell → **New note here** or **New text file
+here**, any other cell → **New text file here** (an empty `untitled.txt` stacked
+on top), a nested grid → **New text file inside**, or use the **Notes**
 toolbar button for the current grid's own Markdown notes (`notes.md` in its grid
 folder). Enter on a `.md` or `.txt` cell opens it too, and Ruby can call
 `Selenite.edit(path)`.
@@ -431,7 +531,10 @@ You can also launch this window directly from the main application using the **I
   readable. New windows are sized for the display's DPI factor and kept within
   the monitor; the Ruby console takes a fixed share of the window, and the text
   editor drops its Markdown split view to a single pane when the window is too
-  narrow for two. The Ctrl +/- zoom is saved as `ui_scale` in `settings.json`.
+  narrow for two. The Ctrl +/- zoom is saved as `ui_scale` in `settings.json`;
+  the organizer stops zooming when its toolbar would fill more than 25% of the
+  window. The organizer also remembers its window size and maximized state
+  (`window_size`, `window_maximized`).
   When the window is too narrow, toolbar buttons wrap onto additional rows.
 - Text inside grid cells (coordinates, file names, type badges) is sized from
   each cell's on-screen size, so it grows and shrinks with the camera zoom.
@@ -757,11 +860,11 @@ This script:
 4. Generates a portable launcher script `dist/run.sh` that sets up `LD_LIBRARY_PATH` and `RUBYLIB`.
 5. Copies `docs/`, `examples/`, `README.md` and `CHANGELOG.md` into the bundle.
 6. Compresses the release bundle into `selenite-<version>-portable.tar.gz`
-  (for example `selenite-7.0.0-rc.1-portable.tar.gz`).
+  (for example `selenite-11.0.0-portable.tar.gz`).
 
 To test or run the standalone package on any Linux machine:
 ```sh
-mkdir selenite && tar -xzf selenite-7.0.0-rc.1-portable.tar.gz -C selenite
+mkdir selenite && tar -xzf selenite-11.0.0-portable.tar.gz -C selenite
 cd selenite
 ./run.sh [--profile NAME | --grid FILE.json | --script FILE.rb | --game GAME.rb ...]
 ./run.sh --game examples/games/pong.rb

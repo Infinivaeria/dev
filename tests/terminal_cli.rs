@@ -266,28 +266,21 @@ fn terminal_run_maps_python_extension() {
 
 #[cfg(all(feature = "scripting", target_os = "linux"))]
 #[test]
-fn ruby_terminal_api_launches_an_emulator_with_context() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn ruby_terminal_api_opens_a_window_with_context() {
+    if std::env::var_os("DISPLAY").is_none_or(|display| display.is_empty()) {
+        eprintln!("skipping: needs an X11 display");
+        return;
+    }
     let directory =
         std::env::temp_dir().join(format!("selenite-ruby-terminal-{}", std::process::id()));
-    let bin = directory.join("bin");
     let work = directory.join("work folder");
-    std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    let record = directory.join("record");
-    let emulator = bin.join("x-terminal-emulator");
+    let command_file = directory.join("command.sh");
     std::fs::write(
-        &emulator,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}.args'\npwd -P > '{0}.cwd'\n",
-            record.display()
-        ),
+        &command_file,
+        "pwd -P > record.cwd\nprintf '%s\\n' \"$@\" > record.args\n",
     )
     .unwrap();
-    std::fs::set_permissions(&emulator, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let command_file = directory.join("command.sh");
-    std::fs::write(&command_file, "true\n").unwrap();
     let script = directory.join("launch.rb");
     std::fs::write(
         &script,
@@ -298,9 +291,9 @@ fn ruby_terminal_api_launches_an_emulator_with_context() {
         ),
     )
     .unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    // After the command file finishes, the window's shell is /bin/true, which closes it.
     let output = Command::new(env!("CARGO_BIN_EXE_selenite"))
-        .env("PATH", path)
+        .env("SHELL", "/bin/true")
         .env("SELENITE_HOME", directory.join("home"))
         .arg("--script")
         .arg(&script)
@@ -313,31 +306,16 @@ fn ruby_terminal_api_launches_an_emulator_with_context() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let args_file = directory.join("record.args");
-    for _ in 0..100 {
-        if args_file.is_file() && directory.join("record.cwd").is_file() {
+    let args_file = work.join("record.args");
+    for _ in 0..200 {
+        if args_file.is_file() && work.join("record.cwd").is_file() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let args = std::fs::read_to_string(&args_file).unwrap();
-    let lines: Vec<&str> = args.lines().collect();
-    assert_eq!(lines[..2], ["-e", "env"]);
-    assert!(lines[2].starts_with("SELENITE_GRID="));
-    assert!(lines[3].ends_with("selenite"));
+    assert_eq!(std::fs::read_to_string(&args_file).unwrap(), "two words\n");
     assert_eq!(
-        lines[4..],
-        [
-            "--terminal-run",
-            std::fs::canonicalize(&command_file)
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "two words"
-        ]
-    );
-    assert_eq!(
-        std::fs::read_to_string(directory.join("record.cwd"))
+        std::fs::read_to_string(work.join("record.cwd"))
             .unwrap()
             .trim(),
         std::fs::canonicalize(&work).unwrap().to_str().unwrap()
