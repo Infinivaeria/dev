@@ -1,0 +1,13 @@
+[package]
+name = "rustby"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Build Rust executables with embedded MRI Ruby bytecode using Magnus"
+license = "MIT"
+autoexamples = false
+
+[dependencies]
+magnus = { git = "https://github.com/matsadler/magnus", rev = "c08ca65b527e2cff2b347c46d3f8a029e17ca665", version = "0.10", features = ["embed"] }
+
+[workspace]
