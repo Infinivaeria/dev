@@ -35,6 +35,8 @@ use crate::{
 };
 
 const SCROLLBACK_LINES: usize = 10_000;
+const SCROLLBAR_WIDTH: f32 = 12.0;
+const SCROLLBAR_MIN_THUMB: f32 = 28.0;
 const BASE_FONT: f32 = 18.0;
 const THEME_FG: (u8, u8, u8) = (216, 218, 224);
 const THEME_BG: (u8, u8, u8) = (20, 21, 26);
@@ -498,6 +500,7 @@ struct TermWindow {
     metrics: Metrics,
     /// Lines scrolled back from the live screen.
     offset: usize,
+    scrollbar_drag: Option<f32>,
     selection: Option<Selection>,
     selecting: bool,
     last_click: Option<(f64, (usize, usize), u8)>,
@@ -552,7 +555,37 @@ impl TermWindow {
         self.offset = self.offset.min(self.term.scrollback_len());
         if self.term.on_alt_screen() {
             self.offset = 0;
+            self.scrollbar_drag = None;
         }
+    }
+
+    fn scrollbar_mouse(&mut self, mouse: Vector2, width: i32, height: i32, pressed: bool, down: bool) -> bool {
+        let scrollback = self.term.scrollback_len();
+        let geometry = scrollbar_geometry(height as f32, self.term.rows(), scrollback, self.offset);
+        let Some((top, thumb)) = geometry else {
+            self.scrollbar_drag = None;
+            return false;
+        };
+        if let Some(grab) = self.scrollbar_drag {
+            if down {
+                self.offset = scrollbar_offset(mouse.y - grab, height as f32, thumb, scrollback);
+                return true;
+            }
+            self.scrollbar_drag = None;
+            return true;
+        }
+        let left = width as f32 - SCROLLBAR_WIDTH;
+        if !pressed || mouse.x < left || mouse.x > width as f32 || mouse.y < 0.0 || mouse.y > height as f32 {
+            return false;
+        }
+        let grab = if mouse.y >= top && mouse.y <= top + thumb {
+            mouse.y - top
+        } else {
+            thumb * 0.5
+        };
+        self.offset = scrollbar_offset(mouse.y - grab, height as f32, thumb, scrollback);
+        self.scrollbar_drag = Some(grab);
+        true
     }
 
     /// Re-fits the character grid to the window (after a resize or a zoom change).
@@ -806,6 +839,18 @@ impl TermWindow {
     fn mouse_at(&mut self, rl: &mut RaylibHandle, now: f64, top: f32) -> MouseCursor {
         let mut mouse = rl.get_mouse_position();
         mouse.y -= top;
+        if self.scrollbar_mouse(
+            mouse,
+            rl.get_screen_width(),
+            (rl.get_screen_height() as f32 - top).max(1.0) as i32,
+            rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT),
+            rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT),
+        ) {
+            return MouseCursor::MOUSE_CURSOR_DEFAULT;
+        }
+        if mouse.y < 0.0 {
+            return MouseCursor::MOUSE_CURSOR_DEFAULT;
+        }
         let (col, view_row) = self.cell_at(mouse);
         let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
@@ -1223,23 +1268,46 @@ impl TermWindow {
 
     fn draw_scrollbar<D: RaylibDraw>(&self, d: &mut D, width: i32, height: i32) {
         let scrollback = self.term.scrollback_len();
-        if scrollback == 0 || self.term.on_alt_screen() {
+        let Some((top, thumb)) = scrollbar_geometry(height as f32, self.term.rows(), scrollback, self.offset)
+        else {
             return;
-        }
-        let total = (scrollback + self.term.rows()) as f32;
-        let track = height as f32;
-        let thumb = (track * self.term.rows() as f32 / total).max(18.0);
-        let top = (track - thumb) * (1.0 - self.offset as f32 / scrollback as f32);
-        let bar = (self.metrics.pad * 0.6).max(3.0);
+        };
         let alpha = if self.offset > 0 { 150 } else { 60 };
         d.draw_rectangle(
-            (width as f32 - bar) as i32,
+            width - SCROLLBAR_WIDTH as i32,
+            0,
+            SCROLLBAR_WIDTH as i32,
+            height,
+            Color::new(42, 45, 54, 100),
+        );
+        d.draw_rectangle(
+            width - SCROLLBAR_WIDTH as i32,
             top as i32,
-            bar as i32,
+            SCROLLBAR_WIDTH as i32,
             thumb as i32,
             Color::new(160, 165, 185, alpha),
         );
     }
+}
+
+fn scrollbar_geometry(height: f32, rows: usize, scrollback: usize, offset: usize) -> Option<(f32, f32)> {
+    if height <= 0.0 || rows == 0 || scrollback == 0 {
+        return None;
+    }
+    let thumb = (height * rows as f32 / (scrollback + rows) as f32)
+        .max(SCROLLBAR_MIN_THUMB)
+        .min(height);
+    let travel = height - thumb;
+    let top = travel * (1.0 - offset.min(scrollback) as f32 / scrollback as f32);
+    Some((top, thumb))
+}
+
+fn scrollbar_offset(top: f32, height: f32, thumb: f32, scrollback: usize) -> usize {
+    let travel = (height - thumb).max(0.0);
+    if travel == 0.0 {
+        return 0;
+    }
+    (scrollback as f32 * (1.0 - top.clamp(0.0, travel) / travel)).round() as usize
 }
 
 // -------------------------------------------------------------------- run --
@@ -1339,25 +1407,35 @@ impl EmbeddedTerminal {
         if focused && !click && !new_tab && !close_tab && !switch && window.exited.is_none() {
             window.keyboard(rl, now);
         }
-        if focused && content.check_collision_point_rec(mouse) {
-            let wheel = rl.get_mouse_wheel_move();
-            if wheel > 0.0 {
-                window.offset = (window.offset + wheel.ceil() as usize * 3)
-                    .min(window.term.scrollback_len());
-            } else if wheel < 0.0 {
-                window.offset = window.offset.saturating_sub((-wheel).ceil() as usize * 3);
-            }
-            let (col, row) = window.cell_at(Vector2::new(mouse.x - content.x, mouse.y - content.y));
-            let point = (col, window.base_abs() + row);
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                window.selection = Some(Selection { anchor: point, head: point, unit: Unit::Cell });
-                window.selecting = true;
-            }
-            if window.selecting && rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-                if let Some(selection) = &mut window.selection { selection.head = point; }
-            }
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT) {
-                if !window.copy_selection(rl, now) { window.paste(rl); }
+        if focused {
+            let local = Vector2::new(mouse.x - content.x, mouse.y - content.y);
+            let scrollbar_handled = window.scrollbar_mouse(
+                local,
+                content.width as i32,
+                content.height as i32,
+                rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT),
+                rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT),
+            );
+            if content.check_collision_point_rec(mouse) && !scrollbar_handled {
+                let wheel = rl.get_mouse_wheel_move();
+                if wheel > 0.0 {
+                    window.offset = (window.offset + wheel.ceil() as usize * 3)
+                        .min(window.term.scrollback_len());
+                } else if wheel < 0.0 {
+                    window.offset = window.offset.saturating_sub((-wheel).ceil() as usize * 3);
+                }
+                let (col, row) = window.cell_at(Vector2::new(mouse.x - content.x, mouse.y - content.y));
+                let point = (col, window.base_abs() + row);
+                if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                    window.selection = Some(Selection { anchor: point, head: point, unit: Unit::Cell });
+                    window.selecting = true;
+                }
+                if window.selecting && rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+                    if let Some(selection) = &mut window.selection { selection.head = point; }
+                }
+                if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT) {
+                    if !window.copy_selection(rl, now) { window.paste(rl); }
+                }
             }
         }
         if !rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) { window.selecting = false; }
@@ -1392,6 +1470,33 @@ fn child_command(args: &[OsString]) -> Result<(PathBuf, Vec<OsString>), String> 
         Some("--terminal" | "--terminal-run") => Ok((exe, args.to_vec())),
         Some(other) => Err(format!("--terminal-window cannot run {other}")),
     }
+}
+
+fn terminal_window_options(args: &[OsString]) -> Result<(Option<PathBuf>, Vec<OsString>), String> {
+    let mut directory = None;
+    let mut command_args = Vec::new();
+    let mut index = 0;
+    let mut command_started = false;
+    while index < args.len() {
+        let argument = args[index].to_str();
+        if !command_started && argument == Some("--working-directory") {
+            index += 1;
+            let value = args
+                .get(index)
+                .ok_or("--working-directory needs a path")?;
+            directory = Some(PathBuf::from(value));
+        } else if !command_started
+            && argument.is_some_and(|argument| argument.starts_with("--working-directory="))
+        {
+            let value = argument.unwrap().trim_start_matches("--working-directory=");
+            directory = Some(PathBuf::from(value));
+        } else {
+            command_started |= matches!(argument, Some("--terminal" | "--terminal-run"));
+            command_args.push(args[index].clone());
+        }
+        index += 1;
+    }
+    Ok((directory, command_args))
 }
 
 struct TabBar {
@@ -1451,12 +1556,14 @@ fn new_session(program: &Path, args: &[OsString], width: i32, height: i32, direc
         blink_from: 0.0, toast: None, bell_until: 0.0, started: Instant::now(),
         output_closed: false, exited: None, hold_open: false, held_button: None,
         last_reported: None, focused: true, title: "Selenite Terminal".to_owned(), saw_output: false,
+        scrollbar_drag: None,
     })
 }
 
 /// Opens the terminal window and returns the exit status of the command it ran.
 pub fn run(args: &[OsString]) -> Result<i32, String> {
-    let (program, program_args) = child_command(args)?;
+    let (directory, args) = terminal_window_options(args)?;
+    let (program, program_args) = child_command(&args)?;
     let frame_limit: Option<u32> = env::var("SELENITE_TERMINAL_FRAMES")
         .ok()
         .and_then(|value| value.parse().ok());
@@ -1479,7 +1586,7 @@ pub fn run(args: &[OsString]) -> Result<i32, String> {
     ui::load_font(&thread);
     load_mono_font(true);
 
-    let mut sessions = vec![new_session(&program, &program_args, rl.get_screen_width(), rl.get_screen_height(), None, None)?];
+    let mut sessions = vec![new_session(&program, &program_args, rl.get_screen_width(), rl.get_screen_height(), directory.as_deref(), None)?];
     let mut active = 0usize;
     let mut scale_menu = ui::ScaleMenu::default();
     let mut suite_menu = crate::suite::Menu::default();
@@ -1570,7 +1677,7 @@ pub fn run(args: &[OsString]) -> Result<i32, String> {
             }
         } else if !scale_input && !tab_command && window.exited.is_none() {
             window.keyboard(&mut rl, now);
-            let cursor = if rl.get_mouse_position().y >= bar.height { window.mouse_at(&mut rl, now, bar.height) } else { MouseCursor::MOUSE_CURSOR_DEFAULT };
+            let cursor = if rl.get_mouse_position().y >= bar.height || window.scrollbar_drag.is_some() { window.mouse_at(&mut rl, now, bar.height) } else { MouseCursor::MOUSE_CURSOR_DEFAULT };
             if cursor != applied_cursor {
                 rl.set_mouse_cursor(cursor);
                 applied_cursor = cursor;
@@ -1638,6 +1745,21 @@ pub fn run(args: &[OsString]) -> Result<i32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scrollbar_thumb_maps_to_history_endpoints() {
+        let height = 400.0;
+        let scrollback = 500;
+        let (oldest, thumb) = scrollbar_geometry(height, 20, scrollback, scrollback).unwrap();
+        assert_eq!(oldest, 0.0);
+        assert_eq!(scrollbar_offset(oldest, height, thumb, scrollback), scrollback);
+
+        let (live, _) = scrollbar_geometry(height, 20, scrollback, 0).unwrap();
+        assert_eq!(scrollbar_offset(live, height, thumb, scrollback), 0);
+        assert_eq!(scrollbar_offset(-10.0, height, thumb, scrollback), scrollback);
+        assert_eq!(scrollbar_offset(height, height, thumb, scrollback), 0);
+        assert!(scrollbar_geometry(height, 20, 0, 0).is_none());
+    }
 
     #[test]
     fn tab_controls_fit_and_keep_the_active_tab_visible() {
@@ -1833,5 +1955,19 @@ mod tests {
         assert_eq!(args, ["--terminal"]);
         let (_, args) = child_command(&["--terminal-run".into(), "x".into()]).unwrap();
         assert_eq!(args, ["--terminal-run", "x"]);
+    }
+
+    #[test]
+    fn consumes_xdg_working_directory_before_terminal_command() {
+        let args =
+            ["--working-directory", "/tmp", "--terminal", "printf", "ok"].map(OsString::from);
+        let (directory, command) = terminal_window_options(&args).unwrap();
+        assert_eq!(directory, Some(PathBuf::from("/tmp")));
+        assert_eq!(command, ["--terminal", "printf", "ok"].map(OsString::from));
+
+        let args = ["--terminal", "--working-directory", "literal"].map(OsString::from);
+        let (directory, command) = terminal_window_options(&args).unwrap();
+        assert_eq!(directory, None);
+        assert_eq!(command, args);
     }
 }

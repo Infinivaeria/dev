@@ -70,11 +70,12 @@ def shortcut_tools(root, tool, target=None, grid=None):
     tools = {
         "organizer": ("selenite", "Selenite", *launcher("selenite", "run.sh")),
         "ide": ("selenite-ide", "Selenite IDE", *launcher("selenite", "run-ide.sh", ["--ide", str(target)] if target else ["--ide"], [str(target)] if target else [])),
-        "terminal": ("selenite-consolegpu", "Terminal", *launcher("selenite", "run.sh", ["--terminal-window"])),
+        "terminal": ("selenite-consolegpu", "Selenite Terminal", *launcher("selenite", "run.sh", ["--terminal-window"])),
         "audio": ("selenite-audio", "Selenite Audio Studio", *launcher("mic_freq/mic_freq", "run-mic-freq.sh")),
     }
     if tool == "all":
         result = [tools[key] for key in ("organizer", "ide", "terminal", "audio")]
+        result.append(("selenite-assets", "Selenite Asset Manager", *launcher("selenite", "run.sh", ["--inventory"])))
         starter = root / "examples/games/starter.rb"
         if ((root / "selenite-game").is_file() or (root / "run-game.sh").is_file()) and starter.is_file():
             result.append(("selenite-game", "Selenite Game", *launcher("selenite-game", "run-game.sh", [str(starter)])))
@@ -181,6 +182,20 @@ def main():
                     "Categories": "Development;Utility;", "StartupNotify": "false",
                     "X-Selenite-Managed": "true",
                 }
+                if identifier == "selenite-consolegpu":
+                    entry["Desktop Entry"]["Categories"] = "Development;Utility;System;TerminalEmulator;"
+                    entry["Desktop Entry"]["X-TerminalArgExec"] = "--terminal"
+                    entry["Desktop Entry"]["X-ExecArg"] = "--terminal"
+                    entry["Desktop Entry"]["X-TerminalArgDir"] = "--working-directory"
+                    entry["Desktop Entry"]["Actions"] = "SetAsDefaultTerminal;RestoreDefaultTerminal;"
+                    for action, action_name, argument in (
+                        ("SetAsDefaultTerminal", "Use Selenite as Default Terminal", "--set-gnome-terminal"),
+                        ("RestoreDefaultTerminal", "Restore Previous Terminal", "--restore-gnome-terminal"),
+                    ):
+                        entry[f"Desktop Action {action}"] = {
+                            "Name": entry_value(action_name),
+                            "Exec": " ".join(exec_argument(value) for value in (executable, argument)),
+                        }
                 entries.append((path, entry))
     if icon_source is not None:
         destination = Path(icon)

@@ -15,6 +15,7 @@ enum Action {
     Assets,
     Recent(PathBuf),
     DesktopMenu,
+    Applications,
     ChangeIcon,
     Desktop { tool: &'static str, target: Option<PathBuf>, grid: Option<PathBuf> },
     Back,
@@ -72,6 +73,7 @@ impl Menu {
                 Action::Assets => "inventory files images search",
                 Action::Recent(path) => return format!("{label} {}", path.display()).to_lowercase().contains(&query),
                 Action::DesktopMenu | Action::Desktop { .. } => "create desktop shortcut launcher",
+                Action::Applications => "gnome applications app menu install shortcuts",
                 Action::ChangeIcon => "application icon image logo appearance customize",
                 Action::Back => "back suite tools",
                 Action::Close => "cancel dismiss",
@@ -90,6 +92,7 @@ impl Menu {
             .filter(|path| path.is_file());
         self.entries = [("All Suite Tools", "all"), ("Selenite", "organizer"), ("IDE", "ide"), ("Terminal", "terminal"), ("Audio Studio", "audio"), ("Starter Game", "game")]
             .into_iter().map(|(label, tool)| (label.into(), Action::Desktop { tool, target: None, grid: grid.clone() })).collect();
+        self.entries.insert(1, ("All Suite Apps (GNOME)".into(), Action::Applications));
         if let Some(path) = &grid {
             self.entries.push(("Current Grid".into(), Action::Desktop { tool: "grid", target: Some(path.clone()), grid: None }));
             self.entries.push(("Asset Manager".into(), Action::Desktop { tool: "assets", target: Some(path.clone()), grid: None }));
@@ -123,6 +126,7 @@ impl Menu {
         match action {
             Action::ChangeIcon => { self.icon_requested = true; self.open = false; return Ok(()); }
             Action::DesktopMenu => { self.desktop_menu(source, grid); return Ok(()); }
+            Action::Applications => { self.message = crate::desktop::create_application_shortcuts()?; return Ok(()); }
             Action::Desktop { tool, target, grid } => {
                 self.message = crate::desktop::create(tool, target.as_deref(), grid.as_deref())?;
                 return Ok(());

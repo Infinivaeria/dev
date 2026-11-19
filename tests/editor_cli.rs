@@ -519,18 +519,22 @@ fn desktop_shortcuts_are_created_from_the_suite_menu_without_vscode() {
     }
     let source = project.join("app.rb");
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[("SELENITE_SHORTCUT_ROOT", runtime.to_str().unwrap()), ("XDG_DESKTOP_DIR", desktop.to_str().unwrap()), ("XDG_DATA_HOME", data.to_str().unwrap())]);
-    send(&child, &["key:ctrl+shift+p", "type:desktop shortcuts", "key:Return", "type:all suite", "key:Return", "wait:200"]);
+    send(&child, &["key:ctrl+shift+p", "type:desktop shortcuts", "key:Return", "type:gnome applications", "key:Return", "wait:200"]);
+    send(&child, &["key:ctrl+a", "type:all suite", "key:Return", "wait:200"]);
     for query in ["current file", "current project in ide", "run current project", "current grid"] {
         send(&child, &["key:ctrl+a", &format!("type:{query}"), "key:Return", "wait:150"]);
     }
     send(&child, &["key:Escape", "close"]);
     assert!(wait_for_exit(&mut child).success());
     let entries: Vec<_> = fs::read_dir(&desktop).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
-    assert_eq!(entries.len(), 10);
+    assert_eq!(entries.len(), 11);
     for flag in ["--terminal-window", "--inventory", "--grid", "--edit", "--project", "--ide"] {
         assert!(entries.iter().any(|entry| entry.contains(flag)), "Missing shortcut action {flag}");
     }
-    assert!(!data.join("applications").exists());
+    let applications: Vec<_> = fs::read_dir(data.join("applications")).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
+    assert_eq!(applications.len(), 6);
+    assert!(applications.iter().any(|entry| entry.contains("Name=Selenite Terminal")));
+    assert!(applications.iter().any(|entry| entry.contains("Name=Selenite Asset Manager")));
     fs::remove_dir_all(directory).unwrap();
 }
 

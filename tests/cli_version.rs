@@ -21,8 +21,15 @@ fn desktop_shortcuts_quote_paths_preserve_commands_and_protect_user_entries() {
     assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
     let shortcut = data.join("applications/selenite-consolegpu.desktop");
     let original = std::fs::read_to_string(&shortcut).unwrap();
-    assert!(original.lines().any(|line| line == "Name=Terminal"));
+    assert!(original.lines().any(|line| line == "Name=Selenite Terminal"));
     assert!(original.contains("suite with spaces %%/run.sh\" \"--terminal-window\""));
+    assert!(original.contains("Actions=SetAsDefaultTerminal;RestoreDefaultTerminal;"));
+    assert!(original.contains("Name=Use Selenite as Default Terminal"));
+    assert!(original.contains("--set-gnome-terminal"));
+    assert!(original.contains("--restore-gnome-terminal"));
+    let assets = std::fs::read_to_string(data.join("applications/selenite-assets.desktop")).unwrap();
+    assert!(assets.lines().any(|line| line == "Name=Selenite Asset Manager"));
+    assert!(assets.contains("\"--inventory\""));
     assert!(desktop.join("selenite.desktop").is_file());
     let icon = directory.join("custom icon.png");
     image::RgbImage::new(32, 32).save(&icon).unwrap();
@@ -38,6 +45,86 @@ fn desktop_shortcuts_quote_paths_preserve_commands_and_protect_user_entries() {
     std::fs::write(&protected, "[Desktop Entry]\nName=Personal launcher\n").unwrap();
     assert!(!command(&[]).status.success());
     assert!(std::fs::read_to_string(protected).unwrap().contains("Personal launcher"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gnome_default_terminal_can_be_enabled_and_restored() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = std::env::temp_dir().join(format!("selenite-gnome-terminal-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let home = directory.join("selenite-home");
+    let config = directory.join("config");
+    let data = directory.join("data");
+    let suite = directory.join("suite");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::create_dir_all(&suite).unwrap();
+    let previous_terminals = "org.gnome.Ptyxis.desktop\n";
+    std::fs::write(config.join("gnome-xdg-terminals.list"), previous_terminals).unwrap();
+    let selenite = suite.join("selenite");
+    std::fs::write(&selenite, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&selenite, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let installed = Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tools/desktop_shortcuts.py"))
+        .args(["--root", suite.to_str().unwrap(), "--tool", "terminal"])
+        .env("XDG_DATA_HOME", &data)
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+    let read_setting = |key: &str| {
+        let output = Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.default-applications.terminal", key])
+            .env("GSETTINGS_BACKEND", "keyfile")
+            .env("XDG_CONFIG_HOME", &config)
+            .output()
+            .ok()?;
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let Some(original_exec) = read_setting("exec") else {
+        std::fs::remove_dir_all(directory).unwrap();
+        return;
+    };
+    let Some(original_arg) = read_setting("exec-arg") else {
+        std::fs::remove_dir_all(directory).unwrap();
+        return;
+    };
+    let run = |argument: &str| {
+        Command::new(env!("CARGO_BIN_EXE_selenite"))
+            .arg(argument)
+            .env("SELENITE_HOME", &home)
+            .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_DATA_HOME", &data)
+            .env("GSETTINGS_BACKEND", "keyfile")
+            .output()
+            .unwrap()
+    };
+    let enabled = run("--set-gnome-terminal");
+    assert!(enabled.status.success(), "{}", String::from_utf8_lossy(&enabled.stderr));
+    assert!(read_setting("exec").unwrap().contains("selenite"));
+    assert!(read_setting("exec-arg").unwrap().contains("--terminal-window"));
+    assert_eq!(std::fs::read_to_string(config.join("gnome-xdg-terminals.list")).unwrap(), format!("selenite-consolegpu.desktop\n{previous_terminals}"));
+    if Command::new("xdg-terminal-exec").arg("--help").output().is_ok() {
+        let dispatched = Command::new("xdg-terminal-exec")
+            .args(["--print-cmd", "--dir=/tmp"])
+            .env("XDG_CURRENT_DESKTOP", "GNOME")
+            .env("XDG_CONFIG_HOME", &config)
+            .env("XDG_DATA_HOME", &data)
+            .env("XDG_CACHE_HOME", directory.join("cache"))
+            .output()
+            .unwrap();
+        assert!(dispatched.status.success(), "{}", String::from_utf8_lossy(&dispatched.stderr));
+        let command = String::from_utf8_lossy(&dispatched.stdout);
+        assert!(command.contains(selenite.to_str().unwrap()), "{command}");
+        assert!(command.contains("--terminal-window"), "{command}");
+        assert!(command.contains("--working-directory\n/tmp"), "{command}");
+    }
+    let restored = run("--restore-gnome-terminal");
+    assert!(restored.status.success(), "{}", String::from_utf8_lossy(&restored.stderr));
+    assert_eq!(read_setting("exec").unwrap(), original_exec);
+    assert_eq!(read_setting("exec-arg").unwrap(), original_arg);
+    assert_eq!(std::fs::read_to_string(config.join("gnome-xdg-terminals.list")).unwrap(), previous_terminals);
+    assert!(!home.join("gnome-terminal-previous.json").exists());
     std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -61,7 +148,10 @@ fn desktop_shortcuts_work_with_native_executables_and_no_shell_launchers() {
         .arg("--root").arg(&root).arg("--desktop-only").env("XDG_DESKTOP_DIR", &desktop).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let entries = std::fs::read_dir(&desktop).unwrap().map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap()).collect::<Vec<_>>();
-    assert_eq!(entries.len(), 5);
+    assert_eq!(entries.len(), 6);
+    for name in ["Selenite", "Selenite IDE", "Selenite Terminal", "Selenite Audio Studio", "Selenite Asset Manager", "Selenite Game"] {
+        assert!(entries.iter().any(|entry| entry.lines().any(|line| line == format!("Name={name}"))));
+    }
     assert!(entries.iter().all(|entry| !entry.lines().any(|line| line.starts_with("Exec=") && line.contains(".sh"))));
     assert!(entries.iter().any(|entry| entry.contains("\"--ide\"")));
     assert!(entries.iter().any(|entry| entry.contains("mic_freq/mic_freq\"")));

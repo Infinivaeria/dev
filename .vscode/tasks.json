@@ -1780,7 +1780,7 @@
 				"--root",
 				"${input:seleniteInstallFolder}"
 			],
-			"detail": "Register organizer, IDE, Terminal and Audio Studio in the Linux application menu.",
+			"detail": "Register all bundled Selenite apps, including Asset Manager, in GNOME's application menu.",
 			"problemMatcher": []
 		},
 		{

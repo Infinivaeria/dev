@@ -6914,6 +6914,12 @@ fn run() -> Result<(), String> {
         let path = args.get(2).ok_or("--terminal-run needs a command file")?;
         return run_terminal_file(Path::new(path), &args[3..]);
     }
+    if args.get(1).is_some_and(|arg| arg == "--set-gnome-terminal") {
+        return desktop::use_as_gnome_terminal();
+    }
+    if args.get(1).is_some_and(|arg| arg == "--restore-gnome-terminal") {
+        return desktop::restore_gnome_terminal();
+    }
     let mut args = args;
     let with_terminal = take_with_terminal(&mut args);
     match parse_mode(&args)? {
@@ -6968,7 +6974,13 @@ fn run() -> Result<(), String> {
                 project::Kind::App => run_script_file(&project.entry(), Target::Grid(project.grid())),
             }
         }
-        StartupMode::Inventory(json_path) => inventory::InventoryApp::new(json_path)?.run(),
+        StartupMode::Inventory(json_path) => {
+            let json_path = json_path.map_or_else(
+                || profile_inventory_path(&ProfileStore::open_default()),
+                Ok,
+            )?;
+            inventory::InventoryApp::new(json_path)?.run()
+        }
         StartupMode::Script(script_path, target) => run_script_file(&script_path, target),
         StartupMode::Game(script_path, target) => run_game_file(&script_path, target),
         StartupMode::Compile(source, output, force) => compile_ruby_file(&source, &output, force),
@@ -7158,7 +7170,7 @@ enum Target {
 enum StartupMode {
     Profile(Option<String>),
     Grid(PathBuf),
-    Inventory(PathBuf),
+    Inventory(Option<PathBuf>),
     Image(PathBuf),
     Edit(PathBuf),
     Ide(PathBuf, Option<PathBuf>),
@@ -7186,6 +7198,8 @@ fn usage() -> String {
         "  selenite --terminal-run FILE [ARGS...]  run a Bash or Ruby command file in the terminal",
         "  selenite --terminal-window [--terminal-run FILE [ARGS...]]",
         "                                   open Selenite's own terminal window (Unix)",
+        "  selenite --set-gnome-terminal    use Selenite for GNOME's default terminal",
+        "  selenite --restore-gnome-terminal restore the previous GNOME terminal",
         "  selenite --script FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
         "                                   run a Ruby script headless against a profile or grid",
         "  selenite --game FILE.rb|FILE.rbc [--profile NAME | --grid FILE.json | FILE.json]",
@@ -7200,7 +7214,7 @@ fn usage() -> String {
         "  selenite --check-project DIR     check Ruby syntax and assets without running code",
         "  selenite --build-executable SCRIPT.rb|SCRIPT.rbc|PROJECT --output DIR [--game|--app] [--name NAME]",
         "                                   build a Rust/Magnus executable with embedded Ruby bytecode",
-        "  selenite --inventory FILE.json   open the inventory window",
+        "  selenite --inventory [FILE.json] open the inventory window (defaults to the last-used profile)",
     ];
     format!(
         "Selenite {} — infinite nested grids for any file\n\n{}\n\nProfiles live in {} (override with SELENITE_HOME).",
@@ -7266,7 +7280,7 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
             ["--project", directory] if !directory.starts_with('-') => StartupMode::Project(directory.into()),
             _ => return Err("--project expects one project folder".to_owned()),
         },
-        Some("--inventory") => StartupMode::Inventory(PathBuf::from(value(1, "--inventory")?)),
+        Some("--inventory") => StartupMode::Inventory(rest.get(1).map(PathBuf::from)),
         Some("--script") => StartupMode::Script(PathBuf::from(value(1, "--script")?), target(2)?),
         Some("--game") => StartupMode::Game(PathBuf::from(value(1, "--game")?), target(2)?),
         Some("--compile") => match game_cli::parse_compile(&rest[1..])? {
@@ -7660,6 +7674,17 @@ fn load_existing_root(path: &Path) -> Result<Arc<Mutex<SavedGrid>>, String> {
         return Err(format!("No saved grid found at {}", path.display()));
     };
     Ok(Arc::new(Mutex::new(grid)))
+}
+
+fn profile_inventory_path(store: &ProfileStore) -> Result<PathBuf, String> {
+    let profile = store.startup_profile(None)?;
+    let path = profile.grid_path();
+    if !path.exists() {
+        SavedGrid::new()
+            .save(&path)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(path)
 }
 
 fn spawn_editor(path: &Path) -> Result<(), String> {
@@ -8446,6 +8471,20 @@ fn draw_confirm_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asset_manager_shortcut_uses_last_profile_and_creates_its_grid() {
+        let directory = env::temp_dir().join(format!("selenite-assets-profile-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        let store = ProfileStore::at(&directory);
+        let profile = store.startup_profile(Some("Work")).unwrap();
+        let path = profile_inventory_path(&store).unwrap();
+        assert_eq!(path, profile.grid_path());
+        assert!(SavedGrid::load(&path).unwrap().is_some());
+        let args = ["selenite", "--inventory"].map(OsString::from);
+        assert_eq!(parse_mode(&args), Ok(StartupMode::Inventory(None)));
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn toolbar_controls_cycle_sizes_and_restore_hidden_buttons() {
