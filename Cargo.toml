@@ -1,9 +1,9 @@
 [package]
 name = "selenite"
-version = "12.0.0-rc.1"
+version = "18.0.0-rc.1"
 edition = "2021"
 rust-version = "1.88"
-description = "GPU-rendered multimedia workspace, Ruby IDE and raylib game development suite"
+description = "Linux-native multimedia, graphics, audio, CAS, Ruby IDE, raylib runtime and host suite"
 license = "MIT"
 
 [[bin]]
@@ -17,15 +17,21 @@ required-features = ["scripting"]
 
 [features]
 scripting = ["dep:magnus"]
+native-video = ["dep:video-rs", "dep:ndarray"]
 
 [dependencies]
 raylib = { version = "6.0", features = ["SUPPORT_IMAGE_GENERATION", "SUPPORT_FILEFORMAT_FLAC"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 image = "0.25"
+imageproc = "0.25"
+video-rs = { version = "0.12", features = ["ndarray"], optional = true }
+ndarray = { version = "=0.17.2", optional = true }
 magnus = { git = "https://github.com/matsadler/magnus", rev = "c08ca65b527e2cff2b347c46d3f8a029e17ca665", version = "0.10", features = ["embed"], optional = true }
 arboard = "3.6.1"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "rustls"] }
+symbolica = { version = "3.0.2", default-features = false, features = ["integer-malachite", "float-astro"] }
+nalgebra = "0.33"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

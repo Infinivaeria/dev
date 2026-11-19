@@ -1,0 +1,13 @@
+[Unit]
+Description=Selenite Linux appliance host
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/selenite --host-appliance
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

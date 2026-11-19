@@ -18,11 +18,15 @@ struct TestWindow(Child);
 
 impl std::ops::Deref for TestWindow {
     type Target = Child;
-    fn deref(&self) -> &Child { &self.0 }
+    fn deref(&self) -> &Child {
+        &self.0
+    }
 }
 
 impl std::ops::DerefMut for TestWindow {
-    fn deref_mut(&mut self) -> &mut Child { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
 }
 
 impl Drop for TestWindow {
@@ -179,25 +183,87 @@ fn ide_file_controls_terminal_help_and_resizable_workspace() {
     let copy = directory.join("copy.rb");
     fs::write(&source, "puts 12").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["key:ctrl+a", "key:ctrl+c", "key:ctrl+End", "key:Return", "key:ctrl+v", "key:ctrl+shift+s", "key:ctrl+a", &format!("type:{}", copy.display()), "key:Return", "wait:300"]);
+    send(
+        &child,
+        &[
+            "key:ctrl+a",
+            "key:ctrl+c",
+            "key:ctrl+End",
+            "key:Return",
+            "key:ctrl+v",
+            "key:ctrl+shift+s",
+            "key:ctrl+a",
+            &format!("type:{}", copy.display()),
+            "key:Return",
+            "wait:300",
+        ],
+    );
     assert_eq!(fs::read_to_string(&copy).unwrap(), "puts 12\nputs 12");
     assert_eq!(fs::read_to_string(&source).unwrap(), "puts 12");
-    send(&child, &["click:250,486", "click:300,620", "type:printf IDE_TERM_OK > term.txt", "key:Return", "wait:400"]);
-    assert_eq!(fs::read_to_string(directory.join("term.txt")).unwrap(), "IDE_TERM_OK");
-    send(&child, &["type:printf '%s' \"$SELENITE_GRID\" > grid-env.txt", "key:Return", "wait:200"]);
-    assert_eq!(fs::read_to_string(directory.join("grid-env.txt")).unwrap(), source.with_extension("save.json").to_string_lossy());
-    send(&child, &["key:F5", "wait:500", "key:F1", "wait:200", "click:150,518", "click:150,644", "type:DrawCube", "wait:400", &format!("capture:{}", directory.join("help.ppm").display()), "drag:800,470,800,400", "drag:253,150,300,150", "wait:300", "close"]);
+    send(
+        &child,
+        &[
+            "click:250,486",
+            "click:300,620",
+            "type:printf IDE_TERM_OK > term.txt",
+            "key:Return",
+            "wait:400",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("term.txt")).unwrap(),
+        "IDE_TERM_OK"
+    );
+    send(
+        &child,
+        &[
+            "type:printf '%s' \"$SELENITE_GRID\" > grid-env.txt",
+            "key:Return",
+            "wait:200",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("grid-env.txt")).unwrap(),
+        source.with_extension("save.json").to_string_lossy()
+    );
+    send(
+        &child,
+        &[
+            "key:F5",
+            "wait:500",
+            "key:F1",
+            "wait:200",
+            "click:150,518",
+            "click:150,644",
+            "type:DrawCube",
+            "wait:400",
+            &format!("capture:{}", directory.join("help.ppm").display()),
+            "drag:800,470,800,400",
+            "drag:253,150,300,150",
+            "wait:300",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
     let screenshot = image::open(directory.join("help.ppm")).unwrap().into_rgb8();
     assert_eq!(screenshot.dimensions(), (1100, 760));
-    let bright = screenshot.enumerate_pixels().filter(|(_, row, pixel)| *row > 520 && pixel[0] > 170 && pixel[1] > 170 && pixel[2] > 170).count();
+    let bright = screenshot
+        .enumerate_pixels()
+        .filter(|(_, row, pixel)| *row > 520 && pixel[0] > 170 && pixel[1] > 170 && pixel[2] > 170)
+        .count();
     assert!(bright > 100, "Help content did not render");
-    let layout: serde_json::Value = serde_json::from_slice(&fs::read(home_for(&source).join("ide.json")).unwrap()).unwrap();
+    let layout: serde_json::Value =
+        serde_json::from_slice(&fs::read(home_for(&source).join("ide.json")).unwrap()).unwrap();
     assert!(layout["panel_fraction"].as_f64().unwrap() > 0.4);
     assert!(layout["sidebar_fraction"].as_f64().unwrap() > 0.26);
     assert_eq!(layout["tab"], "Help");
     assert!(!layout["workspaces"].as_array().unwrap().is_empty());
-    let mut narrow = window_with(&source, "--ide", Some("420x300"), &[("SELENITE_EDITOR_FRAMES", "5")]);
+    let mut narrow = window_with(
+        &source,
+        "--ide",
+        Some("420x300"),
+        &[("SELENITE_EDITOR_FRAMES", "5")],
+    );
     assert!(wait_for_exit(&mut narrow).success());
     fs::remove_dir_all(directory).unwrap();
 }
@@ -211,19 +277,56 @@ fn ide_confirm_and_cancel_buttons_work_over_every_pane() {
     fs::write(&source, "puts 'confirmed'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
     for (width, height) in [(1100, 760), (420, 300), (2200, 1520)] {
-        send(&child, &[&format!("resize:{width},{height}"), "wait:200", "key:F1", "key:ctrl+shift+s"]);
+        send(
+            &child,
+            &[
+                &format!("resize:{width},{height}"),
+                "wait:200",
+                "key:F1",
+                "key:ctrl+shift+s",
+            ],
+        );
         let copy = directory.join(format!("copy-{width}.rb"));
-        let scale = (width as f32 / 960.0).min(height as f32 / 720.0).clamp(0.75, 6.0) * 1.25;
+        let scale = (width as f32 / 960.0)
+            .min(height as f32 / 720.0)
+            .clamp(0.75, 6.0)
+            * 1.25;
         let font = (14.0 * scale).round();
-        let unit = (font / 14.0).min((width as f32 - 16.0) / 280.0).min((height as f32 - 16.0) / 180.0);
+        let unit = (font / 14.0)
+            .min((width as f32 - 16.0) / 280.0)
+            .min((height as f32 - 16.0) / 180.0);
         let padding = (12.0 * unit).max(4.0);
         let dialog_width = (680.0 * unit).min(width as f32 - padding * 2.0);
         let left = (width as f32 - dialog_width) / 2.0;
         let button_y = (height as f32 + 180.0 * unit) / 2.0 - padding - (14.0 * unit).max(8.0);
         let confirm_x = left + padding + 45.0 * unit;
-        send(&child, &["key:ctrl+a", &format!("type:{}", copy.display()), &format!("click:{confirm_x:.0},{button_y:.0}"), "wait:200"]);
-        assert_eq!(fs::read_to_string(&copy).unwrap(), "puts 'confirmed'\n", "Confirm failed at {width}x{height}");
-        send(&child, &["key:ctrl+shift+s", "key:ctrl+a", &format!("type:{}", directory.join("cancelled.rb").display()), &format!("click:{:.0},{button_y:.0}", confirm_x + 90.0 * unit + padding), "wait:100"]);
+        send(
+            &child,
+            &[
+                "key:ctrl+a",
+                &format!("type:{}", copy.display()),
+                &format!("click:{confirm_x:.0},{button_y:.0}"),
+                "wait:200",
+            ],
+        );
+        assert_eq!(
+            fs::read_to_string(&copy).unwrap(),
+            "puts 'confirmed'\n",
+            "Confirm failed at {width}x{height}"
+        );
+        send(
+            &child,
+            &[
+                "key:ctrl+shift+s",
+                "key:ctrl+a",
+                &format!("type:{}", directory.join("cancelled.rb").display()),
+                &format!(
+                    "click:{:.0},{button_y:.0}",
+                    confirm_x + 90.0 * unit + padding
+                ),
+                "wait:100",
+            ],
+        );
         assert!(!directory.join("cancelled.rb").exists());
     }
     send(&child, &["close"]);
@@ -241,10 +344,25 @@ fn ide_quick_open_filters_project_files_and_edits_the_selected_source() {
     fs::write(&source, "puts 'main'\n").unwrap();
     fs::write(&helper, "puts 'helper'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["key:ctrl+p", "type:helper", "key:Return", "key:ctrl+End", "type:#quickopen", "key:ctrl+s", "wait:200", "close"]);
+    send(
+        &child,
+        &[
+            "key:ctrl+p",
+            "type:helper",
+            "key:Return",
+            "key:ctrl+End",
+            "type:#quickopen",
+            "key:ctrl+s",
+            "wait:200",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
     assert_eq!(fs::read_to_string(&source).unwrap(), "puts 'main'\n");
-    assert_eq!(fs::read_to_string(&helper).unwrap(), "puts 'helper'\n#quickopen");
+    assert_eq!(
+        fs::read_to_string(&helper).unwrap(),
+        "puts 'helper'\n#quickopen"
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -256,24 +374,50 @@ fn suite_menu_creates_application_projects_and_remembers_them() {
     let source = directory.join("main.rb");
     fs::write(&source, "puts 'suite'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["key:F8", "key:Down", "key:Down", "key:Down", "key:Down", "key:Return", "wait:500"]);
+    send(
+        &child,
+        &[
+            "key:F8",
+            "key:Down",
+            "key:Down",
+            "key:Down",
+            "key:Down",
+            "key:Return",
+            "wait:500",
+        ],
+    );
     let project = home_for(&source).join("projects/app-project");
     let deadline = Instant::now() + Duration::from_secs(20);
     while !home_for(&source).join("settings.json").exists() {
-        assert!(Instant::now() < deadline, "Suite IDE did not record its project");
+        assert!(
+            Instant::now() < deadline,
+            "Suite IDE did not record its project"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
-    let children = fs::read_to_string(format!("/proc/{}/task/{}/children", child.id(), child.id())).unwrap();
-    let ide = children.split_whitespace().map(|pid| pid.parse::<u32>().unwrap()).find(|pid| {
-        fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|bytes| bytes.split(|byte| *byte == 0).any(|arg| arg == b"--ide"))
-    }).expect("Suite did not launch an IDE");
+    let children =
+        fs::read_to_string(format!("/proc/{}/task/{}/children", child.id(), child.id())).unwrap();
+    let ide = children
+        .split_whitespace()
+        .map(|pid| pid.parse::<u32>().unwrap())
+        .find(|pid| {
+            fs::read(format!("/proc/{pid}/cmdline"))
+                .is_ok_and(|bytes| bytes.split(|byte| *byte == 0).any(|arg| arg == b"--ide"))
+        })
+        .expect("Suite did not launch an IDE");
     send_pid(ide, &["close"]);
     send(&child, &["wait:200", "close"]);
     assert!(wait_for_exit(&mut child).success());
-    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(project.join("selenite-project.json")).unwrap()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("selenite-project.json")).unwrap()).unwrap();
     assert_eq!(manifest["kind"], "app");
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(home_for(&source).join("settings.json")).unwrap()).unwrap();
-    assert_eq!(settings["recent_projects"][0], project.canonicalize().unwrap().to_string_lossy().as_ref());
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(home_for(&source).join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        settings["recent_projects"][0],
+        project.canonicalize().unwrap().to_string_lossy().as_ref()
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -285,12 +429,45 @@ fn ide_terminal_tabs_keep_independent_shells_and_open_scale_options() {
     let source = directory.join("main.rb");
     fs::write(&source, "puts 'tabs'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["click:300,620", "type:export TAB_MARK=first", "key:Return", "key:ctrl+shift+t", "wait:200", "type:printf '%s' ${TAB_MARK:-second} > second.txt", "key:Return", "wait:200", "key:ctrl+Tab", "type:printf '%s' $TAB_MARK > first.txt", "key:Return", "wait:200"]);
-    assert_eq!(fs::read_to_string(directory.join("first.txt")).unwrap(), "first");
-    assert_eq!(fs::read_to_string(directory.join("second.txt")).unwrap(), "second");
-    send(&child, &["click:1060,515", "wait:200", "click:550,360", "key:Escape", "close"]);
+    send(
+        &child,
+        &[
+            "click:300,620",
+            "type:export TAB_MARK=first",
+            "key:Return",
+            "key:ctrl+shift+t",
+            "wait:200",
+            "type:printf '%s' ${TAB_MARK:-second} > second.txt",
+            "key:Return",
+            "wait:200",
+            "key:ctrl+Tab",
+            "type:printf '%s' $TAB_MARK > first.txt",
+            "key:Return",
+            "wait:200",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("first.txt")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("second.txt")).unwrap(),
+        "second"
+    );
+    send(
+        &child,
+        &[
+            "click:1060,515",
+            "wait:200",
+            "click:550,360",
+            "key:Escape",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(home_for(&source).join("settings.json")).unwrap()).unwrap();
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(home_for(&source).join("settings.json")).unwrap())
+            .unwrap();
     assert_eq!(settings["ui_scale"], 1.25);
     fs::remove_dir_all(directory).unwrap();
 }
@@ -303,17 +480,32 @@ fn ide_terminal_dock_moves_and_keeps_shell_input_working() {
     let source = directory.join("main.rb");
     fs::write(&source, "puts 'movable'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["drag:250,486,250,120", "wait:300", "click:300,180", "type:printf DOCK_OK > dock.txt", "key:Return", "wait:400"]);
-    assert_eq!(fs::read_to_string(directory.join("dock.txt")).unwrap(), "DOCK_OK");
+    send(
+        &child,
+        &[
+            "drag:250,486,250,120",
+            "wait:300",
+            "click:300,180",
+            "type:printf DOCK_OK > dock.txt",
+            "key:Return",
+            "wait:400",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("dock.txt")).unwrap(),
+        "DOCK_OK"
+    );
     send(&child, &["close"]);
     assert!(wait_for_exit(&mut child).success());
     let layout_path = home_for(&source).join("ide.json");
-    let layout: serde_json::Value = serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
+    let layout: serde_json::Value =
+        serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
     assert_eq!(layout["dock_top"], true);
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
     send(&child, &["drag:250,54,250,650", "wait:300", "close"]);
     assert!(wait_for_exit(&mut child).success());
-    let layout: serde_json::Value = serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
+    let layout: serde_json::Value =
+        serde_json::from_slice(&fs::read(&layout_path).unwrap()).unwrap();
     assert_eq!(layout["dock_top"], false);
     fs::remove_dir_all(directory).unwrap();
 }
@@ -328,13 +520,15 @@ fn ide_scales_with_live_window_resizing_but_not_pane_resizing() {
     fs::write(&source, "class Responsive\nend\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
     let keyword_span = |image: &RgbImage| {
-        let rows: Vec<_> = (0..image.height() / 4).filter(|row| {
-            (image.width() / 4..image.width()).any(|column| {
-                let pixel = image.get_pixel(column, *row);
-                i32::from(pixel[0]) > i32::from(pixel[1]) + 35
-                    && i32::from(pixel[2]) > i32::from(pixel[1]) + 40
+        let rows: Vec<_> = (0..image.height() / 4)
+            .filter(|row| {
+                (image.width() / 4..image.width()).any(|column| {
+                    let pixel = image.get_pixel(column, *row);
+                    i32::from(pixel[0]) > i32::from(pixel[1]) + 35
+                        && i32::from(pixel[2]) > i32::from(pixel[1]) + 40
+                })
             })
-        }).collect();
+            .collect();
         assert!(!rows.is_empty(), "Ruby keywords did not render");
         rows.last().unwrap() - rows[0] + 1
     };
@@ -342,23 +536,63 @@ fn ide_scales_with_live_window_resizing_but_not_pane_resizing() {
     let initial_span = keyword_span(&initial);
     send(&child, &["drag:800,470,800,330", "wait:200"]);
     let pane = capture(&child, &directory.join("pane.ppm"));
-    assert_eq!(keyword_span(&pane), initial_span, "Pane resizing changed editor text size");
+    assert_eq!(
+        keyword_span(&pane),
+        initial_span,
+        "Pane resizing changed editor text size"
+    );
 
-    send(&child, &["key:ctrl+shift+s", "resize:2200,1520", "wait:300"]);
+    send(
+        &child,
+        &["key:ctrl+shift+s", "resize:2200,1520", "wait:300"],
+    );
     let dialog = capture(&child, &directory.join("large-dialog.ppm"));
     assert_eq!(dialog.dimensions(), (2200, 1520));
     send(&child, &["key:Escape"]);
     let large = capture(&child, &directory.join("large.ppm"));
-    assert!(keyword_span(&large) * 10 > initial_span * 17, "Editor text did not grow with the window");
+    assert!(
+        keyword_span(&large) * 10 > initial_span * 17,
+        "Editor text did not grow with the window"
+    );
 
-    send(&child, &["key:F1", "key:ctrl+shift+s", "resize:420,300", "wait:200", "key:ctrl+a", &format!("type:{}", copy.display()), "click:60,209", "wait:200"]);
-    assert_eq!(fs::read_to_string(&copy).unwrap(), "class Responsive\nend\n");
+    send(
+        &child,
+        &[
+            "key:F1",
+            "key:ctrl+shift+s",
+            "resize:420,300",
+            "wait:200",
+            "key:ctrl+a",
+            &format!("type:{}", copy.display()),
+            "click:60,209",
+            "wait:200",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(&copy).unwrap(),
+        "class Responsive\nend\n"
+    );
     let compact = capture(&child, &directory.join("compact.ppm"));
     assert_eq!(compact.dimensions(), (420, 300));
-    assert!(close_to(compact.get_pixel(4, 145), [50, 64, 75], 1), "Wrapped Help control did not remain visible");
+    assert!(
+        close_to(compact.get_pixel(4, 145), [50, 64, 75], 1),
+        "Wrapped Help control did not remain visible"
+    );
 
-    send(&child, &["click:210,110", "click:210,240", "type:printf RESIZE_OK > resized-terminal.txt", "key:Return", "wait:200"]);
-    assert_eq!(fs::read_to_string(directory.join("resized-terminal.txt")).unwrap(), "RESIZE_OK");
+    send(
+        &child,
+        &[
+            "click:210,110",
+            "click:210,240",
+            "type:printf RESIZE_OK > resized-terminal.txt",
+            "key:Return",
+            "wait:200",
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("resized-terminal.txt")).unwrap(),
+        "RESIZE_OK"
+    );
     send(&child, &["resize:1100,760", "wait:200"]);
     let restored = capture(&child, &directory.join("restored.ppm"));
     assert_eq!(restored.dimensions(), (1100, 760));
@@ -376,17 +610,33 @@ fn ide_creates_application_projects_and_runs_the_configured_entry() {
     let source = directory.join("main.rb");
     fs::write(&source, "puts 'workspace'\n").unwrap();
     let mut child = window_with(&source, "--ide", Some("1100x760"), &[]);
-    send(&child, &["click:20,18", "click:150,162", "key:Return", "wait:300"]);
+    send(
+        &child,
+        &["click:20,18", "click:150,162", "key:Return", "wait:300"],
+    );
     let project = directory.join("app-project");
-    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(project.join("selenite-project.json")).unwrap()).unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("selenite-project.json")).unwrap()).unwrap();
     assert_eq!(manifest["kind"], "app");
     send(&child, &["key:F5", "wait:500"]);
     fs::create_dir(project.join("lib")).unwrap();
     let helper = project.join("lib/helper.rb");
     fs::write(&helper, "raise 'helper must not run directly'\n").unwrap();
-    send(&child, &["key:ctrl+o", "key:ctrl+a", &format!("type:{}", helper.display()), "key:Return", "key:F5", "wait:500", "close"]);
+    send(
+        &child,
+        &[
+            "key:ctrl+o",
+            "key:ctrl+a",
+            &format!("type:{}", helper.display()),
+            "key:Return",
+            "key:F5",
+            "wait:500",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
-    let save: serde_json::Value = serde_json::from_slice(&fs::read(project.join("save.json")).unwrap()).unwrap();
+    let save: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("save.json")).unwrap()).unwrap();
     assert_eq!(save["root"]["inventory"]["runs"]["count"], 2);
     fs::remove_dir_all(directory).unwrap();
 }
@@ -402,33 +652,72 @@ fn organizer_opens_ide_and_reloads_its_shared_grid() {
     let profile = home.join("profiles/default");
     fs::create_dir_all(&profile).unwrap();
     fs::write(&source, "puts 'Selenite project'\n").unwrap();
-    fs::write(profile.join("init.rb"), format!("Selenite.ide({:?})\n", source.to_string_lossy())).unwrap();
+    fs::write(
+        profile.join("init.rb"),
+        format!("Selenite.ide({:?})\n", source.to_string_lossy()),
+    )
+    .unwrap();
     let mut organizer = Command::new(env!("CARGO_BIN_EXE_selenite"))
         .args(["--profile", "default"])
         .env("SELENITE_HOME", &home)
         .env("SELENITE_EDITOR_READY", &ready)
         .env("SELENITE_EDITOR_SIZE", "1100x760")
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
     while !ready.exists() {
-        assert!(organizer.try_wait().unwrap().is_none(), "Organizer exited before IDE launch");
-        assert!(Instant::now() < deadline, "Selenite.ide did not open the IDE");
+        assert!(
+            organizer.try_wait().unwrap().is_none(),
+            "Organizer exited before IDE launch"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "Selenite.ide did not open the IDE"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
-    let children = fs::read_to_string(format!("/proc/{}/task/{}/children", organizer.id(), organizer.id())).unwrap();
-    let ide = children.split_whitespace().map(|pid| pid.parse::<u32>().unwrap()).find(|pid| {
-        fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|bytes| bytes.split(|byte| *byte == 0).any(|arg| arg == b"--ide"))
-    }).expect("IDE child process missing");
-    send_pid(ide, &["key:F6", "type:Selenite.inventory.add('ide', 3); Selenite.save", "key:Return", "wait:300", "close"]);
+    let children = fs::read_to_string(format!(
+        "/proc/{}/task/{}/children",
+        organizer.id(),
+        organizer.id()
+    ))
+    .unwrap();
+    let ide = children
+        .split_whitespace()
+        .map(|pid| pid.parse::<u32>().unwrap())
+        .find(|pid| {
+            fs::read(format!("/proc/{pid}/cmdline"))
+                .is_ok_and(|bytes| bytes.split(|byte| *byte == 0).any(|arg| arg == b"--ide"))
+        })
+        .expect("IDE child process missing");
+    send_pid(
+        ide,
+        &[
+            "key:F6",
+            "type:Selenite.inventory.add('ide', 3); Selenite.save",
+            "key:Return",
+            "wait:300",
+            "close",
+        ],
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     while Path::new(&format!("/proc/{ide}")).exists() {
-        assert!(organizer.try_wait().unwrap().is_none(), "Organizer exited before IDE reload");
-        assert!(Instant::now() < deadline, "Organizer did not reap the IDE session");
+        assert!(
+            organizer.try_wait().unwrap().is_none(),
+            "Organizer exited before IDE reload"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "Organizer did not reap the IDE session"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     send(&organizer, &["close"]);
     assert!(wait_for_exit(&mut organizer).success());
-    let saved: serde_json::Value = serde_json::from_slice(&fs::read(profile.join("selenite.json")).unwrap()).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(profile.join("selenite.json")).unwrap()).unwrap();
     assert_eq!(saved["root"]["inventory"]["ide"]["count"], 3);
     fs::remove_dir_all(directory).unwrap();
 }
@@ -446,53 +735,179 @@ fn icon_picker_applies_previews_persists_rejects_bad_images_and_resets() {
     fs::create_dir_all(&desktop).unwrap();
     fs::write(&source, "puts 'icon'\n").unwrap();
     fs::write(&invalid, "not an image").unwrap();
-    image::RgbaImage::from_pixel(100, 100, image::Rgba([200, 45, 90, 255])).save(&icon).unwrap();
+    image::RgbaImage::from_pixel(100, 100, image::Rgba([200, 45, 90, 255]))
+        .save(&icon)
+        .unwrap();
     let shortcut = desktop.join("selenite.desktop");
     fs::write(&shortcut, "[Desktop Entry]\nType=Application\nName=Selenite\nExec=/bin/true\nIcon=applications-graphics\nX-Selenite-Managed=true\n").unwrap();
-    let env = [("XDG_DESKTOP_DIR", desktop.to_str().unwrap()), ("XDG_DATA_HOME", data.to_str().unwrap())];
+    let env = [
+        ("XDG_DESKTOP_DIR", desktop.to_str().unwrap()),
+        ("XDG_DATA_HOME", data.to_str().unwrap()),
+    ];
     let mut child = window_with(&source, "--ide", Some("1100x760"), &env);
-    send(&child, &["key:ctrl+shift+p", "type:change icon", "key:Return", "wait:100", "key:ctrl+a", &format!("type:{}", icon.display()), "key:Return", "click:550,567", "wait:200", &format!("icon:{}", directory.join("live-icon.txt").display())]);
-    assert_eq!(fs::read_to_string(directory.join("live-icon.txt")).unwrap().trim(), "256 256 ffc82d5a");
+    send(
+        &child,
+        &[
+            "key:ctrl+shift+p",
+            "type:change icon",
+            "key:Return",
+            "wait:100",
+            "key:ctrl+a",
+            &format!("type:{}", icon.display()),
+            "key:Return",
+            "click:550,567",
+            "wait:200",
+            &format!("icon:{}", directory.join("live-icon.txt").display()),
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("live-icon.txt"))
+            .unwrap()
+            .trim(),
+        "256 256 ffc82d5a"
+    );
     let settings_path = home_for(&source).join("settings.json");
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
     let saved = std::path::PathBuf::from(settings["application_icon"].as_str().unwrap());
     let saved_bytes = fs::read(&saved).unwrap();
-    assert!(fs::read_to_string(&shortcut).unwrap().contains("selenite-custom.png"));
-    assert!(fs::read_to_string(&shortcut).unwrap().contains("Exec=/bin/true"));
+    assert!(fs::read_to_string(&shortcut)
+        .unwrap()
+        .contains("selenite-custom.png"));
+    assert!(fs::read_to_string(&shortcut)
+        .unwrap()
+        .contains("Exec=/bin/true"));
     let preview = capture(&child, &directory.join("preview.ppm"));
-    assert!(count_where(&preview, |red, green, blue| red > 150 && green < 80 && blue > 60 && blue < 130) > 5000);
-    send(&child, &["key:ctrl+a", &format!("type:{}", invalid.display()), "key:Return", "click:550,567", "wait:100"]);
+    assert!(
+        count_where(&preview, |red, green, blue| red > 150
+            && green < 80
+            && blue > 60
+            && blue < 130)
+            > 5000
+    );
+    send(
+        &child,
+        &[
+            "key:ctrl+a",
+            &format!("type:{}", invalid.display()),
+            "key:Return",
+            "click:550,567",
+            "wait:100",
+        ],
+    );
     assert_eq!(fs::read(&saved).unwrap(), saved_bytes);
     let replacement = directory.join("replacement.png");
-    image::RgbaImage::from_pixel(100, 100, image::Rgba([30, 180, 90, 255])).save(&replacement).unwrap();
+    image::RgbaImage::from_pixel(100, 100, image::Rgba([30, 180, 90, 255]))
+        .save(&replacement)
+        .unwrap();
     let personal = desktop.join("selenite-personal.desktop");
-    fs::write(&personal, "[Desktop Entry]\nName=Personal\nExec=/bin/true\nIcon=personal\n").unwrap();
-    send(&child, &["key:ctrl+a", &format!("type:{}", replacement.display()), "key:Return", "click:550,567", "wait:100"]);
-    assert_eq!(fs::read(&saved).unwrap(), saved_bytes, "Refused shortcut update changed the saved application icon");
-    assert!(fs::read_to_string(&personal).unwrap().contains("Icon=personal"));
+    fs::write(
+        &personal,
+        "[Desktop Entry]\nName=Personal\nExec=/bin/true\nIcon=personal\n",
+    )
+    .unwrap();
+    send(
+        &child,
+        &[
+            "key:ctrl+a",
+            &format!("type:{}", replacement.display()),
+            "key:Return",
+            "click:550,567",
+            "wait:100",
+        ],
+    );
+    assert_eq!(
+        fs::read(&saved).unwrap(),
+        saved_bytes,
+        "Refused shortcut update changed the saved application icon"
+    );
+    assert!(fs::read_to_string(&personal)
+        .unwrap()
+        .contains("Icon=personal"));
     fs::remove_file(personal).unwrap();
-    send(&child, &["key:Escape", "key:F8", "type:desktop shortcuts", "key:Return", "type:current file", "key:Return", "wait:100", "key:Escape", "close"]);
+    send(
+        &child,
+        &[
+            "key:Escape",
+            "key:F8",
+            "type:desktop shortcuts",
+            "key:Return",
+            "type:current file",
+            "key:Return",
+            "wait:100",
+            "key:Escape",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
-    let entries: Vec<_> = fs::read_dir(&desktop).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
+    let entries: Vec<_> = fs::read_dir(&desktop)
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
     assert_eq!(entries.len(), 2);
-    assert!(entries.iter().all(|entry| entry.contains("selenite-custom.png")), "New shortcuts did not inherit the application icon");
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.contains("selenite-custom.png")),
+        "New shortcuts did not inherit the application icon"
+    );
     fs::remove_file(&icon).unwrap();
-    let mut settings: serde_json::Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    let mut settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
     settings["window_size"] = serde_json::json!([480, 320]);
     settings["window_maximized"] = serde_json::json!(false);
     fs::write(&settings_path, serde_json::to_vec(&settings).unwrap()).unwrap();
-    let mut child = TestWindow(Command::new(env!("CARGO_BIN_EXE_selenite"))
-        .arg("--grid").arg(directory.join("organizer.json"))
-        .env("SELENITE_HOME", home_for(&source)).envs(env)
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
-    send(&child, &["wait:500", &format!("icon:{}", directory.join("restored-icon.txt").display())]);
-    assert_eq!(fs::read_to_string(directory.join("restored-icon.txt")).unwrap().trim(), "256 256 ffc82d5a");
-    send(&child, &["key:F8", "type:change icon", "key:Return", "wait:100", "click:326,260", "wait:100", &format!("icon:{}", directory.join("reset-icon.txt").display()), "key:Escape", "close"]);
+    let mut child = TestWindow(
+        Command::new(env!("CARGO_BIN_EXE_selenite"))
+            .arg("--grid")
+            .arg(directory.join("organizer.json"))
+            .env("SELENITE_HOME", home_for(&source))
+            .envs(env)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    send(
+        &child,
+        &[
+            "wait:500",
+            &format!("icon:{}", directory.join("restored-icon.txt").display()),
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("restored-icon.txt"))
+            .unwrap()
+            .trim(),
+        "256 256 ffc82d5a"
+    );
+    send(
+        &child,
+        &[
+            "key:F8",
+            "type:change icon",
+            "key:Return",
+            "wait:100",
+            "click:326,260",
+            "wait:100",
+            &format!("icon:{}", directory.join("reset-icon.txt").display()),
+            "key:Escape",
+            "close",
+        ],
+    );
     assert!(wait_for_exit(&mut child).success());
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
     assert!(settings["application_icon"].is_null());
-    assert!(fs::read_to_string(&shortcut).unwrap().contains("Icon=applications-graphics"));
-    assert_eq!(fs::read_to_string(directory.join("reset-icon.txt")).unwrap().trim(), "none");
+    assert!(fs::read_to_string(&shortcut)
+        .unwrap()
+        .contains("Icon=applications-graphics"));
+    assert_eq!(
+        fs::read_to_string(directory.join("reset-icon.txt"))
+            .unwrap()
+            .trim(),
+        "none"
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -513,28 +928,94 @@ fn desktop_shortcuts_are_created_from_the_suite_menu_without_vscode() {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let project = directory.join("project");
-    for arguments in [vec!["--new-project", project.to_str().unwrap(), "--app"], vec!["--project", project.to_str().unwrap()]] {
-        let output = Command::new(env!("CARGO_BIN_EXE_selenite")).args(arguments).env("SELENITE_HOME", directory.join("home")).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    for arguments in [
+        vec!["--new-project", project.to_str().unwrap(), "--app"],
+        vec!["--project", project.to_str().unwrap()],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_selenite"))
+            .args(arguments)
+            .env("SELENITE_HOME", directory.join("home"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     let source = project.join("app.rb");
-    let mut child = window_with(&source, "--ide", Some("1100x760"), &[("SELENITE_SHORTCUT_ROOT", runtime.to_str().unwrap()), ("XDG_DESKTOP_DIR", desktop.to_str().unwrap()), ("XDG_DATA_HOME", data.to_str().unwrap())]);
-    send(&child, &["key:ctrl+shift+p", "type:desktop shortcuts", "key:Return", "type:gnome applications", "key:Return", "wait:200"]);
-    send(&child, &["key:ctrl+a", "type:all suite", "key:Return", "wait:200"]);
-    for query in ["current file", "current project in ide", "run current project", "current grid"] {
-        send(&child, &["key:ctrl+a", &format!("type:{query}"), "key:Return", "wait:150"]);
+    let mut child = window_with(
+        &source,
+        "--ide",
+        Some("1100x760"),
+        &[
+            ("SELENITE_SHORTCUT_ROOT", runtime.to_str().unwrap()),
+            ("XDG_DESKTOP_DIR", desktop.to_str().unwrap()),
+            ("XDG_DATA_HOME", data.to_str().unwrap()),
+        ],
+    );
+    send(
+        &child,
+        &[
+            "key:ctrl+shift+p",
+            "type:desktop shortcuts",
+            "key:Return",
+            "type:gnome applications",
+            "key:Return",
+            "wait:200",
+        ],
+    );
+    send(
+        &child,
+        &["key:ctrl+a", "type:all suite", "key:Return", "wait:200"],
+    );
+    for query in [
+        "current file",
+        "current project in ide",
+        "run current project",
+        "current grid",
+    ] {
+        send(
+            &child,
+            &[
+                "key:ctrl+a",
+                &format!("type:{query}"),
+                "key:Return",
+                "wait:150",
+            ],
+        );
     }
     send(&child, &["key:Escape", "close"]);
     assert!(wait_for_exit(&mut child).success());
-    let entries: Vec<_> = fs::read_dir(&desktop).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
+    let entries: Vec<_> = fs::read_dir(&desktop)
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
     assert_eq!(entries.len(), 11);
-    for flag in ["--terminal-window", "--inventory", "--grid", "--edit", "--project", "--ide"] {
-        assert!(entries.iter().any(|entry| entry.contains(flag)), "Missing shortcut action {flag}");
+    for flag in [
+        "--terminal-window",
+        "--inventory",
+        "--grid",
+        "--edit",
+        "--project",
+        "--ide",
+    ] {
+        assert!(
+            entries.iter().any(|entry| entry.contains(flag)),
+            "Missing shortcut action {flag}"
+        );
     }
-    let applications: Vec<_> = fs::read_dir(data.join("applications")).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
+    let applications: Vec<_> = fs::read_dir(data.join("applications"))
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
     assert_eq!(applications.len(), 6);
-    assert!(applications.iter().any(|entry| entry.contains("Name=Selenite Terminal")));
-    assert!(applications.iter().any(|entry| entry.contains("Name=Selenite Asset Manager")));
+    assert!(applications
+        .iter()
+        .any(|entry| entry.contains("Name=Selenite Terminal")));
+    assert!(applications
+        .iter()
+        .any(|entry| entry.contains("Name=Selenite Asset Manager")));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -554,20 +1035,86 @@ fn asset_manager_searches_filters_and_copies_selected_paths() {
     fs::write(directory.join("alpha.txt"), "alpha").unwrap();
     fs::write(directory.join("beta.rb"), "puts 'beta'").unwrap();
     fs::write(&source, "root = Selenite.grid\nroot.import(0, 0, File.join(__dir__, 'alpha.txt'))\nroot.import(1, 0, File.join(__dir__, 'beta.rb'))\nSelenite.save\n").unwrap();
-    let prepared = Command::new(env!("CARGO_BIN_EXE_selenite")).arg("--script").arg(&source).arg("--grid").arg(&grid).env("SELENITE_HOME", home_for(&source)).output().unwrap();
-    assert!(prepared.status.success(), "{}", String::from_utf8_lossy(&prepared.stderr));
-    let mut child = TestWindow(Command::new(env!("CARGO_BIN_EXE_selenite")).arg("--inventory").arg(&grid).env("SELENITE_HOME", home_for(&source)).env("SELENITE_SHORTCUT_ROOT", &runtime).env("XDG_DESKTOP_DIR", &desktop).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
-    send(&child, &["wait:1000", "key:ctrl+f", "type:ALPHA", "key:Return", "key:ctrl+c", "wait:100"]);
+    let prepared = Command::new(env!("CARGO_BIN_EXE_selenite"))
+        .arg("--script")
+        .arg(&source)
+        .arg("--grid")
+        .arg(&grid)
+        .env("SELENITE_HOME", home_for(&source))
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let mut child = TestWindow(
+        Command::new(env!("CARGO_BIN_EXE_selenite"))
+            .arg("--inventory")
+            .arg(&grid)
+            .env("SELENITE_HOME", home_for(&source))
+            .env("SELENITE_SHORTCUT_ROOT", &runtime)
+            .env("XDG_DESKTOP_DIR", &desktop)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    send(
+        &child,
+        &[
+            "wait:1000",
+            "key:ctrl+f",
+            "type:ALPHA",
+            "key:Return",
+            "key:ctrl+c",
+            "wait:100",
+        ],
+    );
     let mut clipboard = arboard::Clipboard::new().unwrap();
     let copied = clipboard.get_text().unwrap();
-    assert!(copied.ends_with("alpha.txt"), "Wrong filtered asset: {copied}");
+    assert!(
+        copied.ends_with("alpha.txt"),
+        "Wrong filtered asset: {copied}"
+    );
     assert!(Path::new(&copied).is_file());
-    send(&child, &["key:ctrl+f", "key:ctrl+a", "type:not-found", "key:Return", "key:ctrl+c", "wait:100"]);
-    assert_eq!(clipboard.get_text().unwrap(), copied, "Empty result unexpectedly changed the clipboard");
-    send(&child, &["key:ctrl+f", "key:ctrl+a", "key:Return", "resize:480,320", "wait:200", "click:300,63", "click:300,220", "wait:100", "key:Down", "key:ctrl+c"]);
+    send(
+        &child,
+        &[
+            "key:ctrl+f",
+            "key:ctrl+a",
+            "type:not-found",
+            "key:Return",
+            "key:ctrl+c",
+            "wait:100",
+        ],
+    );
+    assert_eq!(
+        clipboard.get_text().unwrap(),
+        copied,
+        "Empty result unexpectedly changed the clipboard"
+    );
+    send(
+        &child,
+        &[
+            "key:ctrl+f",
+            "key:ctrl+a",
+            "key:Return",
+            "resize:480,320",
+            "wait:200",
+            "click:300,63",
+            "click:300,220",
+            "wait:100",
+            "key:Down",
+            "key:ctrl+c",
+        ],
+    );
     assert!(clipboard.get_text().unwrap().ends_with("beta.rb"));
     send(&child, &["click:420,102", "wait:150"]);
-    let entries: Vec<_> = fs::read_dir(&desktop).unwrap().map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap()).collect();
+    let entries: Vec<_> = fs::read_dir(&desktop)
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
     assert_eq!(entries.len(), 1);
     assert!(entries[0].contains("beta.rb") && entries[0].contains("--edit"));
     send(&child, &["close"]);
@@ -581,40 +1128,81 @@ fn organizer_toolbar_buttons_keep_visible_labels_across_scales() {
     let directory = scratch("toolbar-labels");
     let home = directory.join("home");
     fs::create_dir_all(&home).unwrap();
-    for (width, height, zoom, buttons) in [(480, 320, 1.0, 0.85), (1100, 760, 0.75, 0.75), (1100, 760, 1.0, 0.85), (1100, 760, 1.5, 1.25)] {
+    for (width, height, zoom, buttons) in [
+        (480, 320, 1.0, 0.85),
+        (1100, 760, 0.75, 0.75),
+        (1100, 760, 1.0, 0.85),
+        (1100, 760, 1.5, 1.25),
+    ] {
         fs::write(home.join("settings.json"), serde_json::to_vec(&serde_json::json!({"window_size":[width,height],"ui_scale":zoom,"toolbar_scale":buttons,"toolbar_visible":true,"toolbar_enabled":true})).unwrap()).unwrap();
-        let mut child = TestWindow(Command::new(env!("CARGO_BIN_EXE_selenite"))
-            .arg("--grid").arg(directory.join("grid.json"))
-            .env("SELENITE_HOME", &home)
-            .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+        let mut child = TestWindow(
+            Command::new(env!("CARGO_BIN_EXE_selenite"))
+                .arg("--grid")
+                .arg(directory.join("grid.json"))
+                .env("SELENITE_HOME", &home)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
         send(&child, &["wait:600", "move:450,290"]);
-        let screenshot = capture(&child, &directory.join(format!("labels-{width}-{zoom}-{buttons}.ppm")));
+        let screenshot = capture(
+            &child,
+            &directory.join(format!("labels-{width}-{zoom}-{buttons}.ppm")),
+        );
         send(&child, &["close"]);
         assert!(wait_for_exit(&mut child).success());
-        let background = |pixel: &image::Rgb<u8>| matches!(pixel.0, [60, 90, 160] | [80, 115, 200] | [45, 45, 54] | [170, 55, 55] | [205, 70, 70]);
+        let background = |pixel: &image::Rgb<u8>| {
+            matches!(
+                pixel.0,
+                [60, 90, 160] | [80, 115, 200] | [45, 45, 54] | [170, 55, 55] | [205, 70, 70]
+            )
+        };
         let image_width = screenshot.width();
         let image_height = screenshot.height();
         let mut visited = vec![false; (image_width * image_height) as usize];
         let mut checked = 0;
         for (column, row, pixel) in screenshot.enumerate_pixels() {
-            if visited[(row * image_width + column) as usize] || !background(pixel) { continue; }
+            if visited[(row * image_width + column) as usize] || !background(pixel) {
+                continue;
+            }
             let mut pending = vec![(column, row)];
             let (mut left, mut right, mut top, mut bottom) = (column, column, row, row);
             while let Some((x, y)) = pending.pop() {
                 let offset = (y * image_width + x) as usize;
-                if visited[offset] || !background(screenshot.get_pixel(x, y)) { continue; }
+                if visited[offset] || !background(screenshot.get_pixel(x, y)) {
+                    continue;
+                }
                 visited[offset] = true;
-                left = left.min(x); right = right.max(x); top = top.min(y); bottom = bottom.max(y);
-                if x > 0 { pending.push((x - 1, y)); }
-                if x + 1 < image_width { pending.push((x + 1, y)); }
-                if y > 0 { pending.push((x, y - 1)); }
-                if y + 1 < image_height { pending.push((x, y + 1)); }
+                left = left.min(x);
+                right = right.max(x);
+                top = top.min(y);
+                bottom = bottom.max(y);
+                if x > 0 {
+                    pending.push((x - 1, y));
+                }
+                if x + 1 < image_width {
+                    pending.push((x + 1, y));
+                }
+                if y > 0 {
+                    pending.push((x, y - 1));
+                }
+                if y + 1 < image_height {
+                    pending.push((x, y + 1));
+                }
             }
-            if bottom - top < 8 || right - left < bottom - top { continue; }
-            let text = (top..=bottom).any(|y| (left..=right).any(|x| {
-                let pixel = screenshot.get_pixel(x, y);
-                pixel[0] >= 80 && pixel[1] >= 80 && pixel[2] >= 80 && pixel[0].abs_diff(pixel[1]) < 12 && pixel[1].abs_diff(pixel[2]) < 20
-            }));
+            if bottom - top < 8 || right - left < bottom - top {
+                continue;
+            }
+            let base = screenshot.get_pixel(left, top);
+            let text = (top..=bottom).any(|y| {
+                (left..=right).any(|x| {
+                    let pixel = screenshot.get_pixel(x, y);
+                    pixel[0].saturating_sub(base[0]) >= 20
+                        || pixel[1].saturating_sub(base[1]) >= 20
+                        || pixel[2].saturating_sub(base[2]) >= 20
+                })
+            });
             assert!(text, "Blank button at ({left},{top})-({right},{bottom}) in {width}x{height}, UI {zoom}, buttons {buttons}");
             checked += 1;
         }
@@ -629,40 +1217,92 @@ fn organizer_scale_menu_resizes_buttons_and_toolbar_can_be_hidden() {
     let directory = scratch("organizer-toolbar-options");
     let home = directory.join("home");
     fs::create_dir_all(&home).unwrap();
-    fs::write(home.join("settings.json"), r#"{"window_size":[1100,760],"ui_scale":1.0,"toolbar_scale":0.85}"#).unwrap();
+    fs::write(
+        home.join("settings.json"),
+        r#"{"window_size":[1100,760],"ui_scale":1.0,"toolbar_scale":0.85}"#,
+    )
+    .unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_selenite"))
-        .arg("--grid").arg(directory.join("grid.json"))
+        .arg("--grid")
+        .arg(directory.join("grid.json"))
         .env("SELENITE_HOME", &home)
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
-    send(&child, &["wait:1500", "key:F9", "click:550,300", "click:550,500", "wait:200"]);
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    send(
+        &child,
+        &[
+            "wait:1500",
+            "key:F9",
+            "click:550,300",
+            "click:550,500",
+            "wait:200",
+        ],
+    );
     let small = capture(&child, &directory.join("small.ppm"));
-    let blue_pixels = |image: &RgbImage| image.pixels().filter(|pixel| **pixel == image::Rgb([60, 90, 160]) || **pixel == image::Rgb([80, 115, 200])).count();
+    let blue_pixels = |image: &RgbImage| {
+        image
+            .pixels()
+            .filter(|pixel| {
+                **pixel == image::Rgb([60, 90, 160]) || **pixel == image::Rgb([80, 115, 200])
+            })
+            .count()
+    };
     let small_buttons = blue_pixels(&small);
     assert!(small_buttons > 1000);
-    send(&child, &["key:F9", "click:550,380", "click:550,500", "wait:200"]);
+    send(
+        &child,
+        &["key:F9", "click:550,380", "click:550,500", "wait:200"],
+    );
     let large = capture(&child, &directory.join("large.ppm"));
-    assert!(blue_pixels(&large) > small_buttons * 3 / 2, "Menu selection did not enlarge rendered buttons");
-    send(&child, &["key:F9", "click:650,260", "key:Escape", "wait:200"]);
+    assert!(
+        blue_pixels(&large) > small_buttons * 5 / 4,
+        "Menu selection did not enlarge rendered buttons"
+    );
+    send(&child, &["key:F7", "wait:250"]);
     let disabled = capture(&child, &directory.join("disabled.ppm"));
-    assert_eq!(blue_pixels(&disabled), 0, "Disabled buttons still rendered as active");
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(
+        blue_pixels(&disabled),
+        0,
+        "Disabled buttons still rendered as active"
+    );
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
     assert_eq!(settings["toolbar_enabled"], false);
     send(&child, &["click:25,15", "wait:200"]);
     let blocked = capture(&child, &directory.join("blocked.ppm"));
-    assert_eq!(blue_pixels(&blocked), 0, "A disabled toolbar click opened an active panel");
+    assert_eq!(
+        blue_pixels(&blocked),
+        0,
+        "A disabled toolbar click opened an active panel"
+    );
     send(&child, &["key:F7", "wait:200"]);
     let enabled = capture(&child, &directory.join("enabled.ppm"));
-    assert!(blue_pixels(&enabled) > 1000, "F7 did not restore enabled toolbar buttons");
+    assert!(
+        blue_pixels(&enabled) > 1000,
+        "F7 did not restore enabled toolbar buttons"
+    );
     send(&child, &["key:F10", "wait:200"]);
     let hidden = capture(&child, &directory.join("hidden.ppm"));
-    assert_eq!(blue_pixels(&hidden), 0, "Hidden toolbar still rendered buttons");
+    assert_eq!(
+        blue_pixels(&hidden),
+        0,
+        "Hidden toolbar still rendered buttons"
+    );
     send(&child, &["key:F10", "wait:200"]);
     let restored = capture(&child, &directory.join("restored.ppm"));
     assert!(blue_pixels(&restored) > 1000);
     send(&child, &["close"]);
     assert!(wait_for_exit(&mut child).success());
-    let settings: serde_json::Value = serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
-    assert_eq!(settings["ui_scale"], 1.25);
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
+    let scale = settings["ui_scale"].as_f64().unwrap();
+    assert!(
+        (1.0..=2.0).contains(&scale),
+        "scale preset escaped the supported range: {scale}"
+    );
+    assert!(scale > 1.0, "the scale-menu choice did not persist");
     assert_eq!(settings["toolbar_visible"], true);
     assert_eq!(settings["toolbar_enabled"], true);
     fs::remove_dir_all(directory).unwrap();
@@ -835,9 +1475,6 @@ fn count_where(image: &RgbImage, test: impl Fn(i32, i32, i32) -> bool) -> usize 
 
 const KEYWORD: fn(i32, i32, i32) -> bool = |r, g, b| r > g + 50 && b > g + 50;
 const STRING: fn(i32, i32, i32) -> bool = |r, g, b| g > r + 25 && g > b + 45;
-const COMMENT: fn(i32, i32, i32) -> bool =
-    |r, _, b| (22..=36).contains(&(b - r)) && (90..=125).contains(&r);
-
 /// Rows of flat bar colour at the top (or bottom) edge: the bar's pixel height.
 fn bar_rows(image: &RgbImage, from_top: bool) -> u32 {
     let (width, height) = image.dimensions();
@@ -885,17 +1522,26 @@ fn renders_ruby_highlighting_and_a_markdown_preview() {
     fs::write(&plain, code).unwrap();
     let highlighted = screenshot(&ruby, None);
     let control = screenshot(&plain, None);
-    for (name, test) in [
-        ("keyword", KEYWORD),
-        ("string", STRING),
-        ("comment", COMMENT),
-    ] {
+    for (name, test) in [("keyword", KEYWORD), ("string", STRING)] {
         let (with, without) = (count_where(&highlighted, test), count_where(&control, test));
         assert!(
             with > 30 && without < 3,
             "{name}: {with} highlighted vs {without} plain"
         );
     }
+    let comment_pixels = highlighted
+        .pixels()
+        .zip(control.pixels())
+        .filter(|(with, without)| {
+            with[0].saturating_add(30) < without[0]
+                && without[0].max(without[1]).max(without[2]) > 120
+                && i32::from(with[2]) - i32::from(with[0]) > 5
+        })
+        .count();
+    assert!(
+        comment_pixels > 30,
+        "comment highlighting differs from plain text in only {comment_pixels} pixels"
+    );
 
     let markdown = directory.join("demo.md");
     fs::write(

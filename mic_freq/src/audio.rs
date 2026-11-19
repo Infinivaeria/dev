@@ -5,6 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::collections::VecDeque;
 use std::error::Error;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -80,6 +81,7 @@ pub struct MicCapture {
     pub sample_rate: f32,
     pub device_name: String,
     failed: Arc<AtomicBool>,
+    sequence: Arc<AtomicU64>,
 }
 
 impl MicCapture {
@@ -120,25 +122,56 @@ impl MicCapture {
 
         let buffer = Arc::new(Mutex::new(VecDeque::with_capacity(capacity)));
         let failed = Arc::new(AtomicBool::new(false));
+        let sequence = Arc::new(AtomicU64::new(0));
         let stream = match format {
-            SampleFormat::F32 => {
-                build::<f32>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
-            SampleFormat::I16 => {
-                build::<i16>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
-            SampleFormat::U16 => {
-                build::<u16>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
-            SampleFormat::I32 => {
-                build::<i32>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
-            SampleFormat::U8 => {
-                build::<u8>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
-            SampleFormat::F64 => {
-                build::<f64>(&device, &config, buffer.clone(), capacity, failed.clone())?
-            }
+            SampleFormat::F32 => build::<f32>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
+            SampleFormat::I16 => build::<i16>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
+            SampleFormat::U16 => build::<u16>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
+            SampleFormat::I32 => build::<i32>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
+            SampleFormat::U8 => build::<u8>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
+            SampleFormat::F64 => build::<f64>(
+                &device,
+                &config,
+                buffer.clone(),
+                capacity,
+                failed.clone(),
+                sequence.clone(),
+            )?,
             other => return Err(format!("unsupported sample format {other:?}").into()),
         };
         stream.play()?;
@@ -150,6 +183,7 @@ impl MicCapture {
             sample_rate: config.sample_rate.0 as f32,
             device_name,
             failed,
+            sequence,
         })
     }
 
@@ -160,6 +194,17 @@ impl MicCapture {
         let n = n.min(buf.len()).min(self.capacity);
         out.extend(buf.range(buf.len() - n..));
     }
+
+    pub fn since(&self, sequence: &mut u64, out: &mut Vec<f32>) -> u64 {
+        out.clear();
+        let current = self.sequence.load(Ordering::Relaxed);
+        let skipped = current.saturating_sub(*sequence) as usize;
+        let buf = self.buffer.lock().unwrap();
+        let available = skipped.min(buf.len()).min(self.capacity);
+        out.extend(buf.range(buf.len() - available..));
+        *sequence = current;
+        current
+    }
 }
 
 fn build<T>(
@@ -168,6 +213,7 @@ fn build<T>(
     buffer: Arc<Mutex<VecDeque<f32>>>,
     capacity: usize,
     failed: Arc<AtomicBool>,
+    sequence: Arc<AtomicU64>,
 ) -> Result<Stream, cpal::BuildStreamError>
 where
     T: SizedSample,
@@ -185,6 +231,7 @@ where
                     buf.pop_front();
                 }
                 buf.push_back(mono);
+                sequence.fetch_add(1, Ordering::Relaxed);
             }
         },
         move |err| {

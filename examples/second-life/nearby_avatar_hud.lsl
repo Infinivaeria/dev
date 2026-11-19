@@ -1,17 +1,17 @@
-// Nearby avatar HUD for Second Life (LSL / Mono).
+// Region-wide avatar HUD for Second Life (LSL / Mono).
 // Put this script in a prim, then attach the prim to a HUD position.
 // Click the HUD to advance to the next page. Only the owner can operate it.
-// Sensors are limited to 96 meters and 16 results per scan, in this region.
+// llGetAgentList can return at most 100 agents from the current region.
 
-float SCAN_RANGE = 96.0;       // Meters; clamped to 0.1 .. 96.0.
-float SCAN_INTERVAL = 2.0;    // Seconds; clamped to at least 1.0.
+float SCAN_INTERVAL = 5.0;    // Seconds; clamped to at least 1.0.
 integer ROWS_PER_PAGE = 3;
 vector TEXT_COLOR = <0.3, 1.0, 0.5>;
 
-// Strided list: distance, name. Sensor results arrive nearest first.
+// Strided list: distance, name.
 list gAvatars;
 integer gPage;
-integer gAtSensorLimit;
+integer gAtAgentLimit;
+string gScanError;
 
 string shortName(string name)
 {
@@ -29,10 +29,17 @@ string shortName(string name)
 showPage()
 {
     integer count = llGetListLength(gAvatars) / 2;
+    if (gScanError != "")
+    {
+        llSetText("Avatar scan unavailable\n" + gScanError,
+            TEXT_COLOR, 1.0);
+        return;
+    }
+
     if (count == 0)
     {
-        llSetText("Nearby avatars\nNone detected within "
-            + (string)SCAN_RANGE + " m", TEXT_COLOR, 1.0);
+        llSetText("Nearby avatars\nNo other avatars in this region",
+            TEXT_COLOR, 1.0);
         return;
     }
 
@@ -53,17 +60,67 @@ showPage()
             + " - " + (string)meters + " m";
     }
 
-    if (gAtSensorLimit) text += "\n16-result limit; more may be nearby";
+    if (gAtAgentLimit) text += "\n100-agent limit reached";
     if (pages > 1) text += "\nClick for next page";
     llSetText(text, TEXT_COLOR, 1.0);
 }
 
+scanRegion()
+{
+    list agents = llGetAgentList(AGENT_LIST_REGION, []);
+    integer agentCount = llGetListLength(agents);
+    gAvatars = [];
+    gAtAgentLimit = (agentCount >= 100);
+    gScanError = "";
+
+    if (agentCount > 0
+        && llGetListEntryType(agents, 0) == TYPE_STRING)
+    {
+        gScanError = llList2String(agents, 0);
+        showPage();
+        return;
+    }
+
+    vector origin = llGetPos();
+    list ownerPosition = llGetObjectDetails(llGetOwner(), [OBJECT_POS]);
+    if (llGetListLength(ownerPosition) > 0)
+        origin = llList2Vector(ownerPosition, 0);
+
+    integer i;
+    for (i = 0; i < agentCount; ++i)
+    {
+        key avatar = llList2Key(agents, i);
+        if (avatar != NULL_KEY && avatar != llGetOwner())
+        {
+            // llGetAgentSize also filters stale presence records ("ghosts").
+            if (llGetAgentSize(avatar) != ZERO_VECTOR)
+            {
+                list details = llGetObjectDetails(avatar, [OBJECT_POS]);
+                if (llGetListLength(details) > 0)
+                {
+                    gAvatars += [
+                        llVecDist(origin, llList2Vector(details, 0)),
+                        shortName(llKey2Name(avatar))
+                    ];
+                }
+            }
+        }
+    }
+
+    gAvatars = llListSort(gAvatars, 2, TRUE);
+    if (gPage >= ((llGetListLength(gAvatars) / 2
+        + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE))
+        gPage = 0;
+    showPage();
+}
+
 startScanner()
 {
-    llSensorRemove();
+    llSetTimerEvent(0.0);
     gAvatars = [];
     gPage = 0;
-    gAtSensorLimit = FALSE;
+    gAtAgentLimit = FALSE;
+    gScanError = "";
 
     if (llGetAttached() == 0)
     {
@@ -72,15 +129,14 @@ startScanner()
         return;
     }
 
-    if (SCAN_RANGE < 0.1) SCAN_RANGE = 0.1;
-    if (SCAN_RANGE > 96.0) SCAN_RANGE = 96.0;
     if (SCAN_INTERVAL < 1.0) SCAN_INTERVAL = 1.0;
-    // Three rows leave room for multibyte names and the sensor-limit notice.
+    // Three rows leave room for multibyte names and the agent-limit notice.
     if (ROWS_PER_PAGE < 1) ROWS_PER_PAGE = 1;
     if (ROWS_PER_PAGE > 3) ROWS_PER_PAGE = 3;
 
     llSetText("Nearby avatars\nScanning...", TEXT_COLOR, 1.0);
-    llSensorRepeat("", NULL_KEY, AGENT, SCAN_RANGE, PI, SCAN_INTERVAL);
+    scanRegion();
+    llSetTimerEvent(SCAN_INTERVAL);
 }
 
 default
@@ -95,7 +151,7 @@ default
         if (avatar != NULL_KEY) startScanner();
         else
         {
-            llSensorRemove();
+            llSetTimerEvent(0.0);
             llSetText("", TEXT_COLOR, 0.0);
         }
     }
@@ -106,28 +162,9 @@ default
         if (change & (CHANGED_REGION | CHANGED_TELEPORT)) startScanner();
     }
 
-    sensor(integer detected)
+    timer()
     {
-        gAvatars = [];
-        gAtSensorLimit = (detected >= 16);
-        vector origin = llGetPos();
-        integer i;
-        for (i = 0; i < detected; ++i)
-        {
-            // Explicitly exclude the wearer even if the sensor returns them.
-            if (llDetectedKey(i) != llGetOwner())
-                gAvatars += [llVecDist(origin, llDetectedPos(i)),
-                    shortName(llDetectedName(i))];
-        }
-        showPage();
-    }
-
-    no_sensor()
-    {
-        gAvatars = [];
-        gPage = 0;
-        gAtSensorLimit = FALSE;
-        showPage();
+        scanRegion();
     }
 
     touch_start(integer touches)

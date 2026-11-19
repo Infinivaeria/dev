@@ -1,11 +1,18 @@
 # Selenite
 
-**Version 12.0.0-rc.1**. See [CHANGELOG.md](CHANGELOG.md).
+**Version 18.0.0-rc.1**. See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
 pannable, zoomable multimedia file grid with recursively nestable sub-grids,
 an integrated Ruby IDE, and a complete native raylib programming API in one suite.
+
+On Linux, Selenite also provides an optional appliance-style host layer backed by
+XDG, DBus, systemd, logind, `/proc`, and `/sys`. Open **Suite > Linux Host** or
+run `selenite --host`; a dedicated Wayland kiosk session can use
+`selenite --host-appliance`. The kernel, compositor, init system, devices, and
+user permissions remain owned by Linux. See
+[the Linux appliance guide](docs/linux-appliance.md).
 
 ## Instruction manual
 
@@ -58,6 +65,46 @@ Remaining requested usability work:
 - [x] In-app icon browsing, preview, Apply/Reset and saved window/shortcut icons.
 
 ## Features
+
+- **Direct executable suite:** all packaged runtimes initialize adjacent Ruby,
+  native libraries, FFmpeg tools, resources, executable search paths and suite
+  roots themselves. `selenite`, `selenite-game`, and `mic_freq/mic_freq` run
+  directly without `run*.sh`. Source-checkout control is also available through
+  `selenite --package-suite`, `--distribute-suite`, `--bootstrap-suite`,
+  `--bootstrap-game-suite`, and `--install-appliance`; shell files remain
+  compatibility entry points.
+
+- **Complete distributable documentation and Rustby SDK:** package and
+  distribution include every source Markdown file discovered outside generated
+  dependency/build trees, plus the Rustby source SDK, examples, tests, scripts
+  and licenses. `documentation-manifest.json` and `rustby-manifest.json` record
+  SHA-256 integrity for verified relocation.
+
+- **Selenite CAS Notebook:** a native scaled notebook for Symbolica exact
+  simplification, expansion/factorization, rational algebra, differentiation,
+  supported exact integration, Taylor series, solving and numeric substitution,
+  plus nalgebra determinant, inverse, Ax=b, rank and eigenvalues. It runs in
+  the GUI or directly through `--cas-run` and `--cas-notebook`.
+  See [the CAS guide](docs/cas.md) for syntax and Symbolica licensing scope.
+
+- **Selenite Graphics Studio:** scalable layered image editor, GIF frame
+  workflow, direct PNG/JPEG/WebP/BMP/TIFF/QOI/GIF processing, transforms,
+  filters, project JSON, PNG export, ffmpeg-assisted frame extraction and
+  transcoding, and PNGTuber idle/talking/loud/blink generation. Open directly
+  with `selenite --graphics-studio`; Audio Studio opens it with its Graphics
+  button and Selenite exposes it in both the toolbar and Suite menu.
+
+- **Direct suite executables:** `selenite --audio-studio`, `--graphics-studio`,
+  `--host`, `--terminal-window`, project and game modes launch without shell
+  wrappers. Compatibility `run*.sh` files remain available for existing users.
+
+- **Selenite Audio Studio 2.0:** PNGTuber controls plus a complete four-track
+  chiptune composer with piano-roll entry, five oscillator waveforms, envelopes,
+  track volume/pan/mute, scales, chords and inversions, progressions,
+  arpeggiation, key/chord analysis, MIDI import, WAV/OGG sample import, JSON
+  projects and 44.1 kHz stereo WAV export. Integrated tone/pitch, harmonic,
+  spectral, tonal/percussive and rhythmic BPM/onset analysis works on live
+  microphone input and the rendered Composer mix.
 
 - **Rust executable builds:** `--build-executable` generates a Rust/Magnus
   executable with verified embedded Ruby bytecode for apps or Selenite games.
@@ -860,11 +907,11 @@ This script:
 4. Generates a portable launcher script `dist/run.sh` that sets up `LD_LIBRARY_PATH` and `RUBYLIB`.
 5. Copies `docs/`, `examples/`, `README.md` and `CHANGELOG.md` into the bundle.
 6. Compresses the release bundle into `selenite-<version>-portable.tar.gz`
-  (for example `selenite-11.0.0-portable.tar.gz`).
+  (for example `selenite-18.0.0-rc.1-portable.tar.gz`).
 
 To test or run the standalone package on any Linux machine:
 ```sh
-mkdir selenite && tar -xzf selenite-11.0.0-portable.tar.gz -C selenite
+mkdir selenite && tar -xzf selenite-18.0.0-rc.1-portable.tar.gz -C selenite
 cd selenite
 ./run.sh [--profile NAME | --grid FILE.json | --script FILE.rb | --game GAME.rb ...]
 ./run.sh --game examples/games/pong.rb

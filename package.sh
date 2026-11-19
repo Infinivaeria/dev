@@ -36,15 +36,21 @@ fi
 
 echo "=== Building Selenite with embedded Ruby scripting ==="
 cd "${SCRIPT_DIR}"
-RUBY_LIBDIR="$(ruby -rrbconfig -e 'puts RbConfig::CONFIG["libdir"]')"
+RUBY="${SELENITE_RUBY:-$(command -v ruby)}"
+if [[ -z "${RUBY}" || ! -x "${RUBY}" ]]; then
+    printf 'Ruby is required. Set SELENITE_RUBY to a working executable.\n' >&2
+    exit 1
+fi
+RUBY_LIBDIR="${SELENITE_RUBY_LIBDIR:-$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["libdir"]')}"
 export LD_LIBRARY_PATH="${RUBY_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-RUBY="$(ruby -rrbconfig -e 'puts RbConfig.ruby')"
+export LIBRARY_PATH="${RUBY_LIBDIR}${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+RUBY="${SELENITE_RUBY:-$("${RUBY}" -rrbconfig -e 'puts RbConfig.ruby')}"
 export RUBY
 if [[ -n "${OUTPUT_DIR}" ]]; then
     DIST_DIR="$("${RUBY}" -e 'puts File.expand_path(ARGV.fetch(0))' "${OUTPUT_DIR}")"
 fi
 "${RUBY}" -rjson -e 'destination, source = ARGV.map { |path| File.expand_path(path) }; abort "Refusing an unsafe distribution path" if destination == "/" || destination == source || source.start_with?(destination + "/") || File.symlink?(destination); if File.exist?(destination); info = File.join(destination, "package-info.json"); abort "Refusing to replace a directory without Selenite package metadata" unless File.file?(info) && %w[selenite selenite-game].include?(JSON.parse(File.read(info))["name"]); end' "${DIST_DIR}" "${SCRIPT_DIR}"
-RUBY_INCLUDE_PATH="$("${RUBY}" -rrbconfig -rshellwords -e 'puts Shellwords.split(RbConfig::CONFIG["CPPFLAGS"]).grep(/\A-I./).map { |flag| flag.delete_prefix("-I") }.join(":")')"
+RUBY_INCLUDE_PATH="${SELENITE_RUBY_INCLUDE_PATH:-$("${RUBY}" -rrbconfig -rshellwords -e 'puts Shellwords.split(RbConfig::CONFIG["CPPFLAGS"]).grep(/\A-I./).map { |flag| flag.delete_prefix("-I") }.join(":")')}"
 if [[ -n "${RUBY_INCLUDE_PATH}" ]]; then
     export CPATH="${RUBY_INCLUDE_PATH}${CPATH:+:${CPATH}}"
     export CMAKE_INCLUDE_PATH="${RUBY_INCLUDE_PATH}${CMAKE_INCLUDE_PATH:+:${CMAKE_INCLUDE_PATH}}"
@@ -59,7 +65,68 @@ BUILD_PACKAGES=(-p selenite)
 if [[ "${APP_NAME}" == "selenite" ]]; then
     BUILD_PACKAGES+=(-p mic_freq)
 fi
-cargo build --locked --release "${BUILD_PACKAGES[@]}" --features selenite/scripting "${BUILD_TARGETS[@]}"
+CARGO_FEATURES=(selenite/scripting)
+if [[ "${SELENITE_NATIVE_VIDEO:-0}" == "1" ]]; then
+    CARGO_FEATURES+=(selenite/native-video)
+fi
+if [[ "${APP_NAME}" == "selenite" ]]; then
+    FFMPEG_BIN="${SELENITE_FFMPEG_BIN:-$(command -v ffmpeg || true)}"
+    FFPROBE_BIN="${SELENITE_FFPROBE_BIN:-$(command -v ffprobe || true)}"
+    FFPROBE_REUSE=""
+    if [[ -z "${FFMPEG_BIN}" || -z "${FFPROBE_BIN}" ]]; then
+        FFMPEG_STAGE="${TMPDIR:-/tmp}/selenite-package-ffmpeg-${UID:-$(id -u)}"
+        mkdir -p "${FFMPEG_STAGE}"
+        if [[ -x "${DIST_DIR}/ffmpeg/bin/ffmpeg" && -x "${DIST_DIR}/ffmpeg/bin/ffprobe" ]]; then
+            cp "${DIST_DIR}/ffmpeg/bin/ffmpeg" "${FFMPEG_STAGE}/ffmpeg"
+            cp "${DIST_DIR}/ffmpeg/bin/ffprobe" "${FFMPEG_STAGE}/ffprobe"
+            FFMPEG_BIN="${FFMPEG_BIN:-${FFMPEG_STAGE}/ffmpeg}"
+            FFPROBE_REUSE="${FFMPEG_STAGE}/ffprobe"
+        fi
+    fi
+    if [[ -z "${FFPROBE_BIN}" && -n "${FFPROBE_REUSE}" ]]; then
+        FFPROBE_BIN="${FFPROBE_REUSE}"
+    fi
+    if [[ -z "${FFMPEG_BIN}" || ! -x "${FFMPEG_BIN}" || -z "${FFPROBE_BIN}" || ! -x "${FFPROBE_BIN}" ]]; then
+        if command -v apt-get >/dev/null 2>&1 && command -v dpkg-deb >/dev/null 2>&1; then
+            FFMPEG_CACHE="${TMPDIR:-/tmp}/selenite-ffmpeg-${UID:-$(id -u)}"
+            mkdir -p "${FFMPEG_CACHE}"
+            CACHED_FFMPEG="$(find "${FFMPEG_CACHE}" -type f -path '*/usr/bin/ffmpeg' -perm -111 -print -quit)"
+            CACHED_FFPROBE="$(find "${FFMPEG_CACHE}" -type f -path '*/usr/bin/ffprobe' -perm -111 -print -quit)"
+            if [[ -n "${CACHED_FFMPEG}" && -n "${CACHED_FFPROBE}" ]]; then
+                FFMPEG_BIN="${CACHED_FFMPEG}"
+                FFPROBE_BIN="${CACHED_FFPROBE}"
+            fi
+            if [[ -z "${FFMPEG_BIN:-}" || -z "${FFPROBE_BIN:-}" || ! -x "${FFMPEG_BIN:-}" || ! -x "${FFPROBE_BIN:-}" ]]; then
+                echo "=== Acquiring portable ffmpeg/ffprobe ==="
+                FFMPEG_APT_LISTS="${FFMPEG_CACHE}/apt-lists"
+                mkdir -p "${FFMPEG_APT_LISTS}/partial" "${FFMPEG_CACHE}/apt-cache/archives/partial"
+                (
+                    cd "${FFMPEG_CACHE}"
+                    apt-get \
+                        -o Dir::State::lists="${FFMPEG_APT_LISTS}" \
+                        -o Dir::Cache="${FFMPEG_CACHE}/apt-cache" \
+                        -o Debug::NoLocking=1 \
+                        update
+                    apt-get \
+                        -o Dir::State::lists="${FFMPEG_APT_LISTS}" \
+                        -o Dir::Cache="${FFMPEG_CACHE}/apt-cache" \
+                        -o Debug::NoLocking=1 \
+                        download ffmpeg
+                    for package in ./ffmpeg_*.deb; do dpkg-deb -x "${package}" "${FFMPEG_CACHE}/root"; done
+                )
+                FFMPEG_BIN="${FFMPEG_CACHE}/root/usr/bin/ffmpeg"
+                FFPROBE_BIN="${FFMPEG_CACHE}/root/usr/bin/ffprobe"
+            fi
+        fi
+    fi
+    if [[ -z "${FFMPEG_BIN}" || ! -x "${FFMPEG_BIN}" || -z "${FFPROBE_BIN}" || ! -x "${FFPROBE_BIN}" ]]; then
+        printf 'Could not locate or acquire ffmpeg/ffprobe. Set SELENITE_FFMPEG_BIN and SELENITE_FFPROBE_BIN, or provide an apt-based Linux build host.\n' >&2
+        exit 1
+    fi
+    "${FFMPEG_BIN}" -version >/dev/null
+    "${FFPROBE_BIN}" -version >/dev/null
+fi
+cargo build --locked --release "${BUILD_PACKAGES[@]}" --features "$(IFS=,; echo "${CARGO_FEATURES[*]}")" "${BUILD_TARGETS[@]}"
 
 echo "=== Preparing distribution folder at ${DIST_DIR} ==="
 rm -rf "${DIST_DIR}"
@@ -72,9 +139,9 @@ if [[ "${APP_NAME}" == "selenite" ]]; then
 fi
 
 echo "=== Bootstrapping Ruby runtime libraries ==="
-RUBY_ARCHLIBDIR="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["archlibdir"]')"
-RUBY_STDLIB="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubylibdir"]')"
-RUBY_ARCHLIB="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubyarchdir"]')"
+RUBY_ARCHLIBDIR="${SELENITE_RUBY_ARCHLIBDIR:-$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["archlibdir"]')}"
+RUBY_STDLIB="${SELENITE_RUBY_STDLIB:-$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubylibdir"]')}"
+RUBY_ARCHLIB="${SELENITE_RUBY_ARCHLIB:-$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["rubyarchdir"]')}"
 RUBY_SHARED="$("${RUBY}" -rrbconfig -e 'puts RbConfig::CONFIG["LIBRUBY_SO"]')"
 
 if [[ ! -f "${RUBY_LIBDIR}/${RUBY_SHARED}" ]]; then
@@ -115,6 +182,23 @@ cp "${SCRIPT_DIR}/assets/fonts/LICENSE-DejaVu.txt" "${DIST_DIR}/licenses/"
 echo "=== Copying documentation and example plugins ==="
 cp -r "${SCRIPT_DIR}/docs" "${SCRIPT_DIR}/examples" "${DIST_DIR}/"
 cp "${SCRIPT_DIR}/LICENSE" "${DIST_DIR}/"
+if [[ "${APP_NAME}" == "selenite" ]]; then
+    mkdir -p "${DIST_DIR}/session" "${DIST_DIR}/systemd"
+    cp "${SCRIPT_DIR}/session/selenite-appliance.desktop" "${DIST_DIR}/session/"
+    cp "${SCRIPT_DIR}/systemd/selenite-appliance.service" "${DIST_DIR}/systemd/"
+    cp "${SCRIPT_DIR}/bin/selenite-appliance" "${DIST_DIR}/selenite-appliance"
+    cp "${SCRIPT_DIR}/tools/install-appliance.sh" "${DIST_DIR}/install-appliance.sh"
+    chmod +x "${DIST_DIR}/selenite-appliance" "${DIST_DIR}/install-appliance.sh"
+    mkdir -p "${DIST_DIR}/ffmpeg/bin"
+    cp "${FFMPEG_BIN}" "${FFPROBE_BIN}" "${DIST_DIR}/ffmpeg/bin/"
+    while IFS=' ' read -r library path; do
+        case "${library}" in
+            libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|libresolv.so.*) ;;
+            *) cp -L "${path}" "${DIST_DIR}/lib/${library}" ;;
+        esac
+    done < <(ldd "${FFMPEG_BIN}" "${FFPROBE_BIN}" | awk '$2 == "=>" && $3 ~ /^\// {print $1, $3}' | sort -u)
+    echo "Bundled portable ffmpeg/ffprobe with $(find "${DIST_DIR}/lib" -maxdepth 1 -type f | wc -l | tr -d ' ') shared objects"
+fi
 mkdir -p "${DIST_DIR}/mic_freq"
 if [[ "${APP_NAME}" == "selenite" ]]; then
     cp "${RELEASE_DIR}/mic_freq" "${DIST_DIR}/mic_freq/mic_freq"
@@ -130,6 +214,7 @@ fi
 if [[ "${APP_NAME}" == "selenite-game" ]]; then
     cp "${SCRIPT_DIR}/examples/games/starter.rb" "${DIST_DIR}/game.rb"
 fi
+"${RUBY}" "${SCRIPT_DIR}/tools/package_rustby.rb" "${SCRIPT_DIR}/rustby" "${DIST_DIR}/rustby"
 "${RUBY}" "${SCRIPT_DIR}/tools/package_documentation.rb" "${SCRIPT_DIR}" "${DIST_DIR}" "${PACKAGE_FIELDS[1]}"
 
 echo "=== Creating portable run launcher ==="
@@ -145,7 +230,7 @@ if [[ "${APP_NAME}" == "selenite" ]]; then
     "${DIST_DIR}/selenite" --new-project "${DIST_DIR}/examples/projects/starter"
 fi
 
-"${RUBY}" -rjson -e 'name, version, api_file, mic_version = ARGV; full = name == "selenite"; binaries = full ? ["selenite", "selenite-game", "mic_freq/mic_freq"] : ["selenite-game"]; api = JSON.parse(File.read(api_file)); components = full ? { mic_freq: { version: mic_version, binary: "mic_freq/mic_freq", launcher: "run-mic-freq.sh", assets: "mic_freq/assets" } } : {}; puts JSON.pretty_generate(schema: 1, name: name, version: version, binaries: binaries, scripting: true, ruby_version: RUBY_VERSION, ruby_platform: RUBY_PLATFORM, components: components, capabilities: { ide: full, projects: true, project_checks: true, suite_menu: full, scale_menu: full, quick_open: full, terminal_tabs: full, asset_diagnostics: full, audio_presets: full, embedded_terminal: full, mic_freq: full, native_raylib_functions: api.fetch("functions").size })' "${APP_NAME}" "${VERSION}" "${SCRIPT_DIR}/src/ruby/raylib_api.json" "${MIC_FREQ_VERSION}" > "${DIST_DIR}/package-info.json"
+"${RUBY}" -rjson -e 'name, version, api_file, mic_version = ARGV; full = name == "selenite"; binaries = full ? ["selenite", "selenite-game", "mic_freq/mic_freq"] : ["selenite-game"]; api = JSON.parse(File.read(api_file)); components = full ? { mic_freq: { version: mic_version, binary: "mic_freq/mic_freq", launcher: "run-mic-freq.sh", assets: "mic_freq/assets" } } : {}; channel = version.include?("-rc.") ? "release_candidate" : "stable"; native_video = full && ENV["SELENITE_NATIVE_VIDEO"] == "1"; puts JSON.pretty_generate(schema: 1, name: name, version: version, release_channel: channel, binaries: binaries, scripting: true, ruby_version: RUBY_VERSION, ruby_platform: RUBY_PLATFORM, components: components, capabilities: { ide: full, projects: true, project_checks: true, suite_menu: full, scale_menu: full, quick_open: full, terminal_tabs: full, asset_diagnostics: full, audio_presets: full, audio_composer: full, chiptunes: full, wav_audio_import_export: full, ogg_audio_import: full, midi_import: full, music_theory: full, pitch_analysis: full, harmonic_analysis: full, rhythm_analysis: full, live_audio_analysis: full, graphics_studio: full, image_layers: full, image_filters: full, animated_gif: full, video_tools: full, native_video: native_video, portable_ffmpeg: full, pngtuber_graphics: full, computer_algebra: full, symbolic_math: full, numerical_linear_algebra: full, cas_notebook: full, direct_suite_launch: full, embedded_terminal: full, mic_freq: full, linux_host: full, linux_appliance: full, native_raylib_functions: api.fetch("functions").size, direct_executables: full, shell_shims: full, rustby_sdk: true, complete_documentation: true })' "${APP_NAME}" "${VERSION}" "${SCRIPT_DIR}/src/ruby/raylib_api.json" "${MIC_FREQ_VERSION}" > "${DIST_DIR}/package-info.json"
 
 echo "=== Creating portable tarball ==="
 cd "${SCRIPT_DIR}"

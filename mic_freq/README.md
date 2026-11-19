@@ -13,9 +13,62 @@ mic_freq --preset "Quiet room"
 Save/list commands do not need a display or microphone. Presets live beside the
 studio settings in a `presets` directory.
 
-# mic_freq
+# Selenite Audio Studio
 
-mic_freq is a **Selenite product**: an offline PNGTuber studio built with **raylib** and **cpal**. Microphone volume selects idle, talking, or loud talking artwork. Each pose bounces smoothly: gentle idle breathing, talking hops, and stronger loud-talking hops. No speech recognition, recording, internet connection, or frequency matching is involved.
+mic_freq is **Selenite Audio Studio**: an offline PNGTuber and chiptune
+composition suite built with raylib and cpal. Microphone volume selects idle,
+talking, or loud talking artwork, the Composer button opens a separate
+multitrack music workspace, and Graphics opens Selenite Graphics Studio for
+creating pose artwork. It does not require an internet connection.
+
+## Chiptune Composer
+
+Click **Composer** in the Audio Studio sidebar, or launch:
+
+```sh
+mic_freq --composer
+mic_freq --composer song.json
+mic_freq --self-test
+```
+
+`--self-test` is a headless RC diagnostic. It checks JSON projects, theory,
+rendered pitch analysis, WAV round-trip and rhythm tracking without opening a
+display or an audio device.
+
+The Composer includes:
+
+- Four tracks, sixteen steps, and a C4-B4 piano roll.
+- Sine, square, triangle, saw and deterministic-noise oscillators.
+- Default, pluck and pad envelopes plus track volume, pan and mute.
+- Major, natural-minor and chromatic scale selection.
+- Major, minor, diminished, augmented and seventh chords with inversions.
+- I-IV-V-I progression generation, five arpeggiators, and key/chord analysis.
+- Explicit output-device selection and synchronized stereo playback.
+- JSON project save, WAV/OGG sound assignment, MIDI import and stereo WAV export.
+
+Drop one JSON project to load it, one `.mid`/`.midi` file to import note tracks,
+or a WAV/OGG file to assign it as the selected track's sampler source. Audio is
+resampled to 44.1 kHz and mixed to stereo. WAV export uses the same deterministic
+renderer used for playback.
+
+Projects are saved under `$XDG_CONFIG_HOME/mic_freq/projects` by default. Save
+places the WAV export beside the project. `Ctrl+S` saves, Space starts/stops
+playback, arrow keys select the track/step, and Escape closes the Composer.
+
+## Tone, harmonics and rhythm analysis
+
+Audio Studio's scaled **Analyzer** button shows live microphone measurements:
+
+- RMS level, detected fundamental in Hz, nearest note and cents.
+- Eight FFT harmonic amplitudes, harmonicity, confidence and brightness.
+- Tonal versus percussive balance.
+- Onset strength, estimated tempo/BPM and pulse regularity.
+
+The rhythm tracker consumes only newly arrived microphone samples, so normal
+display-window overlap does not inflate its tempo estimate. In Composer,
+**Analyze Mix** examines the exact deterministic render used by Play and WAV
+export. Polyphonic/noisy material can legitimately have no stable single pitch
+or tempo; Selenite reports that uncertainty instead of inventing a result.
 
 ## Run
 
@@ -49,7 +102,7 @@ PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transpare
 
 ## Studio controls
 
-- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, and loud threshold. The input meter shows microphone level in dBFS.
+- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, and loud threshold. The input meter shows microphone level in dBFS. **Composer** opens the music workspace without interrupting the PNGTuber process.
 - **Calibrate noise gate** measures three seconds of room noise. Stay quiet during calibration, then test normal speech and adjust as needed.
 - Checkboxes toggle microphone mute, horizontal mirroring, and automatic blinking.
 - **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.

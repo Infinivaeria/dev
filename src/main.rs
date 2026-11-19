@@ -1,4 +1,6 @@
 mod camera;
+mod cas;
+mod cas_ui;
 mod desktop;
 mod download;
 mod editor;
@@ -7,9 +9,13 @@ mod executable_builder;
 mod game;
 #[allow(dead_code)]
 mod game_cli;
+mod graphics;
+mod graphics_ui;
 mod grid_inventory;
 mod help;
 mod history;
+#[cfg(target_os = "linux")]
+mod host;
 mod icon;
 #[cfg(feature = "scripting")]
 mod ide;
@@ -24,9 +30,9 @@ mod plugins;
 mod portable;
 mod profiles;
 mod project;
-mod rendering;
 #[cfg(feature = "scripting")]
 mod raylib_api;
+mod rendering;
 #[cfg(feature = "scripting")]
 mod scripting;
 mod search;
@@ -151,6 +157,9 @@ enum ToolbarAction {
     ScaleOptions,
     Suite,
     ToggleToolbar,
+    GraphicsStudio,
+    CasNotebook,
+    AudioStudio,
 }
 
 impl ToolbarAction {
@@ -195,6 +204,9 @@ impl ToolbarAction {
             Self::ScaleOptions => "Choose interface and button scale for Selenite windows (F9).",
             Self::Suite => "Open suite tools, create projects and reopen recent projects (F8).",
             Self::ToggleToolbar => "Enable or disable toolbar clicks (F7). Visibility is controlled separately with F10.",
+            Self::GraphicsStudio => "Open Selenite Graphics Studio for layered image editing, animation, video frames and PNGTuber artwork.",
+            Self::CasNotebook => "Open the Selenite CAS Notebook for Symbolica algebra and nalgebra matrix computation.",
+            Self::AudioStudio => "Open Selenite Audio Studio and its PNGTuber, Composer, and Graphics workflows.",
         }
     }
 }
@@ -860,12 +872,19 @@ impl App {
 
     fn update(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) -> Result<(), String> {
         self.sync_selection();
-        let suite_source = self.selected.and_then(|(col, row)| lock(&self.grid).file_at(col, row).map(Path::to_owned));
-        if self.suite_menu.update(rl, thread, suite_source.as_deref(), Some(&self.json_path)) {
+        let suite_source = self
+            .selected
+            .and_then(|(col, row)| lock(&self.grid).file_at(col, row).map(Path::to_owned));
+        if self
+            .suite_menu
+            .update(rl, thread, suite_source.as_deref(), Some(&self.json_path))
+        {
             self.scale_menu.open = false;
             return Ok(());
         }
-        if self.scale_menu.update(rl) { return Ok(()); }
+        if self.scale_menu.update(rl) {
+            return Ok(());
+        }
         if rl.is_key_pressed(KeyboardKey::KEY_F7) {
             self.perform_toolbar_action(ToolbarAction::ToggleToolbar)?;
         }
@@ -3741,6 +3760,23 @@ impl App {
                 self.hover = None;
                 self.settings.save(&self.settings_path)
             }
+            ToolbarAction::GraphicsStudio => {
+                let program = env::current_exe().map_err(|error| error.to_string())?;
+                Command::new(program)
+                    .arg("--graphics-studio")
+                    .spawn()
+                    .map_err(|error| format!("could not open Graphics Studio: {error}"))?;
+                Ok(())
+            }
+            ToolbarAction::CasNotebook => {
+                let program = env::current_exe().map_err(|error| error.to_string())?;
+                Command::new(program)
+                    .arg("--cas")
+                    .spawn()
+                    .map_err(|error| format!("could not open CAS Notebook: {error}"))?;
+                Ok(())
+            }
+            ToolbarAction::AudioStudio => launch_audio_studio(&[]),
         }
     }
 
@@ -4968,10 +5004,15 @@ impl App {
     }
 
     fn ide_selection(&mut self) -> Result<(), String> {
-        let (col, row) = self.selected.ok_or("select a Ruby source file or an empty cell first")?;
+        let (col, row) = self
+            .selected
+            .ok_or("select a Ruby source file or an empty cell first")?;
         let (kind, path) = {
             let grid = lock(&self.grid);
-            (grid.kind_at(col, row), grid.file_at(col, row).map(Path::to_path_buf))
+            (
+                grid.kind_at(col, row),
+                grid.file_at(col, row).map(Path::to_path_buf),
+            )
         };
         let path = match (kind, path) {
             (Some(CellKind::RubyScript), Some(path)) => path,
@@ -4979,10 +5020,16 @@ impl App {
             (None, _) => {
                 use std::io::Write;
                 let path = editor::unique_ruby_path(&self.asset_directory()?);
-                let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|error| error.to_string())?;
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .map_err(|error| error.to_string())?;
                 file.write_all(b"Selenite::Game.run(title: \"Selenite project\", audio: false) do |game|\n  game.draw_ui do\n    game.text(\"Hello, Selenite!\", 24, 24)\n  end\nend\n").map_err(|error| error.to_string())?;
                 self.edit("New IDE project", |app| {
-                    lock(&app.grid).insert_file(col, row, path.clone()).map_err(|error| error.to_string())?;
+                    lock(&app.grid)
+                        .insert_file(col, row, path.clone())
+                        .map_err(|error| error.to_string())?;
                     app.save()
                 })?;
                 path
@@ -5072,7 +5119,17 @@ impl App {
     fn run_ide(&mut self, script: &Path) -> Result<(), String> {
         self.save()?;
         let child = spawn_ide(script, Some(&self.json_path))?;
-        self.games.push(GameRun { child, name: script.file_name().unwrap_or_default().to_string_lossy().into_owned(), json_path: self.json_path.clone(), modified: modified_time(&self.json_path), kind: "IDE" });
+        self.games.push(GameRun {
+            child,
+            name: script
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            json_path: self.json_path.clone(),
+            modified: modified_time(&self.json_path),
+            kind: "IDE",
+        });
         self.status = Some(format!("Opened Selenite IDE for {}", script.display()));
         Ok(())
     }
@@ -5131,7 +5188,10 @@ impl App {
             let mut message = if success {
                 format!("{kind} {name} finished")
             } else {
-                format!("{kind} {name} exited with an error (run it with {} in a terminal for details)", if kind == "IDE" { "--ide" } else { "--game" })
+                format!(
+                    "{kind} {name} exited with an error (run it with {} in a terminal for details)",
+                    if kind == "IDE" { "--ide" } else { "--game" }
+                )
             };
             if changed && json_path == self.json_path {
                 match load_or_new_root(&json_path) {
@@ -5979,7 +6039,11 @@ impl App {
                 BUTTON_DISABLED_TEXT
             };
             d.draw_rectangle_rec(button.rect, bg);
-            let label = ui::fit(&button.label, toolbar.font_size, (button.rect.width - toolbar.pad_x * 2.0).max(0.0));
+            let label = ui::fit(
+                &button.label,
+                toolbar.font_size,
+                (button.rect.width - toolbar.pad_x * 2.0).max(0.0),
+            );
             ui::draw_text_in(
                 &mut d,
                 &label,
@@ -6731,7 +6795,11 @@ impl App {
                         ToolbarAction::Editor,
                         self.selected.is_some(),
                     ),
-                    ("IDE".to_owned(), ToolbarAction::Ide, self.selected.is_some() && cfg!(feature = "scripting")),
+                    (
+                        "IDE".to_owned(),
+                        ToolbarAction::Ide,
+                        self.selected.is_some() && cfg!(feature = "scripting"),
+                    ),
                     ("Home".to_owned(), ToolbarAction::Home, true),
                     (
                         if self.view_3d { "2D View" } else { "3D View" }.to_owned(),
@@ -6815,8 +6883,15 @@ impl App {
 
         if !specs.is_empty() {
             specs.push(("Suite".to_owned(), ToolbarAction::Suite, true));
+            specs.push(("Graphics".to_owned(), ToolbarAction::GraphicsStudio, true));
+            specs.push(("CAS".to_owned(), ToolbarAction::CasNotebook, true));
+            specs.push(("Audio".to_owned(), ToolbarAction::AudioStudio, true));
             specs.push(("Scale".to_owned(), ToolbarAction::ScaleOptions, true));
-            specs.push((format!("Size: {:.0}%", self.settings.toolbar_scale * 100.0), ToolbarAction::ButtonSize, true));
+            specs.push((
+                format!("Size: {:.0}%", self.settings.toolbar_scale * 100.0),
+                ToolbarAction::ButtonSize,
+                true,
+            ));
             specs.push(("Hide".to_owned(), ToolbarAction::HideToolbar, true));
         }
         let screen_width = rl.get_screen_width();
@@ -6891,12 +6966,126 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<OsString> = env::args_os().collect();
-    if args.get(1).is_some_and(|arg| arg == "--build-executable") { return executable_builder::run(&args[2..]); }
+    if args.get(1).is_some_and(|arg| arg == "--package-suite") {
+        return run_source_script("package.sh", &args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--distribute-suite") {
+        return run_source_script("distribute.sh", &args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--bootstrap-suite") {
+        return run_source_script("bootstrap.sh", &args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--bootstrap-game-suite") {
+        return run_source_script("bootstrap-game.sh", &args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--install-appliance") {
+        return run_source_script("tools/install-appliance.sh", &args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--cas-run") {
+        if args.len() < 3 {
+            return Err("--cas-run needs a command".into());
+        }
+        let command = args[2..]
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let result = cas::execute_command(&command);
+        if let Some(error) = result.error {
+            return Err(error);
+        }
+        println!("{}", result.output);
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--cas-notebook") {
+        let path = args
+            .get(2)
+            .ok_or("--cas-notebook expects NOTEBOOK.json")?;
+        if args.len() != 3 {
+            return Err("--cas-notebook expects exactly one notebook path".into());
+        }
+        let mut notebook = cas::Notebook::load(Path::new(path))?;
+        for cell in &mut notebook.cells {
+            cell.result = cas::execute_command(&cell.input);
+        }
+        notebook.save(Path::new(path))?;
+        println!("Evaluated {} CAS cells", notebook.cells.len());
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--audio-studio") {
+        return launch_audio_studio(&args[2..]);
+    }
+    if args.get(1).is_some_and(|arg| arg == "--graphics-export") {
+        let [project, output] = &args[2..] else {
+            return Err("--graphics-export expects PROJECT.json OUTPUT.png".into());
+        };
+        let project =
+            graphics::load_project(Path::new(project)).map_err(|error| error.to_string())?;
+        return graphics::export_flattened_png(&project, Path::new(output))
+            .map_err(|error| error.to_string());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--graphics-pngtuber") {
+        let [source, output] = &args[2..] else {
+            return Err("--graphics-pngtuber expects IMAGE OUTPUT_DIR".into());
+        };
+        let image = graphics::read_image(Path::new(source)).map_err(|error| error.to_string())?;
+        let eye_width = (image.width() as f32 * 0.2).max(1.0) as u32;
+        let eye_height = (image.height() as f32 * 0.1).max(1.0) as u32;
+        let boxes = [35, 55].map(|percent| graphics::EyeBox {
+            x: image.width().saturating_mul(percent) / 100,
+            y: image.height().saturating_mul(45) / 100,
+            width: eye_width,
+            height: eye_height,
+        });
+        return graphics::write_pngtuber_poses(
+            Path::new(source),
+            Path::new(output),
+            &graphics::PngTuberTransforms::default(),
+            &boxes,
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--graphics-extract") {
+        if !(3..=4).contains(&args.len().saturating_sub(1)) {
+            return Err("--graphics-extract expects VIDEO OUTPUT_DIR [COUNT]".into());
+        }
+        let count = args
+            .get(4)
+            .map(|value| value.to_string_lossy().parse::<u32>())
+            .transpose()
+            .map_err(|_| "--graphics-extract COUNT must be an integer")?
+            .unwrap_or(12);
+        graphics::extract_representative_frames(Path::new(&args[2]), Path::new(&args[3]), count)
+            .map(|paths| println!("Extracted {} frames", paths.len()))
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--graphics-transcode") {
+        if args.len() < 4 {
+            return Err("--graphics-transcode expects INPUT OUTPUT [FFMPEG OPTIONS]".into());
+        }
+        let options = args[4..]
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        return graphics::transcode_video(Path::new(&args[2]), Path::new(&args[3]), &options)
+            .map_err(|error| error.to_string());
+    }
+    if args.get(1).is_some_and(|arg| arg == "--build-executable") {
+        return executable_builder::run(&args[2..]);
+    }
     if args.get(1).is_some_and(|arg| arg == "--check-project") {
-        if args.len() != 3 { return Err("--check-project expects one project folder".into()); }
+        if args.len() != 3 {
+            return Err("--check-project expects one project folder".into());
+        }
         #[cfg(feature = "scripting")]
         {
-            println!("{}", serde_json::to_string_pretty(&project::check_project(Path::new(&args[2]))?).map_err(|error| error.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&project::check_project(Path::new(&args[2]))?)
+                    .map_err(|error| error.to_string())?
+            );
             return Ok(());
         }
         #[cfg(not(feature = "scripting"))]
@@ -6917,8 +7106,43 @@ fn run() -> Result<(), String> {
     if args.get(1).is_some_and(|arg| arg == "--set-gnome-terminal") {
         return desktop::use_as_gnome_terminal();
     }
-    if args.get(1).is_some_and(|arg| arg == "--restore-gnome-terminal") {
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--restore-gnome-terminal")
+    {
         return desktop::restore_gnome_terminal();
+    }
+    #[cfg(target_os = "linux")]
+    if args.get(1).is_some_and(|arg| arg == "--host-status") {
+        if args.len() != 2 {
+            return Err("--host-status does not accept arguments".into());
+        }
+        return host::print_snapshot();
+    }
+    #[cfg(target_os = "linux")]
+    if args.get(1).is_some_and(|arg| arg == "--host-open") {
+        let target = args
+            .get(2)
+            .ok_or("--host-open needs a file, folder or URL")?;
+        if args.len() != 3 {
+            return Err("--host-open expects exactly one target".into());
+        }
+        return host::open_target(Path::new(target));
+    }
+    #[cfg(target_os = "linux")]
+    if args.get(1).is_some_and(|arg| arg == "--host-notify") {
+        if args.len() < 3 {
+            return Err("--host-notify needs message text".into());
+        }
+        host::notify(
+            "Selenite",
+            &args[2..]
+                .iter()
+                .map(|arg| arg.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        return Ok(());
     }
     let mut args = args;
     let with_terminal = take_with_terminal(&mut args);
@@ -6955,30 +7179,50 @@ fn run() -> Result<(), String> {
             }
             Ok(())
         }
+        #[cfg(target_os = "linux")]
+        StartupMode::Host => host::run_window(false),
+        #[cfg(target_os = "linux")]
+        StartupMode::HostAppliance => host::run_window(true),
+        StartupMode::GraphicsStudio(path) => {
+            graphics_ui::run(path).map_err(|error| error.to_string())
+        }
+        StartupMode::CasNotebook(path) => {
+            cas_ui::run(path).map_err(|error| error.to_string())
+        }
         StartupMode::Image(path) => run_image_viewer(&path),
         StartupMode::Edit(path) => editor::run(&path),
         StartupMode::Ide(path, grid) => {
-            let source = if project::is_project_path(&path) { project::Project::load(&path)?.entry() } else { path };
+            let source = if project::is_project_path(&path) {
+                project::Project::load(&path)?.entry()
+            } else {
+                path
+            };
             editor::run_ide(&source, grid.as_deref())
         }
         StartupMode::NewProject(path, kind) => {
             let project = project::Project::create(&path, kind)?;
-            println!("Created Selenite project: {}\nEntry: {}", project.root.display(), project.entry().display());
+            println!(
+                "Created Selenite project: {}\nEntry: {}",
+                project.root.display(),
+                project.entry().display()
+            );
             Ok(())
         }
         StartupMode::Project(path) => {
             let project = project::Project::load(&path)?;
             env::set_current_dir(&project.root).map_err(|error| error.to_string())?;
             match project.manifest.kind {
-                project::Kind::Game => run_game_file(&project.entry(), Target::Grid(project.grid())),
-                project::Kind::App => run_script_file(&project.entry(), Target::Grid(project.grid())),
+                project::Kind::Game => {
+                    run_game_file(&project.entry(), Target::Grid(project.grid()))
+                }
+                project::Kind::App => {
+                    run_script_file(&project.entry(), Target::Grid(project.grid()))
+                }
             }
         }
         StartupMode::Inventory(json_path) => {
-            let json_path = json_path.map_or_else(
-                || profile_inventory_path(&ProfileStore::open_default()),
-                Ok,
-            )?;
+            let json_path = json_path
+                .map_or_else(|| profile_inventory_path(&ProfileStore::open_default()), Ok)?;
             inventory::InventoryApp::new(json_path)?.run()
         }
         StartupMode::Script(script_path, target) => run_script_file(&script_path, target),
@@ -7005,7 +7249,26 @@ fn take_with_terminal(args: &mut Vec<OsString>) -> bool {
     if present {
         args.remove(1);
     }
+
     present
+}
+
+fn launch_audio_studio(arguments: &[OsString]) -> Result<(), String> {
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let parent = executable
+        .parent()
+        .ok_or("Selenite executable has no parent directory")?;
+    let audio = [parent.join("mic_freq/mic_freq"), parent.join("mic_freq")]
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or(
+            "Audio Studio is not installed beside Selenite. Build the full suite package first.",
+        )?;
+    Command::new(audio)
+        .args(arguments)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("could not open Audio Studio: {error}"))
 }
 
 fn validate_terminal_file(path: &Path) -> Result<PathBuf, String> {
@@ -7093,6 +7356,37 @@ fn export_terminal_environment() {
         if let Ok(joined) = env::join_paths(paths) {
             env::set_var("PATH", joined);
         }
+
+    }
+}
+
+fn run_source_script(script: &str, arguments: &[OsString]) -> Result<(), String> {
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    let root = portable::source_root(&executable)
+        .ok_or("This command requires a Selenite source checkout with Cargo.toml and package.sh")?;
+    let script = root.join(script);
+    if !script.is_file() {
+        return Err(format!("Source command is unavailable: {}", script.display()));
+    }
+    let mut command = if script.extension().and_then(|value| value.to_str()) == Some("sh") {
+        let mut command = Command::new("bash");
+        command.arg(&script);
+        command
+    } else {
+        Command::new(&script)
+    };
+    command.current_dir(root).args(arguments);
+    let status = command
+        .status()
+        .map_err(|error| format!("could not run {}: {error}", script.display()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} exited with {}",
+            script.display(),
+            status.code().map_or_else(|| status.to_string(), |code| code.to_string())
+        ))
     }
 }
 
@@ -7171,6 +7465,12 @@ enum StartupMode {
     Profile(Option<String>),
     Grid(PathBuf),
     Inventory(Option<PathBuf>),
+    #[cfg(target_os = "linux")]
+    Host,
+    #[cfg(target_os = "linux")]
+    HostAppliance,
+    GraphicsStudio(Option<PathBuf>),
+    CasNotebook(Option<PathBuf>),
     Image(PathBuf),
     Edit(PathBuf),
     Ide(PathBuf, Option<PathBuf>),
@@ -7215,6 +7515,25 @@ fn usage() -> String {
         "  selenite --build-executable SCRIPT.rb|SCRIPT.rbc|PROJECT --output DIR [--game|--app] [--name NAME]",
         "                                   build a Rust/Magnus executable with embedded Ruby bytecode",
         "  selenite --inventory [FILE.json] open the inventory window (defaults to the last-used profile)",
+        "  selenite --graphics-studio [FILE|PROJECT.json] open Selenite Graphics Studio",
+        "  selenite --cas [NOTEBOOK.json]   open the Selenite CAS Notebook",
+        "  selenite --cas-run COMMAND      print a CAS command result",
+        "  selenite --cas-notebook FILE    evaluate and save every CAS notebook cell",
+        "  selenite --package-suite [ARGS] run package.sh directly from a source checkout",
+        "  selenite --distribute-suite [ARGS] run distribute.sh directly from a source checkout",
+        "  selenite --bootstrap-suite [ARGS] run bootstrap.sh directly from a source checkout",
+        "  selenite --bootstrap-game-suite [ARGS] run bootstrap-game.sh directly",
+        "  selenite --install-appliance [ARGS] run tools/install-appliance.sh directly",
+        "  selenite --audio-studio [ARGS...] open mic_freq Audio Studio directly",
+        "  selenite --graphics-export PROJECT.json OUTPUT.png flatten a graphics project",
+        "  selenite --graphics-pngtuber IMAGE OUTPUT_DIR create mic_freq pose artwork",
+        "  selenite --graphics-extract VIDEO OUTPUT_DIR [COUNT] extract representative PNG frames",
+        "  selenite --graphics-transcode INPUT OUTPUT [FFMPEG OPTIONS] transcode video safely",
+        "  selenite --host                  open the Linux host integration window",
+        "  selenite --host-appliance        open Host maximized for a dedicated Linux session",
+        "  selenite --host-status           print host, process, app, device and service status",
+        "  selenite --host-open TARGET      open a file, folder or URL with the Linux XDG handler",
+        "  selenite --host-notify TEXT      send a desktop notification",
     ];
     format!(
         "Selenite {} — infinite nested grids for any file\n\n{}\n\nProfiles live in {} (override with SELENITE_HOME).",
@@ -7250,9 +7569,29 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
         None => StartupMode::Profile(None),
         Some("-h" | "--help") => StartupMode::Usage,
         Some("-V" | "--version") => StartupMode::Version,
+        #[cfg(target_os = "linux")]
+        Some("--host") => match rest.as_slice() {
+            ["--host"] => StartupMode::Host,
+            _ => return Err("--host does not accept arguments".into()),
+        },
+        #[cfg(target_os = "linux")]
+        Some("--host-appliance") => match rest.as_slice() {
+            ["--host-appliance"] => StartupMode::HostAppliance,
+            _ => return Err("--host-appliance does not accept arguments".into()),
+        },
         Some("--list-profiles") => StartupMode::ListProfiles,
         Some("--profile") => StartupMode::Profile(Some(value(1, "--profile")?)),
         Some("--grid") => StartupMode::Grid(PathBuf::from(value(1, "--grid")?)),
+        Some("--graphics-studio") => match rest.as_slice() {
+            ["--graphics-studio"] => StartupMode::GraphicsStudio(None),
+            ["--graphics-studio", path] => StartupMode::GraphicsStudio(Some(PathBuf::from(path))),
+            _ => return Err("--graphics-studio accepts at most one file or project".into()),
+        },
+        Some("--cas") => match rest.as_slice() {
+            ["--cas"] => StartupMode::CasNotebook(None),
+            ["--cas", path] => StartupMode::CasNotebook(Some(PathBuf::from(path))),
+            _ => return Err("--cas accepts at most one notebook path".into()),
+        },
         Some("--image") => StartupMode::Image(PathBuf::from(value(1, "--image")?)),
         Some("--edit") => StartupMode::Edit(PathBuf::from(value(1, "--edit")?)),
         Some("--ide") => {
@@ -7261,23 +7600,36 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
                 return Ok(StartupMode::Ide(path, None));
             }
             let path = PathBuf::from(value(1, "--ide")?);
-            if path.extension().and_then(|value| value.to_str()) != Some("rb") && !project::is_project_path(&path) {
+            if path.extension().and_then(|value| value.to_str()) != Some("rb")
+                && !project::is_project_path(&path)
+            {
                 return Err("--ide expects Ruby .rb source or a Selenite project folder".to_owned());
             }
             let grid = match rest.as_slice() {
                 ["--ide", _] => None,
-                ["--ide", _, "--grid", grid] if Path::new(grid).extension().and_then(|value| value.to_str()) == Some("json") => Some(PathBuf::from(grid)),
+                ["--ide", _, "--grid", grid]
+                    if Path::new(grid).extension().and_then(|value| value.to_str())
+                        == Some("json") =>
+                {
+                    Some(PathBuf::from(grid))
+                }
                 _ => return Err("--ide expects FILE.rb|PROJECT [--grid FILE.json]".to_owned()),
             };
             StartupMode::Ide(path, grid)
         }
         Some("--new-project") => match rest.as_slice() {
-            ["--new-project", directory] if !directory.starts_with('-') => StartupMode::NewProject(directory.into(), project::Kind::Game),
-            ["--new-project", directory, "--app"] if !directory.starts_with('-') => StartupMode::NewProject(directory.into(), project::Kind::App),
+            ["--new-project", directory] if !directory.starts_with('-') => {
+                StartupMode::NewProject(directory.into(), project::Kind::Game)
+            }
+            ["--new-project", directory, "--app"] if !directory.starts_with('-') => {
+                StartupMode::NewProject(directory.into(), project::Kind::App)
+            }
             _ => return Err("--new-project expects DIR [--app]".to_owned()),
         },
         Some("--project") => match rest.as_slice() {
-            ["--project", directory] if !directory.starts_with('-') => StartupMode::Project(directory.into()),
+            ["--project", directory] if !directory.starts_with('-') => {
+                StartupMode::Project(directory.into())
+            }
             _ => return Err("--project expects one project folder".to_owned()),
         },
         Some("--inventory") => StartupMode::Inventory(rest.get(1).map(PathBuf::from)),
@@ -7291,7 +7643,13 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
             } => StartupMode::Compile(source, output, force),
             _ => unreachable!(),
         },
-        Some(other) if Path::new(other).file_name().is_some_and(|name| name == project::MANIFEST) => StartupMode::Ide(other.into(), None),
+        Some(other)
+            if Path::new(other)
+                .file_name()
+                .is_some_and(|name| name == project::MANIFEST) =>
+        {
+            StartupMode::Ide(other.into(), None)
+        }
         Some(other) if other.ends_with(".json") => StartupMode::Grid(PathBuf::from(other)),
         Some(other) => return Err(format!("unknown argument: {other}\n\n{}", usage())),
     })
@@ -7381,7 +7739,9 @@ fn run_script_file(script_path: &Path, target: Target) -> Result<(), String> {
             scripting::AppRequest::Status(text) => println!("{text}"),
             scripting::AppRequest::Edit(path) => spawn_editor(Path::new(&path))?,
             scripting::AppRequest::Ide(path) => {
-                lock(&root).save(&json_path).map_err(|error| error.to_string())?;
+                lock(&root)
+                    .save(&json_path)
+                    .map_err(|error| error.to_string())?;
                 spawn_ide(Path::new(&path), Some(&json_path))?;
             }
             scripting::AppRequest::Terminal {
@@ -7698,9 +8058,9 @@ fn spawn_editor(path: &Path) -> Result<(), String> {
 }
 
 fn spawn_ide(path: &Path, grid: Option<&Path>) -> Result<std::process::Child, String> {
-        if !cfg!(feature = "scripting") {
-            return Err("The IDE requires a build with --features scripting".to_owned());
-        }
+    if !cfg!(feature = "scripting") {
+        return Err("The IDE requires a build with --features scripting".to_owned());
+    }
     if project::is_project_path(path) {
         project::Project::load(path)?;
     } else if path.extension().and_then(|value| value.to_str()) != Some("rb") {
@@ -7709,8 +8069,12 @@ fn spawn_ide(path: &Path, grid: Option<&Path>) -> Result<std::process::Child, St
     let exe = env::current_exe().map_err(|error| error.to_string())?;
     let mut command = Command::new(exe);
     command.arg("--ide").arg(path);
-    if let Some(grid) = grid { command.arg("--grid").arg(grid); }
-    command.spawn().map_err(|error| format!("could not start the IDE: {error}"))
+    if let Some(grid) = grid {
+        command.arg("--grid").arg(grid);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("could not start the IDE: {error}"))
 }
 
 fn spawn_mode(mode: Mode, json_path: Option<PathBuf>) -> Result<(), String> {
@@ -8474,7 +8838,8 @@ mod tests {
 
     #[test]
     fn asset_manager_shortcut_uses_last_profile_and_creates_its_grid() {
-        let directory = env::temp_dir().join(format!("selenite-assets-profile-{}", std::process::id()));
+        let directory =
+            env::temp_dir().join(format!("selenite-assets-profile-{}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
         let store = ProfileStore::at(&directory);
         let profile = store.startup_profile(Some("Work")).unwrap();
@@ -8488,35 +8853,55 @@ mod tests {
 
     #[test]
     fn toolbar_controls_cycle_sizes_and_restore_hidden_buttons() {
-        let directory = env::temp_dir().join(format!("selenite-toolbar-settings-{}", std::process::id()));
+        let directory =
+            env::temp_dir().join(format!("selenite-toolbar-settings-{}", std::process::id()));
         let mut app = App::new(Mode::Main, directory.join("grid.json")).unwrap();
         app.settings_path = settings::Settings::path_in(&directory);
         app.settings.toolbar_scale = 0.85;
         app.settings.toolbar_visible = true;
         app.settings.toolbar_enabled = true;
         for expected in [1.0, 1.25, 0.75, 0.85] {
-            app.perform_toolbar_action(ToolbarAction::ButtonSize).unwrap();
+            app.perform_toolbar_action(ToolbarAction::ButtonSize)
+                .unwrap();
             assert_eq!(app.settings.toolbar_scale, expected);
-            assert_eq!(settings::Settings::load(&app.settings_path).toolbar_scale, expected);
+            assert_eq!(
+                settings::Settings::load(&app.settings_path).toolbar_scale,
+                expected
+            );
         }
-        app.perform_toolbar_action(ToolbarAction::HideToolbar).unwrap();
+        app.perform_toolbar_action(ToolbarAction::HideToolbar)
+            .unwrap();
         assert!(!app.settings.toolbar_visible);
         assert!(!settings::Settings::load(&app.settings_path).toolbar_visible);
-        app.perform_toolbar_action(ToolbarAction::HideToolbar).unwrap();
+        app.perform_toolbar_action(ToolbarAction::HideToolbar)
+            .unwrap();
         assert!(app.settings.toolbar_visible);
-        app.perform_toolbar_action(ToolbarAction::ToggleToolbar).unwrap();
+        app.perform_toolbar_action(ToolbarAction::ToggleToolbar)
+            .unwrap();
         assert!(!app.settings.toolbar_enabled);
         assert!(!settings::Settings::load(&app.settings_path).toolbar_enabled);
         assert!(app.settings.toolbar_visible);
-        app.perform_toolbar_action(ToolbarAction::ToggleToolbar).unwrap();
+        app.perform_toolbar_action(ToolbarAction::ToggleToolbar)
+            .unwrap();
         assert!(app.settings.toolbar_enabled);
         for width in [320.0, 420.0, 1100.0, 3840.0] {
             for scale in [0.5, 0.75, 0.85, 1.0, 1.25, 1.5, 6.0] {
-                let (buttons, _) = wrap_toolbar_items(&[120.0 * scale, 600.0 * scale, 90.0 * scale], width, 24.0 * scale, 5.0 * scale, 4.0 * scale);
+                let (buttons, _) = wrap_toolbar_items(
+                    &[120.0 * scale, 600.0 * scale, 90.0 * scale],
+                    width,
+                    24.0 * scale,
+                    5.0 * scale,
+                    4.0 * scale,
+                );
                 for (index, button) in buttons.iter().enumerate() {
                     assert!(button.x >= 0.0 && button.x + button.width <= width);
-                    assert!(button.check_collision_point_rec(Vector2::new(button.x + button.width / 2.0, button.y + button.height / 2.0)));
-                    for other in &buttons[index + 1..] { assert!(!button.check_collision_recs(*other)); }
+                    assert!(button.check_collision_point_rec(Vector2::new(
+                        button.x + button.width / 2.0,
+                        button.y + button.height / 2.0
+                    )));
+                    for other in &buttons[index + 1..] {
+                        assert!(!button.check_collision_recs(*other));
+                    }
                 }
             }
         }
@@ -9165,6 +9550,30 @@ mod tests {
             parse(&["--list-profiles"]).unwrap(),
             StartupMode::ListProfiles
         );
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(parse(&["--host"]).unwrap(), StartupMode::Host);
+            assert_eq!(
+                parse(&["--host-appliance"]).unwrap(),
+                StartupMode::HostAppliance
+            );
+            assert!(parse(&["--host", "extra"]).is_err());
+        }
+        assert_eq!(
+            parse(&["--graphics-studio"]).unwrap(),
+            StartupMode::GraphicsStudio(None)
+        );
+        assert_eq!(
+            parse(&["--graphics-studio", "art.png"]).unwrap(),
+            StartupMode::GraphicsStudio(Some("art.png".into()))
+        );
+        assert!(parse(&["--graphics-studio", "one", "two"]).is_err());
+        assert_eq!(parse(&["--cas"]).unwrap(), StartupMode::CasNotebook(None));
+        assert_eq!(
+            parse(&["--cas", "notebook.json"]).unwrap(),
+            StartupMode::CasNotebook(Some("notebook.json".into()))
+        );
+        assert!(parse(&["--cas", "one", "two"]).is_err());
         assert!(parse(&["--profile"]).is_err());
         assert!(parse(&["--bogus"]).is_err());
     }

@@ -54,6 +54,8 @@ dist/
   lib/                      Ruby shared library, stdlib, native extensions
   partitioned_array/lib/
   partitioned_array/*.md, *.txt bundled library documentation
+  rustby/                  source SDK, scripts, examples, tests, licenses
+  rustby/rustby-manifest.json checked source-file SHA-256 manifest
   mic_freq/
     mic_freq               compiled PNGTuber Studio companion
     assets/                copied artwork; built-in demo if no pose images exist
@@ -61,10 +63,17 @@ dist/
   docs/
   examples/
   licenses/
-selenite-11.0.0-portable.tar.gz
+selenite-18.0.0-rc.1-portable.tar.gz
 ```
 
 `./package.sh` builds Selenite with embedded Ruby support (`scripting`) and the
+portable Audio/Graphics suites. Installed FFmpeg tools are bundled automatically. If they are not on PATH,
+`package.sh` first reuses a previous `dist/ffmpeg/bin` or its local cache, then
+downloads/extracts the distro `ffmpeg` package without root privileges on an
+apt-based Linux host. `SELENITE_FFMPEG_BIN` and `SELENITE_FFPROBE_BIN` remain
+supported for explicit tool paths or non-apt build hosts.
+Set `SELENITE_NATIVE_VIDEO=1` when the matching FFmpeg development libraries
+are available to compile the in-process `video-rs` backend.
 `mic_freq` workspace package, so the extraction bundle includes the organizer,
 IDE, game runtime and voice-avatar studio together.
 
@@ -82,7 +91,7 @@ there is no Cargo build step or source checkout required after extraction:
 
 ```sh
 mkdir selenite-suite
-tar -xzf selenite-11.0.0-portable.tar.gz -C selenite-suite
+tar -xzf selenite-18.0.0-rc.1-portable.tar.gz -C selenite-suite
 ./selenite-suite/run.sh
 ./selenite-suite/run-ide.sh
 ./selenite-suite/run-mic-freq.sh --capture
@@ -92,7 +101,7 @@ tar -xzf selenite-11.0.0-portable.tar.gz -C selenite-suite
 
 `distribute.sh` copies the full archive into `$HOME` and extracts it into
 `$HOME/selenite-VERSION` by default, such as
-`/home/aylon-ayrlon/selenite-11.0.0`. It requires Python 3.11 with safe tar
+`/home/aylon-ayrlon/selenite-18.0.0-rc.1`. It requires Python 3.11 with safe tar
 extraction support (Python 3.12+ recommended), but not Cargo to use an existing
 archive. Build first as your normal user:
 
@@ -106,7 +115,7 @@ The default destination uses your writable home directory and normally does not
 require elevated permissions. You can choose another installation directory:
 
 ```sh
-./distribute.sh --destination "$HOME/selenite-11.0.0"
+./distribute.sh --destination "$HOME/selenite-18.0.0-rc.1"
 ```
 
 **Updates replace package files in place.** Existing files at package paths are
@@ -157,7 +166,7 @@ dist-game/
   docs/
   examples/games/
   licenses/
-selenite-game-11.0.0-portable.tar.gz
+selenite-game-18.0.0-rc.1-portable.tar.gz
 ```
 
 The game-only bundle intentionally does **not** include the organizer, IDE or
@@ -191,6 +200,8 @@ The portable bundles include everything Selenite ships itself:
   `mic_freq/mic_freq` and avatar assets in the full suite.
 - Embedded Ruby support (`lib/` Ruby stdlib + native extensions).
 - The PartitionedArray Ruby library (`partitioned_array/lib`).
+- The complete Rustby source SDK (`rustby/`), excluding generated `target/` and
+  `out/` trees, with its own `rustby-manifest.json`.
 - Documentation, examples, and licenses.
 
 Both packages include the Selenite manuals under `docs/`, the top-level README
@@ -203,6 +214,8 @@ copies, temporary/test artifacts, dependency caches and Git internals are exclud
 so the archive does not recursively include generated copies. Each bundle has
 `documentation-manifest.json` listing all included source documents and SHA-256
 hashes; `--verify` checks that list against the source files and extracted contents.
+Rustby source is likewise covered by `rustby/rustby-manifest.json`, allowing
+distribution to verify every bundled Rustby file without trusting the archive.
 Only the full suite contains the `mic_freq` executable and assets. Neither
 package needs the Rust build sources after extraction. Adjacent companion assets
 take precedence over a remembered folder from another installation; an empty
@@ -283,8 +296,8 @@ working OpenGL, Pillow, and, for native organizer tests, `cc` and X11 developmen
 headers. They open temporary windows and close them automatically:
 
 ```sh
-python3 tests/game_runtime_smoke.py --archive selenite-11.0.0-portable.tar.gz \
-  --graphics --artifacts test-artifacts/integration-11.0.0
+python3 tests/game_runtime_smoke.py --archive selenite-18.0.0-rc.1-portable.tar.gz \
+  --graphics --artifacts test-artifacts/integration-18.0.0-rc.1
 python3 tests/game_runtime_smoke.py --graphics
 python3 tests/network_runtime_smoke.py --graphics
 ```

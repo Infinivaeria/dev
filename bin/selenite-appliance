@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELENITE="${HERE}/selenite"
+if [[ ! -x "${SELENITE}" ]]; then
+    SELENITE="${HERE}/../selenite"
+fi
+if [[ ! -x "${SELENITE}" ]]; then
+    SELENITE="$(command -v selenite || true)"
+fi
+if [[ -z "${SELENITE}" || ! -x "${SELENITE}" ]]; then
+    printf 'Selenite executable not found. Build or install the full package first.\n' >&2
+    exit 1
+fi
+
+export XDG_CURRENT_DESKTOP="Selenite"
+export XDG_SESSION_TYPE="wayland"
+export MOZ_ENABLE_WAYLAND=1
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
+export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+
+if [[ -n "${WAYLAND_DISPLAY:-}" || -n "${DISPLAY:-}" ]]; then
+    exec "${SELENITE}" --host-appliance
+fi
+
+if ! command -v cage >/dev/null 2>&1; then
+    printf 'Selenite appliance needs cage to create a Wayland session.\n' >&2
+    printf 'Install the cage package, or start Selenite inside an existing Wayland session.\n' >&2
+    exit 1
+fi
+
+exec cage -s -- "${SELENITE}" --host-appliance

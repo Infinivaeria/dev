@@ -1,3 +1,4 @@
+use mic_freq::analysis::{self, Analysis, RhythmAnalysis, RhythmTracker};
 use mic_freq::audio::MicCapture;
 #[path = "../../src/portable.rs"]
 #[allow(dead_code)]
@@ -197,6 +198,9 @@ struct Options {
     preset: Option<String>,
     save_preset: Option<String>,
     list_presets: bool,
+    self_test: bool,
+    graphics: bool,
+    composer: bool,
 }
 
 fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options, Box<dyn Error>> {
@@ -208,9 +212,20 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
             Some("--capture") => options.capture = true,
             Some("--list-devices") => options.list_devices = true,
             Some("--list-presets") => options.list_presets = true,
+            Some("--self-test") => options.self_test = true,
+            Some("--composer") => options.composer = true,
+            Some("--graphics-studio") => options.graphics = true,
             Some("--preset" | "--save-preset") => {
-                let name = args.next().ok_or("preset option requires a name")?.into_string().map_err(|_| "preset name must be UTF-8")?;
-                if arg == "--preset" { options.preset = Some(name); } else { options.save_preset = Some(name); }
+                let name = args
+                    .next()
+                    .ok_or("preset option requires a name")?
+                    .into_string()
+                    .map_err(|_| "preset name must be UTF-8")?;
+                if arg == "--preset" {
+                    options.preset = Some(name);
+                } else {
+                    options.save_preset = Some(name);
+                }
             }
             Some("--device") => {
                 options.device = Some(
@@ -248,27 +263,63 @@ impl PresetMenu {
         Rectangle::new((width - 620.0) / 2.0, (height - 420.0) / 2.0, 620.0, 420.0)
     }
 
-    fn update(&mut self, rl: &mut RaylibHandle, mouse: Vector2, bounds: Rectangle, config: &Path, settings: &mut Settings) -> bool {
-        if rl.is_key_pressed(KeyboardKey::KEY_F2) { self.open = !self.open; }
-        if !self.open { return false; }
-        self.names = Settings::presets(config).unwrap_or_default();
-        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.open = false; return false; }
-        let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL) || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
-        if ctrl && rl.is_key_pressed(KeyboardKey::KEY_A) { self.name.clear(); }
-        while let Some(character) = rl.get_char_pressed() {
-            if !ctrl && !character.is_control() && self.name.chars().count() < 64 { self.name.push(character); }
+    fn update(
+        &mut self,
+        rl: &mut RaylibHandle,
+        mouse: Vector2,
+        bounds: Rectangle,
+        config: &Path,
+        settings: &mut Settings,
+    ) -> bool {
+        if rl.is_key_pressed(KeyboardKey::KEY_F2) {
+            self.open = !self.open;
         }
-        if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE) { self.name.pop(); }
-        self.offset = (self.offset as isize - rl.get_mouse_wheel_move() as isize).clamp(0, self.names.len().saturating_sub(6) as isize) as usize;
+        if !self.open {
+            return false;
+        }
+        self.names = Settings::presets(config).unwrap_or_default();
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            self.open = false;
+            return false;
+        }
+        let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
+            || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+        if ctrl && rl.is_key_pressed(KeyboardKey::KEY_A) {
+            self.name.clear();
+        }
+        while let Some(character) = rl.get_char_pressed() {
+            if !ctrl && !character.is_control() && self.name.chars().count() < 64 {
+                self.name.push(character);
+            }
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_BACKSPACE) {
+            self.name.pop();
+        }
+        self.offset = (self.offset as isize - rl.get_mouse_wheel_move() as isize)
+            .clamp(0, self.names.len().saturating_sub(6) as isize) as usize;
         let mut action = rl.is_key_pressed(KeyboardKey::KEY_ENTER).then_some(1);
         if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
             for index in 0..3 {
-                let rect = Rectangle::new(bounds.x + 16.0 + index as f32 * 196.0, bounds.y + 88.0, 188.0, 34.0);
-                if rect.check_collision_point_rec(mouse) { action = Some(index); }
+                let rect = Rectangle::new(
+                    bounds.x + 16.0 + index as f32 * 196.0,
+                    bounds.y + 88.0,
+                    188.0,
+                    34.0,
+                );
+                if rect.check_collision_point_rec(mouse) {
+                    action = Some(index);
+                }
             }
             for (slot, name) in self.names.iter().skip(self.offset).take(6).enumerate() {
-                let rect = Rectangle::new(bounds.x + 16.0, bounds.y + 136.0 + slot as f32 * 36.0, bounds.width - 32.0, 34.0);
-                if rect.check_collision_point_rec(mouse) { self.name = name.clone(); }
+                let rect = Rectangle::new(
+                    bounds.x + 16.0,
+                    bounds.y + 136.0 + slot as f32 * 36.0,
+                    bounds.width - 32.0,
+                    34.0,
+                );
+                if rect.check_collision_point_rec(mouse) {
+                    self.name = name.clone();
+                }
             }
         }
         match action {
@@ -277,33 +328,89 @@ impl PresetMenu {
                 Err(error) => self.message = error.to_string(),
             },
             Some(1) => match settings.load_preset(config, &self.name) {
-                Ok(()) => { self.message = format!("Loaded {}", self.name); return true; }
+                Ok(()) => {
+                    self.message = format!("Loaded {}", self.name);
+                    return true;
+                }
                 Err(error) => self.message = error.to_string(),
             },
             Some(2) => self.open = false,
-            _ => {},
+            _ => {}
         }
         false
     }
 
-    fn draw(&self, d: &mut impl RaylibDraw, bounds: Rectangle, width: f32, height: f32, mouse: Vector2) {
-        if !self.open { return; }
+    fn draw(
+        &self,
+        d: &mut impl RaylibDraw,
+        bounds: Rectangle,
+        width: f32,
+        height: f32,
+        mouse: Vector2,
+    ) {
+        if !self.open {
+            return;
+        }
         d.draw_rectangle(0, 0, width as i32, height as i32, Color::new(0, 0, 0, 170));
         d.draw_rectangle_rec(bounds, Color::new(28, 29, 35, 255));
-        d.draw_text("Voice Presets", bounds.x as i32 + 16, bounds.y as i32 + 12, 22, Color::RAYWHITE);
+        d.draw_text(
+            "Voice Presets",
+            bounds.x as i32 + 16,
+            bounds.y as i32 + 12,
+            22,
+            Color::RAYWHITE,
+        );
         let field = Rectangle::new(bounds.x + 16.0, bounds.y + 44.0, bounds.width - 32.0, 32.0);
         d.draw_rectangle_rec(field, Color::new(40, 42, 48, 255));
-        let name: String = self.name.chars().skip(self.name.chars().count().saturating_sub(48)).collect();
-        d.draw_text(&name, field.x as i32 + 8, field.y as i32 + 6, 18, Color::RAYWHITE);
+        let name: String = self
+            .name
+            .chars()
+            .skip(self.name.chars().count().saturating_sub(48))
+            .collect();
+        d.draw_text(
+            &name,
+            field.x as i32 + 8,
+            field.y as i32 + 6,
+            18,
+            Color::RAYWHITE,
+        );
         for (index, label) in ["Save", "Load", "Close"].into_iter().enumerate() {
-            button(d, Rectangle::new(bounds.x + 16.0 + index as f32 * 196.0, bounds.y + 88.0, 188.0, 34.0), label, false, mouse);
+            button(
+                d,
+                Rectangle::new(
+                    bounds.x + 16.0 + index as f32 * 196.0,
+                    bounds.y + 88.0,
+                    188.0,
+                    34.0,
+                ),
+                label,
+                false,
+                mouse,
+            );
         }
         for (slot, name) in self.names.iter().skip(self.offset).take(6).enumerate() {
             let label: String = name.chars().take(48).collect();
-            button(d, Rectangle::new(bounds.x + 16.0, bounds.y + 136.0 + slot as f32 * 36.0, bounds.width - 32.0, 34.0), &label, *name == self.name, mouse);
+            button(
+                d,
+                Rectangle::new(
+                    bounds.x + 16.0,
+                    bounds.y + 136.0 + slot as f32 * 36.0,
+                    bounds.width - 32.0,
+                    34.0,
+                ),
+                &label,
+                *name == self.name,
+                mouse,
+            );
         }
         let message: String = self.message.chars().take(64).collect();
-        d.draw_text(&message, bounds.x as i32 + 16, (bounds.y + bounds.height - 32.0) as i32, 16, Color::GOLD);
+        d.draw_text(
+            &message,
+            bounds.x as i32 + 16,
+            (bounds.y + bounds.height - 32.0) as i32,
+            16,
+            Color::GOLD,
+        );
     }
 }
 
@@ -381,6 +488,133 @@ fn framed_avatar(width: f32, height: f32, tw: f32, th: f32, scale: f32, bounce: 
     rect
 }
 
+fn draw_live_analysis(
+    d: &mut impl RaylibDraw,
+    x: f32,
+    y: f32,
+    width: f32,
+    analysis: &Analysis,
+    rhythm: &RhythmAnalysis,
+) {
+    d.draw_rectangle(
+        x as i32,
+        y as i32,
+        width as i32,
+        104,
+        Color::new(18, 22, 28, 220),
+    );
+    let pitch = analysis
+        .midi_note
+        .map(mic_freq::composer::note_name)
+        .map_or_else(
+            || "—".into(),
+            |name| {
+                format!(
+                    "{name}  {:.1} Hz  {:+.0} cents",
+                    analysis.fundamental_hz.unwrap_or(0.0),
+                    analysis.cents
+                )
+            },
+        );
+    d.draw_text(
+        "SIGNAL ANALYSIS",
+        x as i32 + 10,
+        y as i32 + 8,
+        16,
+        Color::RAYWHITE,
+    );
+    d.draw_text(
+        &pitch,
+        x as i32 + 10,
+        y as i32 + 28,
+        15,
+        Color::new(100, 220, 160, 255),
+    );
+    d.draw_text(
+        &format!(
+            "Level {:.0} dB  Harmonic {:.0}%  Tonal {:.0}%  BPM {}",
+            analysis.rms_db,
+            analysis.harmonicity * 100.0,
+            analysis.tonal_ratio * 100.0,
+            rhythm
+                .bpm
+                .map_or_else(|| "—".into(), |bpm| format!("{bpm:.0}"))
+        ),
+        x as i32 + 10,
+        y as i32 + 48,
+        13,
+        Color::LIGHTGRAY,
+    );
+    let bar_width = ((width - 20.0) / 8.0 - 3.0).max(2.0);
+    for (index, amplitude) in analysis.harmonic_amplitudes.iter().enumerate() {
+        let height = (*amplitude * 24.0).clamp(1.0, 24.0);
+        d.draw_rectangle(
+            (x + 10.0 + index as f32 * (bar_width + 3.0)) as i32,
+            (y + 94.0 - height) as i32,
+            bar_width as i32,
+            height as i32,
+            Color::new(73, 202, 178, 255),
+        );
+    }
+}
+
+fn audio_studio_self_test() -> Result<(), Box<dyn Error>> {
+    use mic_freq::composer::{self, Note, Project, Scale, Step, Waveform};
+    let mut project = Project::default();
+    project.tracks[0].instrument.waveform = Waveform::Square;
+    project.tracks[0].patterns[0].steps[0] = Step::Notes {
+        notes: vec![Note {
+            midi: 69,
+            velocity: 1.0,
+            duration_steps: 1,
+        }],
+    };
+    project.validate()?;
+    if Project::from_json(&project.to_json()?)? != project {
+        return Err("project JSON self-test changed data".into());
+    }
+    if composer::scale_notes(60, Scale::Major, 1) != [60, 62, 64, 65, 67, 69, 71] {
+        return Err("music-theory self-test failed".into());
+    }
+    let audio = composer::render(&project)?;
+    let mono = analysis::downmix(&audio)?;
+    let signal =
+        analysis::try_analyze_samples(&mono[..mono.len().min(8_192)], audio.sample_rate as f32)?;
+    if signal.midi_note != Some(69) {
+        return Err(format!("pitch self-test expected A4, got {:?}", signal.midi_note).into());
+    }
+    let directory = std::env::temp_dir().join(format!("mic-freq-self-test-{}", std::process::id()));
+    std::fs::create_dir_all(&directory)?;
+    let wav = directory.join("self-test.wav");
+    composer::export_wav(&audio, &wav)?;
+    let imported = composer::import_wav(&wav)?;
+    std::fs::remove_dir_all(&directory)?;
+    if imported.sample_rate != audio.sample_rate
+        || imported.channels != audio.channels
+        || imported.samples.len() != audio.samples.len()
+    {
+        return Err("WAV round-trip self-test changed the audio shape".into());
+    }
+    let mut rhythm = analysis::RhythmTracker::try_new(composer::SAMPLE_RATE as f32)?;
+    let click = (0..composer::SAMPLE_RATE as usize / 2)
+        .map(|index| {
+            if index < 32 {
+                1.0 - index as f32 / 32.0
+            } else {
+                0.0
+            }
+        })
+        .collect::<Vec<_>>();
+    for _ in 0..8 {
+        rhythm.update(&click);
+    }
+    println!(
+        "Selenite Audio Studio self-test: OK (A4 {:.2} Hz, WAV, theory, render, analysis)",
+        signal.fundamental_hz.unwrap_or(0.0)
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     portable::initialize().map_err(std::io::Error::other)?;
     let options = options(std::env::args_os().skip(1))?;
@@ -389,10 +623,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             "mic_freq [avatar-folder] [--device NAME] [--capture] [--list-devices]\n\
             C: clean capture  M: mute  0/1/2/3: auto/idle/talking/loud\n\
             Up/Down: gate  B: bounce  X: mirror  R: reload  F2: presets  Esc: quit\n\
+            --composer [PROJECT.json] opens the multitrack chiptune composer\n\
+            --graphics-studio opens the adjacent Selenite Graphics Studio\n\
+            --self-test validates synthesis, media, theory and analysis offline\n\
             --preset NAME  --save-preset NAME  --list-presets\n\
             Drop an avatar folder or pose image to switch sets. Settings save automatically."
         );
         return Ok(());
+    }
+    if options.composer {
+        return mic_freq::composer_ui::run(options.assets);
+    }
+    if options.graphics {
+        let root = portable::package_root(&std::env::current_exe()?);
+        let executable = root.join("selenite");
+        if !executable.is_file() {
+            return Err("Graphics Studio is not installed beside Audio Studio".into());
+        }
+        std::process::Command::new(executable)
+            .arg("--graphics-studio")
+            .spawn()
+            .map_err(|error| format!("Could not open Graphics Studio: {error}"))?;
+        return Ok(());
+    }
+    if options.self_test {
+        return audio_studio_self_test();
     }
     if options.list_devices {
         for device in MicCapture::devices()? {
@@ -407,10 +662,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         Settings::default()
     });
     if options.list_presets {
-        for name in Settings::presets(&config_path)? { println!("{name}"); }
+        for name in Settings::presets(&config_path)? {
+            println!("{name}");
+        }
         return Ok(());
     }
-    if let Some(name) = options.preset { settings.load_preset(&config_path, &name)?; }
+    if let Some(name) = options.preset {
+        settings.load_preset(&config_path, &name)?;
+    }
     if let Some(name) = options.save_preset {
         settings.save_preset(&config_path, &name)?;
         println!("Saved preset: {name}");
@@ -435,7 +694,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (mut rl, thread) = raylib::init()
         .size(900, 900)
-        .title("mic_freq - PNGTuber Studio")
+        .title("mic_freq - Selenite Audio Studio")
         .resizable()
         .build();
     rl.set_target_fps(60);
@@ -457,6 +716,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut save_delay: Option<f32> = None;
     let mut active_slider = None;
     let mut samples = Vec::with_capacity(WINDOW_SAMPLES);
+    let mut rhythm_samples = Vec::with_capacity(WINDOW_SAMPLES);
+    let mut live_analysis = Analysis::default();
+    let mut rhythm: Option<RhythmTracker> = mic
+        .as_ref()
+        .and_then(|input| RhythmTracker::try_new(input.sample_rate).ok());
+    let mut rhythm_sequence = 0;
+    let mut rhythm_analysis = RhythmAnalysis::default();
+    let mut analysis_delay = 0.0;
+    let mut analysis_visible = true;
     let mut presets = PresetMenu::default();
 
     while !rl.window_should_close() {
@@ -469,159 +737,220 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mouse = Vector2::new(position.x / ui, position.y / ui);
         let mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let presets_were_open = presets.open;
-        if !capture && mouse_clicked && Rectangle::new(panel, 56.0, 258.0, 28.0).check_collision_point_rec(mouse) { presets.open = true; }
-        let mut changed = presets.update(&mut rl, mouse, PresetMenu::bounds(w / ui, h / ui), &config_path, &mut settings);
+        let preset_button = Rectangle::new(panel, 56.0, 82.0, 28.0);
+        let composer_button = Rectangle::new(panel + 88.0, 56.0, 82.0, 28.0);
+        let graphics_button = Rectangle::new(panel + 176.0, 56.0, 82.0, 28.0);
+        let analysis_button = Rectangle::new(panel, 748.0, 126.0, 34.0);
+        let capture_button = Rectangle::new(panel + 132.0, 748.0, 126.0, 34.0);
+        if !capture && mouse_clicked && preset_button.check_collision_point_rec(mouse) {
+            presets.open = true;
+        }
+        if !capture && mouse_clicked && composer_button.check_collision_point_rec(mouse) {
+            std::process::Command::new(std::env::current_exe()?)
+                .arg("--composer")
+                .spawn()
+                .map_err(|failure| format!("Could not open Composer: {failure}"))?;
+        }
+        if !capture && mouse_clicked && graphics_button.check_collision_point_rec(mouse) {
+            let executable = std::env::current_exe()?;
+            let parent = executable.parent().unwrap_or_else(|| Path::new("."));
+            let selenite = [parent.join("selenite"), parent.join("../selenite")]
+                .into_iter()
+                .find(|path| path.is_file())
+                .ok_or("Graphics Studio is not installed beside Audio Studio")?;
+            std::process::Command::new(selenite)
+                .arg("--graphics-studio")
+                .spawn()
+                .map_err(|failure| format!("Could not open Graphics Studio: {failure}"))?;
+        }
+        let mut changed = presets.update(
+            &mut rl,
+            mouse,
+            PresetMenu::bounds(w / ui, h / ui),
+            &config_path,
+            &mut settings,
+        );
         let preset_active = presets.open || presets_were_open;
-        if !preset_active && rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { break; }
-        if presets.open { capture = false; active_slider = None; }
+        if !preset_active && rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            break;
+        }
+        if presets.open {
+            capture = false;
+            active_slider = None;
+        }
         let clicked = !capture && mouse_clicked;
         let hit = |top| clicked && control_rect(panel, top).check_collision_point_rec(mouse);
         if !preset_active {
-        let mut capture_key_pressed = false;
-        while let Some(key) = rl.get_key_pressed() {
-            capture_key_pressed |= key == KeyboardKey::KEY_C;
-        }
-        if capture_key_pressed
-            || rl.is_key_pressed(KeyboardKey::KEY_C)
-            || hit(748.0)
-            || (capture && mouse_clicked)
-        {
-            capture = !capture;
-        }
-        if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(410.0) {
-            muted = !muted;
-        }
-        if rl.is_key_pressed(KeyboardKey::KEY_X) || hit(450.0) {
-            settings.mirror = !settings.mirror;
-            changed = true;
-        }
-        if hit(490.0) {
-            settings.blink = !settings.blink;
-            changed = true;
-        }
-        if rl.is_key_pressed(KeyboardKey::KEY_B) {
-            settings.bounce = if settings.bounce > 0.0 { 0.0 } else { 1.0 };
-            changed = true;
-        }
-        for (index, key) in [
-            KeyboardKey::KEY_ZERO,
-            KeyboardKey::KEY_ONE,
-            KeyboardKey::KEY_TWO,
-            KeyboardKey::KEY_THREE,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let rect = Rectangle::new(panel + index as f32 * 65.0, 130.0, 63.0, 34.0);
-            if rl.is_key_pressed(key) || (clicked && rect.check_collision_point_rec(mouse)) {
-                forced = index.checked_sub(1).map(|index| AvatarState::ALL[index]);
+            let mut capture_key_pressed = false;
+            while let Some(key) = rl.get_key_pressed() {
+                capture_key_pressed |= key == KeyboardKey::KEY_C;
             }
-        }
-        if rl.is_key_pressed(KeyboardKey::KEY_UP) {
-            settings.gate_db = (settings.gate_db + 2.0).min(-26.0);
-            changed = true;
-        }
-        if rl.is_key_pressed(KeyboardKey::KEY_DOWN) {
-            settings.gate_db = (settings.gate_db - 2.0).max(-90.0);
-            changed = true;
-        }
-        for (index, top) in [246.0, 309.0, 372.0, 830.0].into_iter().enumerate() {
-            if hit(top) {
-                active_slider = Some(index);
+            if capture_key_pressed
+                || rl.is_key_pressed(KeyboardKey::KEY_C)
+                || (!capture && clicked && capture_button.check_collision_point_rec(mouse))
+                || (capture && mouse_clicked)
+            {
+                capture = !capture;
             }
-        }
-        if !rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) || capture {
-            active_slider = None;
-        }
-        if let Some(index) = active_slider {
-            let amount = ((mouse.x - panel) / 258.0).clamp(0.0, 1.0);
-            match index {
-                0 => settings.gate_db = -90.0 + amount * 64.0,
-                1 => settings.bounce = amount * 2.0,
-                2 => settings.scale = 0.2 + amount * 0.8,
-                _ => settings.loud_delta_db = 8.0 + amount * 28.0,
+            if !capture && clicked && analysis_button.check_collision_point_rec(mouse) {
+                analysis_visible = !analysis_visible;
             }
-            changed = true;
-        }
-        for index in 0..3 {
-            let rect = Rectangle::new(panel + index as f32 * 86.0, 554.0, 76.0, 30.0);
-            if clicked && rect.check_collision_point_rec(mouse) {
-                settings.background = index;
+            if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(410.0) {
+                muted = !muted;
+            }
+            if rl.is_key_pressed(KeyboardKey::KEY_X) || hit(450.0) {
+                settings.mirror = !settings.mirror;
                 changed = true;
             }
-        }
-        if hit(657.0) {
-            match MicCapture::devices() {
-                Ok(devices) => {
-                    let next = settings
-                        .device
-                        .as_ref()
-                        .and_then(|name| devices.iter().position(|device| device == name))
-                        .map_or(0, |index| index + 1);
-                    let device = devices.get(next).cloned();
-                    let mut candidate = settings.clone();
-                    candidate.device = device;
-                    drop(mic.take());
-                    match open_mic(&candidate) {
-                        Ok(input) => {
-                            mic = Some(input);
-                            settings = candidate;
-                            error = None;
-                            changed = true;
-                        }
-                        Err(failure) => {
-                            error = Some(format!("Microphone: {failure}"));
-                            mic = open_mic(&settings).ok();
-                        }
-                    }
-                    voice = VoiceState::default();
+            if hit(490.0) {
+                settings.blink = !settings.blink;
+                changed = true;
+            }
+            if rl.is_key_pressed(KeyboardKey::KEY_B) {
+                settings.bounce = if settings.bounce > 0.0 { 0.0 } else { 1.0 };
+                changed = true;
+            }
+            for (index, key) in [
+                KeyboardKey::KEY_ZERO,
+                KeyboardKey::KEY_ONE,
+                KeyboardKey::KEY_TWO,
+                KeyboardKey::KEY_THREE,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let rect = Rectangle::new(panel + index as f32 * 65.0, 130.0, 63.0, 34.0);
+                if rl.is_key_pressed(key) || (clicked && rect.check_collision_point_rec(mouse)) {
+                    forced = index.checked_sub(1).map(|index| AvatarState::ALL[index]);
                 }
-                Err(failure) => error = Some(format!("Devices: {failure}")),
             }
-        }
-        if hit(704.0) && mic.as_ref().is_some_and(|mic| !mic.has_failed()) {
-            calibration = Some((0.0, -90.0));
-        }
-        let mut reload = rl.is_key_pressed(KeyboardKey::KEY_R);
-        let mut new_dir = None;
-        if rl.is_file_dropped() {
-            let files = rl.load_dropped_files();
-            if files.paths().len() == 1 {
-                let path = PathBuf::from(files.paths()[0]);
-                new_dir = if path.is_dir() {
-                    Some(path)
-                } else {
-                    path.parent().map(Path::to_path_buf)
-                };
-                reload = true;
-            } else {
-                error = Some("Drop one avatar folder or pose image at a time".into());
+            if rl.is_key_pressed(KeyboardKey::KEY_UP) {
+                settings.gate_db = (settings.gate_db + 2.0).min(-26.0);
+                changed = true;
             }
-        }
-        if reload {
-            let candidate = new_dir.as_ref().unwrap_or(&asset_dir);
-            match load_images(&mut rl, &thread, candidate) {
-                Ok(new_images) => {
-                    images = new_images;
-                    asset_dir =
-                        std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.clone());
-                    settings.assets = Some(asset_dir.clone());
+            if rl.is_key_pressed(KeyboardKey::KEY_DOWN) {
+                settings.gate_db = (settings.gate_db - 2.0).max(-90.0);
+                changed = true;
+            }
+            for (index, top) in [246.0, 309.0, 372.0, 830.0].into_iter().enumerate() {
+                if hit(top) {
+                    active_slider = Some(index);
+                }
+            }
+            if !rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) || capture {
+                active_slider = None;
+            }
+            if let Some(index) = active_slider {
+                let amount = ((mouse.x - panel) / 258.0).clamp(0.0, 1.0);
+                match index {
+                    0 => settings.gate_db = -90.0 + amount * 64.0,
+                    1 => settings.bounce = amount * 2.0,
+                    2 => settings.scale = 0.2 + amount * 0.8,
+                    _ => settings.loud_delta_db = 8.0 + amount * 28.0,
+                }
+                changed = true;
+            }
+            for index in 0..3 {
+                let rect = Rectangle::new(panel + index as f32 * 86.0, 554.0, 76.0, 30.0);
+                if clicked && rect.check_collision_point_rec(mouse) {
+                    settings.background = index;
                     changed = true;
-                    error = None;
-                }
-                Err(e) => {
-                    eprintln!("reload failed: {e}");
-                    error = Some(format!("Reload failed: {e}"));
                 }
             }
-        }
+            if hit(657.0) {
+                match MicCapture::devices() {
+                    Ok(devices) => {
+                        let next = settings
+                            .device
+                            .as_ref()
+                            .and_then(|name| devices.iter().position(|device| device == name))
+                            .map_or(0, |index| index + 1);
+                        let device = devices.get(next).cloned();
+                        let mut candidate = settings.clone();
+                        candidate.device = device;
+                        drop(mic.take());
+                        match open_mic(&candidate) {
+                            Ok(input) => {
+                                mic = Some(input);
+                                rhythm = mic.as_ref().and_then(|input| {
+                                    RhythmTracker::try_new(input.sample_rate).ok()
+                                });
+                                rhythm_sequence = 0;
+                                live_analysis = Analysis::default();
+                                rhythm_analysis = RhythmAnalysis::default();
+                                settings = candidate;
+                                error = None;
+                                changed = true;
+                            }
+                            Err(failure) => {
+                                error = Some(format!("Microphone: {failure}"));
+                                mic = open_mic(&settings).ok();
+                                rhythm = mic.as_ref().and_then(|input| {
+                                    RhythmTracker::try_new(input.sample_rate).ok()
+                                });
+                                rhythm_sequence = 0;
+                                live_analysis = Analysis::default();
+                                rhythm_analysis = RhythmAnalysis::default();
+                            }
+                        }
+                        voice = VoiceState::default();
+                    }
+                    Err(failure) => error = Some(format!("Devices: {failure}")),
+                }
+            }
+            if hit(704.0) && mic.as_ref().is_some_and(|mic| !mic.has_failed()) {
+                calibration = Some((0.0, -90.0));
+            }
+            let mut reload = rl.is_key_pressed(KeyboardKey::KEY_R);
+            let mut new_dir = None;
+            if rl.is_file_dropped() {
+                let files = rl.load_dropped_files();
+                if files.paths().len() == 1 {
+                    let path = PathBuf::from(files.paths()[0]);
+                    new_dir = if path.is_dir() {
+                        Some(path)
+                    } else {
+                        path.parent().map(Path::to_path_buf)
+                    };
+                    reload = true;
+                } else {
+                    error = Some("Drop one avatar folder or pose image at a time".into());
+                }
+            }
+            if reload {
+                let candidate = new_dir.as_ref().unwrap_or(&asset_dir);
+                match load_images(&mut rl, &thread, candidate) {
+                    Ok(new_images) => {
+                        images = new_images;
+                        asset_dir =
+                            std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.clone());
+                        settings.assets = Some(asset_dir.clone());
+                        changed = true;
+                        error = None;
+                    }
+                    Err(e) => {
+                        eprintln!("reload failed: {e}");
+                        error = Some(format!("Reload failed: {e}"));
+                    }
+                }
+            }
         }
 
         samples.clear();
         if let Some(input) = &mic {
             if !input.has_failed() {
                 input.latest(WINDOW_SAMPLES, &mut samples);
+                input.since(&mut rhythm_sequence, &mut rhythm_samples);
+                if let Some(tracker) = &mut rhythm {
+                    rhythm_analysis = tracker.update(&rhythm_samples);
+                }
             }
+        }
+        analysis_delay -= dt;
+        if analysis_delay <= 0.0 {
+            let sample_rate = mic.as_ref().map_or(44_100.0, |input| input.sample_rate);
+            live_analysis = analysis::analyze_samples(&samples, sample_rate);
+            analysis_delay = 0.1;
         }
         let db = voice::amplitude_to_db(voice::rms(&samples));
         if let Some((elapsed, peak)) = calibration.as_mut() {
@@ -716,8 +1045,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (h / ui).ceil() as i32,
                 Color::new(25, 27, 31, 255),
             );
-            d.draw_text("PNGTuber Studio", panel as i32, 24, 24, Color::RAYWHITE);
-            button(&mut d, Rectangle::new(panel, 56.0, 258.0, 28.0), "Presets", false, mouse);
+            d.draw_text("Audio Studio", panel as i32, 24, 24, Color::RAYWHITE);
+            button(&mut d, preset_button, "Presets", presets.open, mouse);
+            button(&mut d, composer_button, "Composer", false, mouse);
+            button(&mut d, graphics_button, "Graphics", false, mouse);
             d.draw_text(
                 state.label(),
                 panel as i32,
@@ -815,13 +1146,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 calibration.is_some(),
                 mouse,
             );
-            button(
-                &mut d,
-                control_rect(panel, 748.0),
-                "Clean capture",
-                false,
-                mouse,
-            );
+            button(&mut d, analysis_button, "Analyzer", analysis_visible, mouse);
+            button(&mut d, capture_button, "Clean capture", false, mouse);
+            if analysis_visible {
+                draw_live_analysis(
+                    &mut d,
+                    18.0,
+                    18.0,
+                    (canvas_width / ui - 36.0).min(390.0),
+                    &live_analysis,
+                    &rhythm_analysis,
+                );
+            }
             if let Some(message) = &error {
                 let max_chars = ((canvas_width / ui - 32.0) / 10.0).max(1.0) as usize;
                 let chars: Vec<char> = message.chars().collect();
@@ -836,7 +1172,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
                 }
             }
-            presets.draw(&mut d, PresetMenu::bounds(w / ui, h / ui), w / ui, h / ui, mouse);
+            presets.draw(
+                &mut d,
+                PresetMenu::bounds(w / ui, h / ui),
+                w / ui,
+                h / ui,
+                mouse,
+            );
         }
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::BLACK);
@@ -867,6 +1209,11 @@ mod tests {
         assert_eq!(parsed.assets.unwrap(), PathBuf::from("/tmp/avatar"));
         assert_eq!(parsed.device.as_deref(), Some("USB mic"));
         assert!(parsed.capture);
+        let composer = options(["--composer", "song.json"].map(Into::into)).unwrap();
+        assert!(composer.composer);
+        assert_eq!(composer.assets, Some(PathBuf::from("song.json")));
+        assert!(options(["--self-test"].map(Into::into)).unwrap().self_test);
+        assert!(options(["--graphics-studio"].map(Into::into)).unwrap().graphics);
         assert!(options(["--device"].map(Into::into)).is_err());
         assert!(options(["--unknown"].map(Into::into)).is_err());
         assert!(options(["one", "two"].map(Into::into)).is_err());

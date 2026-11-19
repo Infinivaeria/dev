@@ -251,12 +251,39 @@ def main():
         assert package_info["binaries"] == expected_binaries
         assert (runtime / "run.sh").is_file() == ("selenite" in expected_binaries)
         assert package_info["version"] == version
+        assert package_info["release_channel"] == ("release_candidate" if "-rc." in version else "stable")
         assert package_info["scripting"] is True
         assert package_info["capabilities"]["projects"] is True
         assert package_info["capabilities"]["native_raylib_functions"] == 600
         assert package_info["capabilities"]["ide"] == ("selenite" in expected_binaries)
         assert (runtime / "run-ide.sh").is_file() == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["mic_freq"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["audio_composer"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["chiptunes"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["wav_audio_import_export"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["ogg_audio_import"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["midi_import"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["music_theory"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["pitch_analysis"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["harmonic_analysis"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["rhythm_analysis"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["live_audio_analysis"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["graphics_studio"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["image_layers"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["image_filters"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["animated_gif"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["video_tools"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["portable_ffmpeg"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["pngtuber_graphics"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["direct_suite_launch"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["computer_algebra"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["symbolic_math"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["numerical_linear_algebra"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["cas_notebook"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["direct_executables"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["shell_shims"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["rustby_sdk"] is True
+        assert package_info["capabilities"]["complete_documentation"] is True
         assert (runtime / "run-mic-freq.sh").is_file() == ("selenite" in expected_binaries)
         assert all((runtime / binary).is_file() for binary in package_info["binaries"])
         if "selenite" in expected_binaries:
@@ -283,6 +310,33 @@ def main():
             print("PASS: extracted mic_freq executable, launcher, artwork, component metadata and help")
             run([str(runtime / "run-ide.sh"), "--version"], environment=environment, directory=workspace)
             run([str(runtime / "mic_freq/mic_freq"), "--help"], environment=environment, directory=workspace)
+            poses = workspace / "generated pngtuber poses"
+            run([str(runtime / "selenite"), "--graphics-pngtuber",
+                 str(runtime / "mic_freq/assets/idle.png"), str(poses)],
+                environment=environment, directory=workspace)
+            assert all((poses / name).is_file() for name in (
+                "idle.png", "idle_blink.png", "talking.png", "talking_blink.png",
+                "loud.png", "loud_blink.png",
+            ))
+            run([str(runtime / "mic_freq/mic_freq"), "--self-test"],
+                environment=environment, directory=workspace)
+            rustby_manifest = json.loads((runtime / "rustby/rustby-manifest.json").read_text())
+            assert rustby_manifest["schema"] == 1 and rustby_manifest["files"]
+            for entry in rustby_manifest["files"]:
+                source = runtime / "rustby" / entry["path"]
+                assert source.is_file()
+                assert hashlib.sha256(source.read_bytes()).hexdigest() == entry["sha256"]
+            assert (runtime / "rustby/Cargo.toml").is_file()
+            assert (runtime / "rustby/src").is_dir()
+            result = run([str(runtime / "selenite"), "--cas-run", "diff x^3+2*x; x"],
+                         environment=environment, directory=workspace)
+            assert "3*x^2" in result.stdout
+            ffmpeg = runtime / "ffmpeg/bin/ffmpeg"
+            ffprobe = runtime / "ffmpeg/bin/ffprobe"
+            assert ffmpeg.is_file() and ffprobe.is_file()
+            bundled_environment = {**environment, "LD_LIBRARY_PATH": str(runtime / "lib")}
+            run([str(ffmpeg), "-version"], environment=bundled_environment, directory=workspace)
+            run([str(ffprobe), "-version"], environment=bundled_environment, directory=workspace)
         run([str(runtime / "run-game.sh"), "--version"], environment=environment, directory=workspace)
         for script in runtime.glob("run*.sh"):
             script.unlink()
@@ -404,7 +458,12 @@ puts "RUBY_STORAGE_OK"
             result = run([str(organizer), "--terminal-run", str(command_file), "first argument", "$(literal)"],
                          environment=terminal_environment, directory=workspace, success=False)
             assert result.returncode == 29 and result.stdout == "first argument\n$(literal)\n"
-            if shutil.which("ruby", path=environment.get("PATH")):
+            ruby = shutil.which("ruby", path=environment.get("PATH"))
+            ruby_works = ruby and subprocess.run(
+                [ruby, "--version"], env=environment, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, check=False, timeout=10,
+            ).returncode == 0
+            if ruby_works:
                 ruby_file = workspace / "command with spaces.rb"
                 ruby_file.write_text('puts ARGV; exit 31\n')
                 result = run([str(organizer), "--terminal-run", str(ruby_file), "ruby argument"],

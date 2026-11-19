@@ -185,6 +185,7 @@ def main():
         raise ValueError("Archive filename cannot contain a newline")
     checksum = digest(archive)
     required_binaries = {"selenite", "selenite-game", "mic_freq/mic_freq"}
+    required_tools = {"ffmpeg/bin/ffmpeg", "ffmpeg/bin/ffprobe"}
     launchers = ("run.sh", "run-ide.sh", "run-game.sh", "run-mic-freq.sh")
 
     if checksum_file and Path(checksum_file).is_file():
@@ -224,14 +225,48 @@ def main():
         mic_component = metadata.get("components", {}).get("mic_freq", {}) if isinstance(metadata, dict) else {}
         if not isinstance(metadata, dict) or metadata.get("schema") != 1 or metadata.get("name") != "selenite" or metadata.get("version") != version or mic_component.get("version") != mic_freq_version:
             raise ValueError(f"Expected a full Selenite {version} package with mic_freq {mic_freq_version}")
-        if not required_binaries.issubset(set(metadata.get("binaries", []))) or not metadata.get("capabilities", {}).get("mic_freq"):
-            raise ValueError("Incomplete suite: mic_freq and both Selenite executables are required")
-        for name in required_binaries | set(launchers) | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md"}:
+        capabilities = metadata.get("capabilities", {})
+        required_capabilities = {
+            "mic_freq", "audio_composer", "pitch_analysis", "harmonic_analysis",
+            "rhythm_analysis", "graphics_studio", "image_layers", "image_filters",
+            "animated_gif", "video_tools", "portable_ffmpeg", "pngtuber_graphics", "direct_suite_launch",
+            "computer_algebra", "symbolic_math", "numerical_linear_algebra", "cas_notebook",
+            "direct_executables", "shell_shims",
+            "rustby_sdk", "complete_documentation",
+            "linux_host", "linux_appliance",
+        }
+        if (not required_binaries.issubset(set(metadata.get("binaries", [])))
+                or any(capabilities.get(name) is not True for name in required_capabilities)):
+            raise ValueError("Incomplete suite: Selenite binaries, Audio Studio, Graphics Studio and Linux Host are required")
+        if not any(name.startswith("lib/libavcodec.so") for name in names) or not any(
+                name.startswith("lib/libavutil.so") for name in names):
+            raise ValueError("Incomplete suite: portable ffmpeg codec libraries are missing")
+        for name in required_binaries | required_tools | set(launchers) | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md"}:
             if name not in names:
                 raise ValueError(f"Incomplete suite: missing {name}")
         for name in ("lib/ruby", "lib/ruby-arch", "mic_freq/assets", "docs", "examples"):
             if name not in names:
                 raise ValueError(f"Incomplete suite: missing {name}")
+        rustby_manifest_name = "rustby/rustby-manifest.json"
+        if rustby_manifest_name not in names:
+            raise ValueError("Incomplete suite: missing rustby/rustby-manifest.json")
+        rustby_manifest_member = next(
+            member for member in members if safe_name(member.name) == rustby_manifest_name
+        )
+        rustby_manifest = json.load(bundle.extractfile(rustby_manifest_member))
+        if rustby_manifest.get("schema") != 1 or not isinstance(rustby_manifest.get("files"), list):
+            raise ValueError("Invalid Rustby manifest")
+        for entry in rustby_manifest["files"]:
+            relative = entry.get("path") if isinstance(entry, dict) else None
+            expected = entry.get("sha256") if isinstance(entry, dict) else None
+            if not isinstance(relative, str) or not isinstance(expected, str):
+                raise ValueError("Invalid Rustby manifest entry")
+            name = safe_name(posixpath.join("rustby", relative))
+            if name not in names:
+                raise ValueError(f"Incomplete Rustby payload: missing {name}")
+            member = next(member for member in members if safe_name(member.name) == name)
+            if not member.isfile() or hashlib.sha256(bundle.extractfile(member).read()).hexdigest() != expected:
+                raise ValueError(f"Rustby payload checksum mismatch: {name}")
         if dry_run:
             print("Full suite validated; package files will be replaced in place, leaving existing mic_freq/assets untouched. Dry run made no changes.")
             return

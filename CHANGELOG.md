@@ -1,5 +1,138 @@
 # Changelog
 
+## 18.0.0-rc.1 (2026-11-19)
+
+### Finalized
+
+- Packaged executables now initialize their own package root, Ruby library paths,
+  native libraries, portable FFmpeg path, partitioned array path, `PATH`,
+  `SELENITE_EXE`, and `SELENITE_ROOT`; `run.sh`, `run-ide.sh`, `run-game.sh`, and
+  `run-mic-freq.sh` are compatibility shims rather than startup requirements.
+- `selenite` directly exposes source-checkout package, distribution, bootstrap,
+  game-bootstrap and appliance installation controls through
+  `--package-suite`, `--distribute-suite`, `--bootstrap-suite`,
+  `--bootstrap-game-suite`, and `--install-appliance`.
+- Audio Studio can open Graphics Studio directly with `--graphics-studio`, and
+  the organizer toolbar now provides dedicated Audio, Graphics and CAS buttons.
+- Package and relocated smoke tests delete shell launchers before verification,
+  then verify direct Selenite, game, Audio Studio, Graphics/CAS headless paths,
+  FFmpeg tools and package metadata.
+
+## 17.0.0-rc.1 (2026-11-19)
+
+### Added
+
+- Selenite CAS Notebook, backed by Symbolica 3.0.2 and nalgebra 0.33, with exact
+  parse/simplify/expand/factor/together/cancel/apart, differentiation, supported
+  rational/polynomial integration, Taylor series, solving and substitutions.
+- nalgebra determinant, inverse, matrix solve, rank and complex eigenvalue
+  commands using explicit JSON matrix/vector input and finite/error validation.
+- A scaled CAS notebook GUI with cell CRUD, command templates, results/steps,
+  persistent JSON notebooks and keyboard workflows; organizer/Suite/shortcut and
+  direct executable entry points.
+- Direct `--cas`, `--cas-run` and `--cas-notebook` modes for GUI, one-shot and
+  batch notebook execution.
+- Complete CAS documentation, command reference and Symbolica non-commercial /
+  one-thread licensing disclosure.
+- Package and distribution capability checks for symbolic mathematics,
+  numerical linear algebra, CAS notebook and direct CAS execution.
+
+This is a release candidate. Symbolica remains a restricted non-commercial
+backend unless the operator supplies their own compliant Symbolica licensing.
+Existing profiles, grids and studio settings remain backward compatible.
+
+## 16.0.0-rc.1 (2026-11-19)
+
+### Added
+
+- Selenite Graphics Studio with scale-safe layered image editing, transforms,
+  crop/resize, brightness/contrast/grayscale/invert/blur, undo/redo, animated
+  GIF playback, JSON graphics projects and flattened PNG export.
+- Explicit ffmpeg/ffprobe-backed video probing, representative frame extraction
+  and safe allow-listed transcoding, all launched as direct processes without a
+  shell.
+- PNGTuber visual creation directly from source images, including idle/talking/
+  loud and blink pose output compatible with mic_freq; Audio Studio's Graphics
+  button opens this workflow.
+- Direct `selenite --graphics-studio` and `--audio-studio` suite launchers,
+  headless graphics export/PNGTuber/frame-extract/transcode modes, toolbar and
+  Suite entries, and application-menu Graphics Studio shortcuts.
+- Image processing now uses the `imageproc` Rust crate for production Gaussian
+  filtering; the rest remains native Rust `image` processing.
+
+### Finalized
+
+- Graphics Studio and Audio Studio can be launched directly from their
+  executables; packaged `run*.sh` scripts remain compatibility launchers rather
+  than runtime requirements.
+- Existing `package.sh` and `distribute.sh` workflows now advertise and verify
+  Graphics Studio, Audio Studio, host/appliance and media capabilities.
+
+This is a release candidate. Existing profiles, grids, Audio Studio settings and
+Composer projects remain backward compatible.
+
+## 15.0.0-rc.1 (2026-11-19)
+
+### Added
+
+- Release-candidate package metadata now identifies the `release_candidate`
+  channel and asserts the complete Audio Studio, Linux Host and music-analysis
+  capability set during packaging and relocated smoke tests.
+- Audio Studio gains `--self-test`, a headless deterministic diagnostic covering
+  project JSON, MIDI pitch/theory helpers, WAV round-trip, synthesis rendering and
+  pitch/rhythm analysis without opening audio or graphics devices.
+
+### Finalized
+
+- The Linux Host appliance session, XDG application launcher, process/service,
+  network/mount, notification and power integrations.
+- Audio Studio's PNGTuber, chiptune Composer and live pitch/harmonic/rhythm
+  analyzer surfaces, including scale-safe mouse and keyboard controls.
+- Portable suite packaging, distribution, documentation manifests, SDK,
+  launcher, game-runtime and relocated integration verification for the v15 RC.
+
+This is a release candidate. Existing grid, project and Audio Studio settings
+schemas remain backward compatible.
+
+## 14.0.0 (2026-11-19)
+
+### Added
+
+- Audio Studio 2.0 live signal analysis measures level, fundamental pitch,
+  MIDI note and cents, FFT harmonics, spectral centroid/brightness, harmonic
+  confidence, zero crossings, tonal/percussive balance, onsets, pulse regularity
+  and estimated BPM.
+- The PNGTuber analyzer can be shown or hidden with its own scaled sidebar
+  button and reads only newly arrived microphone samples for rhythm tracking.
+- Composer's **Analyze Mix** button measures the deterministic rendered mix used
+  for playback and WAV export, showing pitch, harmonic/percussive balance and BPM.
+- A reusable `mic_freq::analysis` API supports mono buffers, rendered audio,
+  bounded FFT windows and sequential rhythm analysis.
+
+## 13.0.0 (2026-11-19)
+
+### Added
+
+- Selenite Audio Studio 1.0 combines the PNGTuber workflow with a dedicated
+  four-track chiptune composer. The scale-responsive Composer uses a 16-step,
+  12-pitch piano roll, explicit output-device selection, transport controls,
+  waveform/envelope instruments, track mute/volume/pan, and stereo playback.
+- Chiptune oscillators for sine, square, triangle, saw and deterministic noise,
+  with pluck/pad/default envelopes and 44.1 kHz deterministic rendering.
+- Scale selection, chord qualities and inversions, I-IV-V-I progression
+  generation, five arpeggiator patterns, key detection and chord analysis.
+- JSON composer projects, WAV and OGG Vorbis sample import, standard MIDI file
+  import, and 32-bit floating-point stereo WAV export.
+- Scaled **Composer** controls are available in Audio Studio and through
+  `mic_freq --composer [PROJECT.json]`.
+
+### Changed
+
+- Audio Studio was versioned independently as 1.0.0 and is packaged as a
+  first-class music and streaming suite component.
+- Selenite remains Linux-native while adding an optional appliance-style host
+  layer backed by XDG, DBus, systemd, logind, `/proc` and `/sys`.
+
 ## 12.0.0-rc.1 (2026-11-10)
 
 ### Added

@@ -1,4 +1,4 @@
-# mic_freq — Voice avatar manual
+# Selenite Audio Studio manual
 
 ## Requirements
 
@@ -24,6 +24,11 @@ Optional `idle_blink.png`, `talking_blink.png`, and `loud_blink.png` are full-fr
 
 ## Controls
 
+The title-row buttons open **Presets**, **Composer**, and **Graphics**. Graphics
+launches the adjacent Selenite executable's Graphics Studio so artists can edit
+layers, generate idle/talking/loud/blink PNGTuber poses, and return them to the
+avatar workflow.
+
 | Key | Action |
 |-----|--------|
 | Up / Down | Raise / lower the noise gate by 2 dB |
@@ -44,6 +49,73 @@ Each state bounces continuously with smoothly changing strength. At 100%, idle r
 
 The image choice depends on microphone *loudness*, not the words you say or the pitch of your voice. Speech is not recorded or transcribed.
 
+## Composer
+
+Select **Composer** in the sidebar or run `mic_freq --composer [PROJECT.json]`.
+The window starts at 960 x 720 and scales the complete canvas to any larger
+window; controls are never rendered at independent pixel sizes.
+
+### Tracks and piano roll
+
+The four tracks have independent oscillator/sample sources, envelope presets,
+mute, volume and stereo pan. The piano roll displays C4 through B4 over sixteen
+steps. Click a cell to toggle that pitch at that step and click a track to edit
+it. Arrow keys move between tracks and steps.
+
+Waveforms are sine, square, saw, triangle and deterministic noise. Envelopes are
+Default, Pluck and Pad. To use imported audio as an instrument, select the track
+and drop one WAV or OGG file anywhere in the Composer window.
+
+### Theory tools
+
+Cycle Root, Scale and Chord quality, then choose an inversion. **Add Chord**
+writes the current chord to the selected step. **I-IV-V-I** writes four chords
+at steps 1, 5, 9 and 13. **Arp** writes an eight-step up, down, up/down, down/up
+or deterministic-random pattern from the selected step's notes. Analysis reports
+the closest exact chord and the strongest major/natural-minor key for all notes
+on the selected track.
+
+### Project and media workflow
+
+- **New** resets to a four-track project at 120 BPM.
+- **Save** or Ctrl+S writes JSON under
+  `$XDG_CONFIG_HOME/mic_freq/projects` unless a project path was loaded.
+- **Export WAV** renders deterministic 44.1 kHz floating-point stereo PCM beside
+  the project.
+- Drop JSON to load a project.
+- Drop standard `.mid` or `.midi` to import its tracks, tempo and note events.
+- Drop WAV or OGG to assign a sampled instrument to the selected track.
+- Cycle the **Device** button before Play when several output devices exist.
+- Space starts/stops; Escape closes the Composer.
+
+For headless verification, `mic_freq --self-test` validates project JSON, theory,
+deterministic synthesis, A4 pitch detection, rhythm tracking and WAV round-trip
+without requiring a microphone, output device or display.
+
+Playback uses the selected output device explicitly. If no device is available
+or project/sample data is invalid, the status bar reports the host or format
+error without changing the current project.
+
+## Signal analyzer
+
+The **Analyzer** button shares the clean-capture row and toggles a live panel
+over the avatar canvas. It reports:
+
+- level in dBFS;
+- fundamental pitch in hertz, nearest note and cents from concert A 440 Hz;
+- harmonicity and eight relative harmonic bars;
+- tonal and percussive balance, brightness and confidence;
+- onset/transient strength, pulse regularity and estimated BPM.
+
+Pitch and harmonic measurements update several times per second from the latest
+microphone window. Rhythm uses a sample sequence number to process only new
+frames, not overlapping display windows. Percussive content naturally has weaker
+single-note pitch confidence than a sustained voice or oscillator.
+
+Click **Analyze Mix** in Composer to run the same analysis on a downmixed
+44.1 kHz render. A final mix may not contain one stable pitch or pulse, and the
+UI displays an em dash instead of a false result.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -59,6 +131,11 @@ The image choice depends on microphone *loudness*, not the words you say or the 
 | Artwork disappears with chroma key | Choose a background color absent from the artwork. |
 | Hotkeys do nothing while gaming | Focus mic_freq; global hotkeys are not implemented. |
 | Preferences do not save | Check write permissions on the configuration directory. Save errors appear in the studio or terminal. |
+| Composer has no output | Cycle **Device** and verify the host exposes an enabled audio output. |
+| Imported sound is silent | Use a valid WAV/OGG file and add notes to the selected track. |
+| MIDI has no notes | Verify the file contains Note On events rather than only automation or percussion metadata. |
+| Pitch reads no value | Sustain a pitched sound above the noise gate; noise and drums may not have a fundamental. |
+| BPM is unstable | Feed at least several regular beats; tempo needs multiple distinct onsets. |
 
 ## Calibration and capture
 

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Selenite Appliance
+Comment=Selenite Linux appliance on a dedicated Wayland session
+Exec=selenite-appliance
+TryExec=cage
+Type=Application
+DesktopNames=Selenite

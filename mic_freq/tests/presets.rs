@@ -1,4 +1,11 @@
-use std::{path::PathBuf, process::{Child, Command, Stdio}, time::{Duration, Instant}};
+use std::{
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant},
+};
+
+#[cfg(target_os = "linux")]
+static GUI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("mic-freq-{name}-{}", std::process::id()));
@@ -10,9 +17,20 @@ fn scratch(name: &str) -> PathBuf {
 #[test]
 fn preset_commands_work_without_a_display_or_microphone() {
     let directory = scratch("preset-cli");
-    let run = |arguments: &[&str]| Command::new(env!("CARGO_BIN_EXE_mic_freq")).args(arguments).env("XDG_CONFIG_HOME", &directory).env_remove("DISPLAY").output().unwrap();
+    let run = |arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .args(arguments)
+            .env("XDG_CONFIG_HOME", &directory)
+            .env_remove("DISPLAY")
+            .output()
+            .unwrap()
+    };
     let saved = run(&["--save-preset", "Quiet room"]);
-    assert!(saved.status.success(), "{}", String::from_utf8_lossy(&saved.stderr));
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
     let listed = run(&["--list-presets"]);
     assert!(listed.status.success());
     assert_eq!(String::from_utf8_lossy(&listed.stdout).trim(), "Quiet room");
@@ -38,19 +56,49 @@ impl Drop for Window {
 #[cfg(target_os = "linux")]
 #[test]
 fn preset_dialog_saves_and_loads_with_the_mouse() {
-    if std::env::var_os("DISPLAY").is_none() { return; }
+    if std::env::var_os("DISPLAY").is_none() {
+        return;
+    }
+    let _serial_gui = GUI_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let directory = scratch("preset-dialog");
     let driver = directory.join("keys");
-    let compiled = Command::new("cc").args(["-Wall", "-Wextra", "-Werror"])
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/x11_key_driver.c"))
-        .args(["-lX11", "-o"]).arg(&driver).status().unwrap();
+    let compiled = Command::new("cc")
+        .args(["-Wall", "-Wextra", "-Werror"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/x11_key_driver.c"
+        ))
+        .args(["-lX11", "-o"])
+        .arg(&driver)
+        .status()
+        .unwrap();
     assert!(compiled.success());
-    let mut window = Window(Command::new(env!("CARGO_BIN_EXE_mic_freq"))
-        .env("XDG_CONFIG_HOME", &directory)
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
-    let sent = Command::new(&driver).arg(window.0.id().to_string())
-        .args(["wait:1200", "key:F2", "type:GUI preset", "click:250,345", "wait:200", "click:446,345", "click:642,345", "close"])
-        .status().unwrap();
+    let mut window = Window(
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .env("XDG_CONFIG_HOME", &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let sent = Command::new(&driver)
+        .arg(window.0.id().to_string())
+        .args([
+            "wait:1200",
+            "click:685,765",
+            "click:685,765",
+            "key:F2",
+            "type:GUI preset",
+            "click:250,345",
+            "wait:200",
+            "click:446,345",
+            "click:642,345",
+            "close",
+        ])
+        .status()
+        .unwrap();
     assert!(sent.success());
     let deadline = Instant::now() + Duration::from_secs(20);
     while window.0.try_wait().unwrap().is_none() {
@@ -58,5 +106,64 @@ fn preset_dialog_saves_and_loads_with_the_mouse() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(directory.join("mic_freq/presets/GUI preset.json").is_file());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn composer_window_saves_and_exports_with_scaled_controls() {
+    if std::env::var_os("DISPLAY").is_none() {
+        return;
+    }
+    let _serial_gui = GUI_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = scratch("composer-dialog");
+    let driver = directory.join("keys");
+    let compiled = Command::new("cc")
+        .args(["-Wall", "-Wextra", "-Werror"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/x11_key_driver.c"
+        ))
+        .args(["-lX11", "-o"])
+        .arg(&driver)
+        .status()
+        .unwrap();
+    assert!(compiled.success());
+
+    let mut window = Window(
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .arg("--composer")
+            .env("XDG_CONFIG_HOME", &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let sent = Command::new(&driver)
+        .arg(window.0.id().to_string())
+        .args([
+            "wait:900",
+            "resize:1200,900",
+            "click:270,220",
+            "key:ctrl+s",
+            "wait:250",
+            "click:1030,92",
+            "wait:250",
+            "click:275,92",
+            "wait:500",
+            "key:Escape",
+        ])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while window.0.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "Composer did not close");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(directory.join("mic_freq/projects/Untitled.json").is_file());
+    assert!(directory.join("mic_freq/projects/Untitled.wav").is_file());
     std::fs::remove_dir_all(directory).unwrap();
 }
