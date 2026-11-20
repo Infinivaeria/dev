@@ -69,6 +69,7 @@ struct UiState {
     video_metadata: Option<VideoMetadata>,
     status: String,
     is_error: bool,
+    help_open: bool,
     close: bool,
 }
 
@@ -94,6 +95,7 @@ impl UiState {
             status: "Ready. Drop an image, animated GIF, video, or graphics project JSON."
                 .to_owned(),
             is_error: false,
+            help_open: false,
             close: false,
         };
         if let Some(path) = path {
@@ -493,6 +495,28 @@ impl UiState {
     }
 
     fn input(&mut self, rl: &mut RaylibHandle) {
+        let dismiss_key = rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) && self.help_open;
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            if self.help_open {
+                self.help_open = false;
+            } else {
+                self.close = true;
+            }
+        }
+        if dismiss_key || self.close {
+            return;
+        }
+        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        let mouse = geometry.to_logical(rl.get_mouse_position());
+        let help_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+            && (hit_cell(mouse, rect(1000.0, 52.0, 82.0, 34.0))
+                || (self.help_open && hit_cell(mouse, rect(894.0, 548.0, 78.0, 30.0))));
+        if help_clicked {
+            self.help_open = !self.help_open;
+        }
+        if self.help_open || help_clicked {
+            return;
+        }
         if rl.is_file_dropped() {
             let files: Vec<PathBuf> = rl
                 .load_dropped_files()
@@ -507,9 +531,6 @@ impl UiState {
                 self.open_drop(path);
             }
         }
-        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
-            self.close = true;
-        }
         if !self.gif_frames.is_empty() && self.gif_playing {
             self.gif_clock_ms += rl.get_frame_time() * 1000.0;
             let delay = self.gif_frames[self.gif_index].delay_ms.max(1) as f32;
@@ -521,8 +542,6 @@ impl UiState {
             }
         }
 
-        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
-        let mouse = geometry.to_logical(rl.get_mouse_position());
         let click = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let hit = |bounds| click && hit_cell(mouse, bounds);
 
@@ -701,6 +720,7 @@ impl UiState {
             "Redo",
             self.redo.is_empty(),
         );
+        button(d, rect(1000.0, 52.0, 82.0, 34.0), "Help", self.help_open);
 
         panel(d, rect(12.0, 104.0, 752.0, 446.0), "Selected layer preview");
         draw_checkerboard(d, rect(28.0, 136.0, 720.0, 398.0));
@@ -867,6 +887,9 @@ impl UiState {
                 Color::WHITE
             },
         );
+        if self.help_open {
+            draw_help(d);
+        }
     }
 }
 
@@ -935,6 +958,37 @@ fn button(d: &mut impl RaylibDraw, bounds: Rectangle, label: &str, active: bool)
         font,
         Color::WHITE,
     );
+}
+
+fn draw_help(d: &mut impl RaylibDraw) {
+    d.draw_rectangle_rec(
+        rect(0.0, 0.0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
+        Color::new(0, 0, 0, 190),
+    );
+    let bounds = rect(110.0, 166.0, 880.0, 428.0);
+    panel(d, bounds, "Graphics Studio Help");
+    for (index, line) in [
+        "Drop an image to create a layer. Drop a graphics project .json file to reopen a project.",
+        "Use Add New to start a blank layer, then Save to store the layered project.",
+        "Export PNG saves the composited artwork. PNGTuber opens the pose/artwork workflow.",
+        "Select a layer in the right-hand Layers list. V/H toggles visibility; O cycles opacity.",
+        "Use Up and Down to reorder layers, Remove to delete one, and Undo/Redo to revert edits.",
+        "Image operations crop, resize, rotate, flip, grayscale, brighten, increase contrast and blur.",
+        "Drop animated GIFs for frame preview/export. Drop supported video files to extract frames or transcode.",
+        "Press Esc to close this help panel or close the window. Errors and progress appear in the status bar.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        d.draw_text(
+            line,
+            bounds.x as i32 + 22,
+            bounds.y as i32 + 48 + index as i32 * 38,
+            15,
+            Color::new(224, 231, 242, 255),
+        );
+    }
+    button(d, rect(894.0, 548.0, 78.0, 30.0), "Close", false);
 }
 
 fn centered(d: &mut impl RaylibDraw, bounds: Rectangle, label: &str, size: i32) {

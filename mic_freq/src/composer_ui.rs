@@ -61,6 +61,7 @@ struct UiState {
     rhythm: RhythmAnalysis,
     status: String,
     is_error: bool,
+    help_open: bool,
     close: bool,
 }
 
@@ -370,6 +371,24 @@ impl UiState {
     }
 
     fn input(&mut self, rl: &mut RaylibHandle) {
+        let dismiss_key = rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) && self.help_open;
+        if dismiss_key {
+            self.help_open = false;
+            return;
+        }
+        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        let mouse = geometry.to_logical(rl.get_mouse_position());
+        let help_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+            && (rect(858.0, 55.0, 82.0, 38.0).check_collision_point_rec(mouse)
+                || (self.help_open
+                    && rect(804.0, 520.0, 80.0, 32.0).check_collision_point_rec(mouse)));
+        if help_clicked {
+            self.help_open = !self.help_open;
+            return;
+        }
+        if self.help_open {
+            return;
+        }
         if rl.is_file_dropped() {
             let files: Vec<_> = rl
                 .load_dropped_files()
@@ -401,8 +420,6 @@ impl UiState {
             self.selected_step = (self.selected_step + 1).min(composer::STEPS_PER_PATTERN - 1);
         }
 
-        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
-        let mouse = geometry.to_logical(rl.get_mouse_position());
         let click = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let held = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         let hit = |bounds: Rectangle| click && bounds.check_collision_point_rec(mouse);
@@ -431,10 +448,9 @@ impl UiState {
         if hit(rect(485.0, 55.0, 222.0, 38.0)) {
             self.cycle_device();
         }
-        if hit(rect(713.0, 55.0, 227.0, 38.0)) {
+        if hit(rect(713.0, 55.0, 137.0, 38.0)) {
             self.analyze_project();
         }
-
         for track in 0..TRACK_COUNT {
             if hit(track_rect(track)) {
                 self.selected_track = track;
@@ -537,7 +553,8 @@ impl UiState {
             &format!("Device: {}", truncate(&device, 20)),
             false,
         );
-        button(d, rect(713.0, 55.0, 227.0, 38.0), "Analyze Mix", false);
+        button(d, rect(713.0, 55.0, 137.0, 38.0), "Analyze Mix", false);
+        button(d, rect(858.0, 55.0, 82.0, 38.0), "Help", self.help_open);
 
         panel(d, rect(12.0, 108.0, 150.0, 322.0), "TRACKS");
         for track in 0..TRACK_COUNT {
@@ -778,6 +795,9 @@ impl UiState {
             16,
             if self.is_error { WARNING } else { MUTED },
         );
+        if self.help_open {
+            draw_help(d);
+        }
     }
 }
 
@@ -944,6 +964,33 @@ fn truncate(value: &str, chars: usize) -> String {
             .chain(['…'])
             .collect()
     }
+}
+
+fn draw_help(d: &mut impl RaylibDraw) {
+    d.draw_rectangle_rec(
+        rect(0.0, 0.0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
+        Color::new(0, 0, 0, 190),
+    );
+    let bounds = rect(60.0, 120.0, 840.0, 450.0);
+    d.draw_rectangle_rec(bounds, PANEL);
+    d.draw_rectangle_lines_ex(bounds, 1.0, OUTLINE);
+    text(d, "Composer Help", 80.0, 136.0, 20, INK);
+    for (index, line) in [
+        "Click a piano-roll cell to add or remove a note. Click a track to select it.",
+        "Use Space or Play to audition the arrangement. Select an output device in the top row.",
+        "New starts a project; Save stores JSON; Export WAV renders the full arrangement.",
+        "Click waveform and envelope controls to shape the selected track.",
+        "Root, Scale, Quality and Inversion configure Add Chord and the I-IV-V-I progression.",
+        "Arp fills steps from the selected chord. Analyze Mix reports pitch, rhythm and chord/key.",
+        "Drop JSON to open a project, MIDI to import patterns, or WAV/OGG to sample the selected track.",
+        "Keyboard: arrows select track/step, Ctrl+S saves, Esc closes help (or the window).",
+    ]
+    .iter()
+    .enumerate()
+    {
+        text(d, line, 80.0, 178.0 + index as f32 * 38.0, 15, INK);
+    }
+    button(d, rect(804.0, 520.0, 80.0, 32.0), "Close", false);
 }
 
 /// Open a complete composer window. `project_path` is loaded when supplied and

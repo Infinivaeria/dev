@@ -158,6 +158,7 @@ enum ToolbarAction {
     Suite,
     ToggleToolbar,
     GraphicsStudio,
+    Composer,
     CasNotebook,
     AudioStudio,
 }
@@ -205,6 +206,7 @@ impl ToolbarAction {
             Self::Suite => "Open suite tools, create projects and reopen recent projects (F8).",
             Self::ToggleToolbar => "Enable or disable toolbar clicks (F7). Visibility is controlled separately with F10.",
             Self::GraphicsStudio => "Open Selenite Graphics Studio for layered image editing, animation, video frames and PNGTuber artwork.",
+            Self::Composer => "Open the multitrack Composer to create, analyze and export music.",
             Self::CasNotebook => "Open the Selenite CAS Notebook for Symbolica algebra and nalgebra matrix computation.",
             Self::AudioStudio => "Open Selenite Audio Studio and its PNGTuber, Composer, and Graphics workflows.",
         }
@@ -3768,6 +3770,7 @@ impl App {
                     .map_err(|error| format!("could not open Graphics Studio: {error}"))?;
                 Ok(())
             }
+            ToolbarAction::Composer => launch_audio_studio(&["--composer".into()]),
             ToolbarAction::CasNotebook => {
                 let program = env::current_exe().map_err(|error| error.to_string())?;
                 Command::new(program)
@@ -6883,7 +6886,12 @@ impl App {
 
         if !specs.is_empty() {
             specs.push(("Suite".to_owned(), ToolbarAction::Suite, true));
-            specs.push(("Graphics".to_owned(), ToolbarAction::GraphicsStudio, true));
+            specs.push((
+                "Graphics Studio".to_owned(),
+                ToolbarAction::GraphicsStudio,
+                true,
+            ));
+            specs.push(("Composer".to_owned(), ToolbarAction::Composer, true));
             specs.push(("CAS".to_owned(), ToolbarAction::CasNotebook, true));
             specs.push(("Audio".to_owned(), ToolbarAction::AudioStudio, true));
             specs.push(("Scale".to_owned(), ToolbarAction::ScaleOptions, true));

@@ -364,15 +364,19 @@ fn named_key_bytes(key: KeyboardKey, mods: Mods, app_cursor: bool) -> Option<Vec
     Some(text.into_bytes())
 }
 
-/// Text to send for a paste: line breaks become carriage returns and, when the program asked
-/// for bracketed paste, escapes are dropped so the text cannot end the bracket early.
+/// Text to send for a paste: line breaks become carriage returns and control characters that
+/// can manipulate the terminal (including its flow control) are removed.
 fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
-    let normalized = text.replace("\r\n", "\r").replace('\n', "\r");
+    let normalized: String = text
+        .replace("\r\n", "\r")
+        .replace('\n', "\r")
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\r' | '\t'))
+        .collect();
     if !bracketed {
         return normalized.into_bytes();
     }
-    let safe: String = normalized.chars().filter(|c| *c != '\x1b').collect();
-    format!("\x1b[200~{safe}\x1b[201~").into_bytes()
+    format!("\x1b[200~{normalized}\x1b[201~").into_bytes()
 }
 
 /// The `http(s)` URL around column `col` of `text`, without trailing punctuation.
@@ -519,6 +523,7 @@ struct TermWindow {
     focused: bool,
     title: String,
     saw_output: bool,
+    pending_paste: Option<(Receiver<Result<String, String>>, Instant)>,
 }
 
 impl TermWindow {
@@ -696,13 +701,50 @@ impl TermWindow {
         true
     }
 
-    fn paste(&mut self, rl: &RaylibHandle) {
-        if let Ok(text) = rl.get_clipboard_text() {
-            if !text.is_empty() {
-                self.pty
-                    .write(paste_bytes(&text, self.term.modes.bracketed_paste));
-                self.offset = 0;
+    fn paste(&mut self) {
+        if self.pending_paste.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        self.pending_paste = Some((receiver, Instant::now()));
+        thread::spawn(move || {
+            let result = arboard::Clipboard::new()
+                .map_err(|error| format!("clipboard unavailable: {error}"))
+                .and_then(|mut clipboard| {
+                    clipboard
+                        .get_text()
+                        .map_err(|error| format!("could not read clipboard: {error}"))
+                });
+            let _ = sender.send(result);
+        });
+    }
+
+    fn pump_paste(&mut self, now: f64) {
+        let Some((receiver, started)) = &self.pending_paste else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(text)) => {
+                if !text.is_empty() {
+                    self.pty
+                        .write(paste_bytes(&text, self.term.modes.bracketed_paste));
+                    self.offset = 0;
+                }
+                self.pending_paste = None;
             }
+            Ok(Err(error)) => {
+                self.say(error, now);
+                self.pending_paste = None;
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.say("clipboard reader stopped unexpectedly", now);
+                self.pending_paste = None;
+            }
+            Err(TryRecvError::Empty) if started.elapsed() >= Duration::from_secs(2) => {
+                self.say("Clipboard did not respond", now);
+                self.pending_paste = None;
+            }
+            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -748,7 +790,7 @@ impl TermWindow {
             }
             if self.keys.fire(rl, KeyboardKey::KEY_V, now) {
                 app_command = true;
-                self.paste(rl);
+                self.paste();
             }
             if rl.is_key_pressed(KeyboardKey::KEY_H) {
                 app_command = true;
@@ -763,7 +805,7 @@ impl TermWindow {
         }
         if mods.shift && !mods.ctrl && self.keys.fire(rl, KeyboardKey::KEY_INSERT, now) {
             app_command = true;
-            self.paste(rl);
+            self.paste();
         }
 
         let (rows, _) = self.rows_cols();
@@ -985,7 +1027,7 @@ impl TermWindow {
                 self.copy_selection(rl, now);
                 self.selection = None;
             } else {
-                self.paste(rl);
+                self.paste();
             }
         }
         if link.is_some() {
@@ -1402,6 +1444,7 @@ impl EmbeddedTerminal {
                     window.say(format!("Shell exited ({code}); use + for a new terminal"), now);
                 }
             }
+            window.pump_paste(now);
         }
         let window = &mut self.sessions[self.active];
         if focused && !click && !new_tab && !close_tab && !switch && window.exited.is_none() {
@@ -1434,7 +1477,7 @@ impl EmbeddedTerminal {
                     if let Some(selection) = &mut window.selection { selection.head = point; }
                 }
                 if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT) {
-                    if !window.copy_selection(rl, now) { window.paste(rl); }
+                    if !window.copy_selection(rl, now) { window.paste(); }
                 }
             }
         }
@@ -1556,7 +1599,7 @@ fn new_session(program: &Path, args: &[OsString], width: i32, height: i32, direc
         blink_from: 0.0, toast: None, bell_until: 0.0, started: Instant::now(),
         output_closed: false, exited: None, hold_open: false, held_button: None,
         last_reported: None, focused: true, title: "Selenite Terminal".to_owned(), saw_output: false,
-        scrollbar_drag: None,
+        scrollbar_drag: None, pending_paste: None,
     })
 }
 
@@ -1640,6 +1683,7 @@ pub fn run(args: &[OsString]) -> Result<i32, String> {
                 if session.term.modes.focus_reporting { session.pty.write(if focused { "\x1b[I" } else { "\x1b[O" }); }
             }
             session.pump(&mut rl, &thread, now);
+            session.pump_paste(now);
             if session.exited.is_none() {
                 if let Some(status) = session.pty.exit_code() { session.exited = Some((status, now)); }
             }
@@ -1857,6 +1901,10 @@ mod tests {
         assert_eq!(
             paste_bytes("x\x1b[201~y", true),
             b"\x1b[200~x[201~y\x1b[201~"
+        );
+        assert_eq!(
+            paste_bytes("a\x13b\tc\x00d\x7f", false),
+            b"ab\tcd"
         );
     }
 

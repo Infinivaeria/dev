@@ -595,6 +595,40 @@ fn inline_into(chars: &[char], style: &Style, out: &mut Vec<Inline>) {
                     index += 1;
                 }
             },
+            '[' if chars[index..].starts_with(&['[', '[']) => {
+                let close = chars[index + 2..]
+                    .windows(2)
+                    .position(|pair| pair == [']', ']'])
+                    .map(|offset| index + 2 + offset);
+                let link = close.and_then(|close| {
+                    let body: String = chars[index + 2..close].iter().collect();
+                    let (page, label) = body
+                        .split_once('|')
+                        .map_or((body.as_str(), body.as_str()), |(page, label)| {
+                            (page.trim(), label.trim())
+                        });
+                    if page.is_empty() || label.is_empty() {
+                        return None;
+                    }
+                    let target = if Path::new(page).extension().is_some() {
+                        page.to_owned()
+                    } else {
+                        format!("{page}.md")
+                    };
+                    Some((close, target, label.to_owned()))
+                });
+                if let Some((close, target, label)) = link {
+                    flush!();
+                    let mut linked = style.clone();
+                    linked.link = Some(target);
+                    let label: Vec<char> = label.chars().collect();
+                    inline_into(&label, &linked, out);
+                    index = close + 2;
+                } else {
+                    buffer.push('[');
+                    index += 1;
+                }
+            }
             '[' => match parse_link(chars, index) {
                 Some((close, end, url)) => {
                     flush!();
@@ -1450,6 +1484,35 @@ mod tests {
             inline("<https://z.test>"),
             vec![("https://z.test".into(), "link")]
         );
+    }
+
+    #[test]
+    fn wiki_links_are_distinct_from_markdown_links_and_support_aliases() {
+        let links = parse_inline("[[Page name]] and [[folder/Page.md|*read more*]]");
+        let linked: Vec<(&str, &str, bool)> = links
+            .iter()
+            .filter_map(|part| {
+                part.link
+                    .as_deref()
+                    .map(|target| (part.text.as_str(), target, part.italic))
+            })
+            .collect();
+        assert_eq!(
+            linked,
+            vec![
+                ("Page name", "Page name.md", false),
+                ("read more", "folder/Page.md", true),
+            ]
+        );
+        assert_eq!(
+            parse_inline("[Page](ordinary.md)"),
+            vec![Inline {
+                text: "Page".into(),
+                link: Some("ordinary.md".into()),
+                ..Inline::default()
+            }]
+        );
+        assert_eq!(plain_text(&parse_inline("[[|missing]]")), "[[|missing]]");
     }
 
     #[test]

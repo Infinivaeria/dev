@@ -1089,6 +1089,113 @@ fn preview_origin(geo: &Geometry, rect: Rectangle, scroll: f32) -> (f32, f32) {
     (rect.x + pad, rect.y + pad - scroll)
 }
 
+fn wiki_help_button(geo: &Geometry) -> Rectangle {
+    let size = geo.ui_font;
+    let pad = size * 0.8;
+    let width = size * 10.0;
+    let height = geo.bar_h * 0.72;
+    Rectangle::new(
+        (geo.width - width - pad).max(0.0),
+        (geo.bar_h - height) / 2.0,
+        width,
+        height,
+    )
+}
+
+fn wiki_help_bounds(geo: &Geometry) -> Rectangle {
+    let width = (geo.width - 24.0).min(760.0).max(1.0);
+    let height = (geo.overlay_height - 16.0).min(620.0).max(1.0);
+    Rectangle::new(
+        (geo.width - width) / 2.0,
+        (geo.overlay_height - height) / 2.0,
+        width,
+        height,
+    )
+}
+
+fn wiki_help_close(geo: &Geometry) -> Rectangle {
+    let bounds = wiki_help_bounds(geo);
+    let size = geo.ui_font.max(8.0) * 1.6;
+    Rectangle::new(
+        bounds.x + bounds.width - size - 8.0,
+        bounds.y + 6.0,
+        size,
+        size,
+    )
+}
+
+fn draw_wiki_help<D: RaylibDraw>(d: &mut D, geo: &Geometry) {
+    const LINES: &[&str] = &[
+        "Wiki pages",
+        "  [[Page name]] opens Page name.md beside this document.",
+        "  [[Page name|label]] displays label; an extension is kept as written.",
+        "  Folders work in titles, for example [[guides/Start]].",
+        "Markdown",
+        "  # Heading through ###### Heading; blank lines split paragraphs.",
+        "  **bold**, *italic*, ~~strike~~, and `inline code`.",
+        "  [label](URL/file/#heading), ![alt](image), and <https://...>.",
+        "  ```ruby ... ``` fenced code (Ruby highlighting); > block quote.",
+        "  - bullet, 1. numbered; indent items to nest lists.",
+        "  - [ ] unchecked and - [x] checked task items.",
+        "  --- horizontal rule.",
+        "  | cells | with | a | --- | separator row makes a table.",
+        "  Images appear as linked alt text in the preview.",
+        "Wiki links open existing Markdown/text pages; missing pages show an error.",
+        "Escape or click X to close this help.",
+    ];
+    let bounds = wiki_help_bounds(geo);
+    d.draw_rectangle(
+        0,
+        0,
+        geo.width as i32,
+        geo.overlay_height as i32,
+        Color::new(0, 0, 0, 190),
+    );
+    d.draw_rectangle_rec(bounds, BAR_BG);
+    d.draw_rectangle_lines_ex(bounds, 1.0, DIVIDER_ACTIVE);
+    let pad = (geo.ui_font * 0.8).max(4.0);
+    let title_size = (geo.ui_font * 1.15).min((bounds.height / 12.0).max(5.0));
+    let close = wiki_help_close(geo);
+    d.draw_rectangle_rec(close, FIELD_BG);
+    ui::draw_text(
+        d,
+        "X",
+        close.x + (close.width - title_size) / 2.0,
+        close.y + (close.height - title_size) / 2.0,
+        title_size,
+        TEXT,
+    );
+    ui::draw_text(
+        d,
+        "Markdown & Wiki Help",
+        bounds.x + pad,
+        bounds.y + pad * 0.55,
+        title_size,
+        TEXT,
+    );
+
+    let top = bounds.y + pad + title_size * 1.8;
+    let available = (bounds.y + bounds.height - pad - top).max(1.0);
+    let font = geo
+        .ui_font
+        .min(available / (LINES.len() as f32 * 1.35))
+        .max(5.0);
+    let line_height = font * 1.35;
+    let (x, y, width, height) = crate::rendering::scissor_rect(bounds);
+    let mut clip = d.begin_scissor_mode(x, y, width, height);
+    for (index, line) in LINES.iter().enumerate() {
+        let line = ui::fit(line, font, bounds.width - pad * 2.0);
+        ui::draw_text(
+            &mut clip,
+            &line,
+            bounds.x + pad,
+            top + index as f32 * line_height,
+            font,
+            if matches!(index, 0 | 4) { CARET } else { TEXT },
+        );
+    }
+}
+
 struct Editor {
     path: PathBuf,
     buffer: Buffer,
@@ -1118,6 +1225,7 @@ struct Editor {
     find: Option<Find>,
     /// The preview link under the mouse.
     hover_link: Option<String>,
+    wiki_help_open: bool,
     cursor: MouseCursor,
     menu: Option<bool>,
     file_dialog: Option<FileDialog>,
@@ -1289,6 +1397,7 @@ impl Editor {
             last_divider_click: f64::NEG_INFINITY,
             find: None,
             hover_link: None,
+            wiki_help_open: false,
             cursor: MouseCursor::MOUSE_CURSOR_DEFAULT,
             menu: None,
             file_dialog: None,
@@ -1483,6 +1592,15 @@ impl Editor {
     }
 
     fn controls(&mut self, rl: &mut RaylibHandle, geo: &Geometry, now: f64, ctrl: bool, shift: bool) -> bool {
+        if self.wiki_help_open {
+            if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE)
+                || (rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+                    && point_in(wiki_help_close(geo), rl.get_mouse_position()))
+            {
+                self.wiki_help_open = false;
+            }
+            return true;
+        }
         if self.file_dialog.is_some() {
             if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) { self.file_dialog = None; return true; }
             let dialog = self.file_dialog.as_mut().unwrap();
@@ -1526,6 +1644,13 @@ impl Editor {
         }
         if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
             let mouse = rl.get_mouse_position();
+            if self.language == Language::Markdown
+                && point_in(wiki_help_button(geo), mouse)
+                && mouse.y < geo.bar_h
+            {
+                self.wiki_help_open = true;
+                return true;
+            }
             let button_width = geo.ui_font * 3.5;
             if mouse.y < geo.bar_h && mouse.x < button_width * 2.0 {
                 let edit = mouse.x >= button_width;
@@ -2378,6 +2503,9 @@ impl Editor {
                 ui::draw_text(d, label, button.x + padding, button.y + (button.height - font) / 2.0, font, TEXT);
             }
         }
+        if self.wiki_help_open {
+            draw_wiki_help(d, geo);
+        }
     }
 
     fn draw_editor<D: RaylibDraw>(&mut self, d: &mut D, geo: &Geometry, rect: Rectangle, now: f64) {
@@ -2803,19 +2931,37 @@ impl Editor {
         };
         let right = format!("{}{view}", self.language.name());
         let width = ui::measure(&right, size);
-        let show_right = geo.width > width + ui::measure("MMMMMM", size) + pad * 3.0;
+        let help_button = (self.language == Language::Markdown).then(|| wiki_help_button(geo));
+        let right_edge = help_button.map_or(geo.width - pad, |button| button.x - pad);
+        let show_right =
+            right_edge > width + ui::measure("MMMMMM", size) + pad * 2.0;
         let title_left = size * 7.0 + pad;
-        let title_room = geo.width - title_left - pad - if show_right { width + pad } else { 0.0 };
+        let title_room = right_edge
+            - title_left
+            - pad
+            - if show_right { width + pad } else { 0.0 };
         let title = ui::fit(&title, size, title_room);
         ui::draw_text(d, &title, title_left, (geo.bar_h - size) / 2.0, size, TEXT);
         if show_right {
             ui::draw_text(
                 d,
                 &right,
-                geo.width - width - pad,
+                right_edge - width,
                 (geo.bar_h - size) / 2.0,
                 size,
                 DIM,
+            );
+        }
+        if let Some(button) = help_button {
+            d.draw_rectangle_rec(button, FIELD_BG);
+            d.draw_rectangle_lines_ex(button, 1.0, DIVIDER);
+            ui::draw_text(
+                d,
+                "Markdown Help",
+                button.x + size * 0.45,
+                button.y + (button.height - size) / 2.0,
+                size,
+                TEXT,
             );
         }
 

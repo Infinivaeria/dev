@@ -736,6 +736,21 @@ fn markdown_inline(chars: &[char], from: usize, spans: &mut Vec<Span>) {
                 }
             }
             '[' => {
+                if chars[index..].starts_with(&['[', '[']) {
+                    let end = chars[index + 2..]
+                        .windows(2)
+                        .position(|pair| pair == [']', ']'])
+                        .map(|offset| index + 4 + offset);
+                    if let Some(end) = end {
+                        spans.push(Span {
+                            start: index,
+                            end,
+                            token: Token::Link,
+                        });
+                        index = end;
+                        continue;
+                    }
+                }
                 let close = chars[index..]
                     .iter()
                     .position(|c| *c == ']')
@@ -1242,6 +1257,10 @@ mod tests {
         assert_eq!(
             tokens(Language::Markdown, "> quoted"),
             vec![("> quoted".into(), Token::Quote)]
+        );
+        assert_eq!(
+            tokens(Language::Markdown, "See [[Page|label]]"),
+            vec![("[[Page|label]]".into(), Token::Link)]
         );
     }
 

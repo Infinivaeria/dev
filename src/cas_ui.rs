@@ -87,6 +87,7 @@ struct UiState {
     editing: bool,
     status: String,
     error: bool,
+    help_open: bool,
     close: bool,
 }
 
@@ -101,6 +102,7 @@ impl UiState {
             editing: false,
             status: "Ready".to_owned(),
             error: false,
+            help_open: false,
             close: false,
         };
         state.load();
@@ -274,8 +276,32 @@ impl UiState {
     fn input(&mut self, rl: &mut RaylibHandle) {
         let ctrl = rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
             || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL);
+        let dismiss_key = rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) && self.help_open;
         if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
-            self.close = true;
+            if self.help_open {
+                self.help_open = false;
+            } else {
+                self.close = true;
+            }
+        }
+        if dismiss_key {
+            while rl.get_char_pressed().is_some() {}
+            return;
+        }
+        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
+        let mouse = geometry.to_logical(rl.get_mouse_position());
+        let help_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+            && (hit_cell(mouse, rect(1000.0, 52.0, 82.0, 32.0))
+                || (self.help_open && hit_cell(mouse, rect(894.0, 548.0, 78.0, 30.0))));
+        if help_clicked {
+            self.help_open = !self.help_open;
+            self.editing = false;
+            while rl.get_char_pressed().is_some() {}
+            return;
+        }
+        if self.help_open {
+            while rl.get_char_pressed().is_some() {}
+            return;
         }
         if ctrl && rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
             self.run_selected();
@@ -312,8 +338,6 @@ impl UiState {
             while rl.get_char_pressed().is_some() {}
         }
 
-        let geometry = ui_geometry(rl.get_screen_width() as f32, rl.get_screen_height() as f32);
-        let mouse = geometry.to_logical(rl.get_mouse_position());
         let clicked = |bounds: Rectangle| {
             rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) && hit_cell(mouse, bounds)
         };
@@ -394,6 +418,7 @@ impl UiState {
         ] {
             button(d, bounds, label, false);
         }
+        button(d, rect(1000.0, 52.0, 82.0, 32.0), "Help", self.help_open);
         d.draw_text(
             "Ctrl+Enter run   Ctrl+S save   Ctrl+N new",
             610,
@@ -556,6 +581,9 @@ impl UiState {
                 Color::new(205, 243, 222, 255)
             },
         );
+        if self.help_open {
+            draw_help(d);
+        }
     }
 }
 
@@ -638,6 +666,37 @@ fn button(d: &mut impl RaylibDraw, bounds: Rectangle, label: &str, active: bool)
         size,
         Color::WHITE,
     );
+}
+
+fn draw_help(d: &mut impl RaylibDraw) {
+    d.draw_rectangle_rec(
+        rect(0.0, 0.0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
+        Color::new(0, 0, 0, 190),
+    );
+    let bounds = rect(110.0, 166.0, 880.0, 428.0);
+    panel(d, bounds, "CAS Notebook Help");
+    for (index, line) in [
+        "Type a command in the Selected command field, then press Ctrl+Enter or Run.",
+        "Use New Cell to add a command, Duplicate to copy the selected cell, and Delete to remove it.",
+        "Save and Load store the notebook as JSON. The default notebook is saved under ~/.config/selenite/cas/.",
+        "Examples: simplify (x^2-1)/(x-1)   |   expand (x+1)^4   |   diff x^3; x",
+        "More examples: integrate x^2; x   |   solve x+y=3,x-y=1; x,y   |   determinant [[1,2],[3,4]]",
+        "Matrix commands include determinant, inverse, matrix-solve, rank and eigenvalues.",
+        "Select a template to insert it into the current command. Results and steps appear in the cell list.",
+        "Keyboard: Ctrl+Enter run, Ctrl+S save, Ctrl+N new cell, Ctrl+D duplicate, Delete remove, Esc close help.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        d.draw_text(
+            line,
+            bounds.x as i32 + 22,
+            bounds.y as i32 + 48 + index as i32 * 38,
+            15,
+            Color::new(224, 231, 242, 255),
+        );
+    }
+    button(d, rect(894.0, 548.0, 78.0, 30.0), "Close", false);
 }
 
 fn text_width(text: &str, size: i32, limit: usize) -> i32 {
