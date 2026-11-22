@@ -1,7 +1,7 @@
 [package]
 name = "selenite"
-version = "18.0.0-rc.1"
-edition = "2021"
+version = "19.0.0-rc.1"
+edition = "2024"
 rust-version = "1.88"
 description = "Linux-native multimedia, graphics, audio, CAS, Ruby IDE, raylib runtime and host suite"
 license = "MIT"

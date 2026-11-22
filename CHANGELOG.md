@@ -1,5 +1,26 @@
 # Changelog
 
+## 19.0.0-rc.1 (2026-11-20)
+
+### Added
+
+- Audio Studio now classifies live microphone pitch into Low, Mid and High
+  voice bands and provides independently adjustable -18 to +18 dB sensitivity
+  for each band before the noise-gate and talking/loud pose thresholds.
+- The Audio Studio status area shows the active pitch band, detected pitch and
+  applied gain so frequency response can be tuned while speaking.
+
+### Improved
+
+- Audio Studio now opens at 1280 x 960 with a 960 x 720 minimum and a wider,
+  uniformly scaled sidebar, giving the additional controls larger sliders and
+  touch targets across window sizes.
+- Low/Mid/High gain settings clamp safely, persist with normal settings and
+  named presets, and leave unpitched input at its original microphone level.
+
+This is a release candidate. Existing Audio Studio settings remain backward
+compatible and use zero dB frequency gains by default.
+
 ## 18.0.0-rc.1 (2026-11-19)
 
 ### Finalized

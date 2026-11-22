@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 pub struct Settings {
     pub gate_db: f32,
     pub loud_delta_db: f32,
+    pub low_voice_gain_db: f32,
+    pub mid_voice_gain_db: f32,
+    pub high_voice_gain_db: f32,
     pub bounce: f32,
     pub scale: f32,
     pub mirror: bool,
@@ -21,6 +24,9 @@ impl Default for Settings {
         Self {
             gate_db: -45.0,
             loud_delta_db: 24.0,
+            low_voice_gain_db: 0.0,
+            mid_voice_gain_db: 0.0,
+            high_voice_gain_db: 0.0,
             bounce: 1.0,
             scale: 1.0,
             mirror: false,
@@ -41,6 +47,9 @@ impl Settings {
         };
         settings.gate_db = finite_clamp(settings.gate_db, -90.0, -26.0, -45.0);
         settings.loud_delta_db = finite_clamp(settings.loud_delta_db, 8.0, 36.0, 24.0);
+        settings.low_voice_gain_db = finite_clamp(settings.low_voice_gain_db, -18.0, 18.0, 0.0);
+        settings.mid_voice_gain_db = finite_clamp(settings.mid_voice_gain_db, -18.0, 18.0, 0.0);
+        settings.high_voice_gain_db = finite_clamp(settings.high_voice_gain_db, -18.0, 18.0, 0.0);
         settings.bounce = finite_clamp(settings.bounce, 0.0, 2.0, 1.0);
         settings.scale = finite_clamp(settings.scale, 0.2, 1.0, 1.0);
         settings.background %= 3;
@@ -155,13 +164,25 @@ mod tests {
     fn named_presets_restore_voice_controls_without_switching_devices_or_assets() {
         let directory = std::env::temp_dir().join(format!("mic-freq-presets-{}", std::process::id()));
         let config = directory.join("settings.json");
-        let mut settings = Settings { gate_db: -60.0, mirror: true, device: Some("Current microphone".into()), assets: Some("current avatar".into()), ..Settings::default() };
+        let mut settings = Settings {
+            gate_db: -60.0,
+            low_voice_gain_db: 7.0,
+            high_voice_gain_db: -5.0,
+            mirror: true,
+            device: Some("Current microphone".into()),
+            assets: Some("current avatar".into()),
+            ..Settings::default()
+        };
         settings.save_preset(&config, "Quiet room").unwrap();
         assert_eq!(Settings::presets(&config).unwrap(), vec!["Quiet room"]);
         settings.gate_db = -30.0;
+        settings.low_voice_gain_db = -18.0;
+        settings.high_voice_gain_db = 18.0;
         settings.mirror = false;
         settings.load_preset(&config, "Quiet room").unwrap();
         assert_eq!(settings.gate_db, -60.0);
+        assert_eq!(settings.low_voice_gain_db, 7.0);
+        assert_eq!(settings.high_voice_gain_db, -5.0);
         assert!(settings.mirror);
         assert_eq!(settings.device.as_deref(), Some("Current microphone"));
         assert_eq!(settings.assets, Some("current avatar".into()));
@@ -176,6 +197,9 @@ mod tests {
         let path = dir.join("settings.json");
         let settings = Settings {
             gate_db: 20.0,
+            low_voice_gain_db: 100.0,
+            mid_voice_gain_db: 9.0,
+            high_voice_gain_db: -100.0,
             bounce: -4.0,
             scale: 8.0,
             device: Some("Test input".into()),
@@ -184,6 +208,9 @@ mod tests {
         settings.save(&path).unwrap();
         let loaded = Settings::load(&path).unwrap();
         assert_eq!(loaded.gate_db, -26.0);
+        assert_eq!(loaded.low_voice_gain_db, 18.0);
+        assert_eq!(loaded.mid_voice_gain_db, 9.0);
+        assert_eq!(loaded.high_voice_gain_db, -18.0);
         assert_eq!(loaded.bounce, 0.0);
         assert_eq!(loaded.scale, 1.0);
         assert_eq!(loaded.device, settings.device);

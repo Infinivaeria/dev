@@ -87,14 +87,14 @@ fn preset_dialog_saves_and_loads_with_the_mouse() {
         .arg(window.0.id().to_string())
         .args([
             "wait:1200",
-            "click:685,765",
-            "click:685,765",
+            "click:1000,933",
+            "click:1000,933",
             "key:F2",
             "type:GUI preset",
-            "click:250,345",
+            "click:440,375",
             "wait:200",
-            "click:446,345",
-            "click:642,345",
+            "click:636,375",
+            "click:832,375",
             "close",
         ])
         .status()

@@ -679,7 +679,21 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
         "rustby_sdk":true, "complete_documentation":true,
         "linux_host":true, "linux_appliance":true
     });
-    let metadata = serde_json::json!({"schema":1, "name":"selenite", "version":env!("CARGO_PKG_VERSION"), "binaries":binaries, "components":{"mic_freq":{"version":mic_freq_version}}, "capabilities":capabilities});
+    let metadata = serde_json::json!({
+        "schema":1,
+        "name":"selenite",
+        "version":env!("CARGO_PKG_VERSION"),
+        "binaries":binaries,
+        "components":{"mic_freq":{
+            "version":mic_freq_version,
+            "binary":"mic_freq/mic_freq",
+            "launcher":"mic_freq/mic_freq",
+            "shell_shim":"run-mic-freq.sh",
+            "assets":"mic_freq/assets",
+            "manuals":["mic_freq/README.md","mic_freq/MANUAL.md"]
+        }},
+        "capabilities":capabilities
+    });
     std::fs::write(
         fixture.join("package-info.json"),
         serde_json::to_vec(&metadata).unwrap(),

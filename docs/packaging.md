@@ -48,7 +48,7 @@ dist/
   run.sh                    portable launcher for selenite
   run-game.sh               portable launcher for selenite-game
   run-ide.sh                IDE launcher with a bundled starter project
-  run-mic-freq.sh           PNGTuber Studio launcher
+  run-mic-freq.sh           optional PNGTuber compatibility shim
   package-info.json         release version, binaries, Ruby build metadata
   LICENSE
   lib/                      Ruby shared library, stdlib, native extensions
@@ -63,7 +63,7 @@ dist/
   docs/
   examples/
   licenses/
-selenite-18.0.0-rc.1-portable.tar.gz
+selenite-19.0.0-rc.1-portable.tar.gz
 ```
 
 `./package.sh` builds Selenite with embedded Ruby support (`scripting`) and the
@@ -81,27 +81,29 @@ To keep earlier bundles, use `./package.sh --output dist-v11 --verify` (or add
 `--game --output dist-game-v11` for the runtime-only package). Existing output
 folders without recognized Selenite package metadata are not removed. The
 package metadata includes project, IDE, terminal, native API and `mic_freq`
-capabilities, plus the companion's version, binary, launcher and asset paths.
+capabilities, plus the companion's version, direct binary, optional shell shim,
+asset and manual paths.
 Run `./dist-v11/run-ide.sh` for the starter, or pass your own project directory.
-Run `./dist-v11/run-mic-freq.sh` for the studio. Its launcher accepts the same
-folder, `--device`, `--capture` and `--list-devices` arguments as the executable.
+Run `./dist-v11/mic_freq/mic_freq` directly for the studio. It accepts the same
+folder, `--device`, `--capture` and `--list-devices` arguments as the optional
+compatibility launcher.
 
-Extract the full archive into any directory and start the sibling launchers;
-there is no Cargo build step or source checkout required after extraction:
+Extract the full archive into any directory and start the executables directly;
+there is no Cargo build step, source checkout or shell launcher required:
 
 ```sh
 mkdir selenite-suite
-tar -xzf selenite-18.0.0-rc.1-portable.tar.gz -C selenite-suite
-./selenite-suite/run.sh
-./selenite-suite/run-ide.sh
-./selenite-suite/run-mic-freq.sh --capture
+tar -xzf selenite-19.0.0-rc.1-portable.tar.gz -C selenite-suite
+./selenite-suite/selenite
+./selenite-suite/selenite --ide
+./selenite-suite/mic_freq/mic_freq --capture
 ```
 
 ## Distribute Into Your Home
 
 `distribute.sh` copies the full archive into `$HOME` and extracts it into
 `$HOME/selenite-VERSION` by default, such as
-`/home/aylon-ayrlon/selenite-18.0.0-rc.1`. It requires Python 3.11 with safe tar
+`/home/aylon-ayrlon/selenite-19.0.0-rc.1`. It requires Python 3.11 with safe tar
 extraction support (Python 3.12+ recommended), but not Cargo to use an existing
 archive. Build first as your normal user:
 
@@ -115,7 +117,7 @@ The default destination uses your writable home directory and normally does not
 require elevated permissions. You can choose another installation directory:
 
 ```sh
-./distribute.sh --destination "$HOME/selenite-18.0.0-rc.1"
+./distribute.sh --destination "$HOME/selenite-19.0.0-rc.1"
 ```
 
 **Updates replace package files in place.** Existing files at package paths are
@@ -166,7 +168,7 @@ dist-game/
   docs/
   examples/games/
   licenses/
-selenite-game-18.0.0-rc.1-portable.tar.gz
+selenite-game-19.0.0-rc.1-portable.tar.gz
 ```
 
 The game-only bundle intentionally does **not** include the organizer, IDE or
@@ -296,8 +298,8 @@ working OpenGL, Pillow, and, for native organizer tests, `cc` and X11 developmen
 headers. They open temporary windows and close them automatically:
 
 ```sh
-python3 tests/game_runtime_smoke.py --archive selenite-18.0.0-rc.1-portable.tar.gz \
-  --graphics --artifacts test-artifacts/integration-18.0.0-rc.1
+  python3 tests/game_runtime_smoke.py --archive selenite-19.0.0-rc.1-portable.tar.gz \
+  --graphics --artifacts test-artifacts/integration-19.0.0-rc.1
 python3 tests/game_runtime_smoke.py --graphics
 python3 tests/network_runtime_smoke.py --graphics
 ```

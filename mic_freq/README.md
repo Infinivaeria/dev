@@ -73,7 +73,8 @@ or tempo; Selenite reports that uncertainty instead of inventing a result.
 ## Run
 
 The full Selenite extraction package includes this executable, adjacent artwork,
-and these guides. After extracting the suite, use `./run-mic-freq.sh`; add
+and these guides. After extracting the suite, run `./mic_freq/mic_freq` directly;
+the optional `run-mic-freq.sh` wrapper is only for compatibility. Add
 `--capture` for OBS or pass your own avatar folder and `--device "NAME"`.
 Build that combined package from the repository root with
 `./package.sh --output dist-v11 --verify`. The game-only `--game` package does
@@ -102,7 +103,7 @@ PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transpare
 
 ## Studio controls
 
-- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, and loud threshold. The input meter shows microphone level in dBFS. **Composer** opens the music workspace without interrupting the PNGTuber process.
+- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, loud threshold, and independent Low/Mid/High voice gains. Detected low voices (below 160 Hz), mid voices (160-300 Hz), and high voices (above 300 Hz) receive their selected dB adjustment before the gate and loud threshold are evaluated. The input meter shows the resulting level in dBFS and the detected pitch. **Composer** opens the music workspace without interrupting the PNGTuber process.
 - **Calibrate noise gate** measures three seconds of room noise. Stay quiet during calibration, then test normal speech and adjust as needed.
 - Checkboxes toggle microphone mute, horizontal mirroring, and automatic blinking.
 - **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.
@@ -110,11 +111,11 @@ PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transpare
 - Drop one avatar folder or pose image into the window to switch sets. **R** reloads edited artwork. Failed reloads preserve the current set.
 - Background swatches select green, magenta, or dark. **Clean capture** hides every control, meter, and error message. Press **C** or click the canvas to return.
 
-The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Smoothing and 4 dB hysteresis reduce flicker.
+The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Low, Mid and High voice gains each range from -18 to +18 dB, allowing deeper or brighter microphones and voices to use different sensitivities. Unpitched input receives no frequency adjustment. Smoothing and 4 dB hysteresis reduce flicker.
 
 Full-scene anti-aliasing uses 4-sample supersampling: the avatar and text render at twice the window's width and height before being smoothly downsampled. Avatar textures also use mipmaps and trilinear filtering. The render buffer follows window resizing; this avoids requesting a window MSAA mode that can fail on some GLX drivers.
 
-The resizable studio has a 720 x 600 minimum window size. Avatar size preserves aspect ratio and reserves enough headroom for maximum bounce. Controls and mouse hit areas scale together.
+The resizable studio opens at 1280 x 960 with a 960 x 720 minimum window size. Avatar size preserves aspect ratio and reserves enough headroom for maximum bounce. The full sidebar and mouse hit areas scale together with the window so the additional frequency controls remain easy to tune.
 
 Linux needs ALSA + X11/GL dev packages (`libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`) plus `cmake` and `clang`.
 
@@ -132,6 +133,6 @@ The window itself is opaque: image transparency is composited onto the selected 
 
 ## Saved preferences
 
-Gate, loud sensitivity, bounce, size, mirror, blink, background, input device, and avatar folder save automatically after edits and on normal exit. Linux uses `$XDG_CONFIG_HOME/mic_freq/settings.json`, or `~/.config/mic_freq/settings.json`. Mute, manual pose, and clean-capture mode are session-only; `--capture` enables clean capture at startup. `--device` and a folder argument override saved choices and become the new preferences.
+Gate, loud sensitivity, Low/Mid/High voice gains, bounce, size, mirror, blink, background, input device, and avatar folder save automatically after edits and on normal exit. Linux uses `$XDG_CONFIG_HOME/mic_freq/settings.json`, or `~/.config/mic_freq/settings.json`. Mute, manual pose, and clean-capture mode are session-only; `--capture` enables clean capture at startup. `--device` and a folder argument override saved choices and become the new preferences.
 
 Existing alarm/timer/stopwatch and grid-launch source modules are preserved, but are not wired into this PNGTuber executable.

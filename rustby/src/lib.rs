@@ -15,7 +15,8 @@ pub fn configure_runtime() -> Result<(), String> {
         let mut directories = paths.to_vec();
         directories.extend(std::env::split_paths(&inherited).filter(|path| !paths.contains(path)));
         let value = std::env::join_paths(directories).map_err(|error| error.to_string())?;
-        std::env::set_var("RUBYLIB", value);
+        // SAFETY: configure_runtime must run at startup before worker threads.
+        unsafe { std::env::set_var("RUBYLIB", value) };
     }
     Ok(())
 }

@@ -186,7 +186,7 @@ def native_mic_freq(repository, runtime, workspace, environment, artifacts):
         if process.poll() is None:
             process.kill()
             process.communicate()
-    print("PASS: relocated mic_freq launcher, adjacent artwork priority, rendered avatar, isolated preferences and clean shutdown")
+    print("PASS: relocated mic_freq direct executable, adjacent artwork priority, rendered avatar, isolated preferences and clean shutdown")
 
 
 def main():
@@ -291,8 +291,11 @@ def main():
             with (repository / "mic_freq/Cargo.toml").open("rb") as manifest:
                 assert component["version"] == tomllib.load(manifest)["package"]["version"]
             assert component["binary"] == "mic_freq/mic_freq"
-            assert component["launcher"] == "run-mic-freq.sh"
+            assert component["launcher"] == "mic_freq/mic_freq"
+            assert component["shell_shim"] == "run-mic-freq.sh"
             assert component["assets"] == "mic_freq/assets"
+            assert component["manuals"] == ["mic_freq/README.md", "mic_freq/MANUAL.md"]
+            assert all((runtime / manual).is_file() for manual in component["manuals"])
             assert (runtime / component["assets"]).is_dir()
             for source in (repository / "mic_freq/assets").rglob("*"):
                 if source.is_file():
@@ -304,12 +307,13 @@ def main():
             environment.pop(variable, None)
         environment["SELENITE_HOME"] = str(workspace / "organizer-home")
         if "selenite" in expected_binaries:
-            result = run([str(runtime / "run-mic-freq.sh"), "--help"], environment=environment, directory=workspace)
+            result = run([str(runtime / "mic_freq/mic_freq"), "--help"], environment=environment, directory=workspace)
             assert result.stdout.startswith("mic_freq [avatar-folder]")
             assert "--device" in result.stdout and "--capture" in result.stdout
-            print("PASS: extracted mic_freq executable, launcher, artwork, component metadata and help")
+            print("PASS: extracted mic_freq direct executable, artwork, manuals, component metadata and help")
             run([str(runtime / "run-ide.sh"), "--version"], environment=environment, directory=workspace)
-            run([str(runtime / "mic_freq/mic_freq"), "--help"], environment=environment, directory=workspace)
+            if (runtime / "run-mic-freq.sh").is_file():
+                run([str(runtime / "run-mic-freq.sh"), "--help"], environment=environment, directory=workspace)
             poses = workspace / "generated pngtuber poses"
             run([str(runtime / "selenite"), "--graphics-pngtuber",
                  str(runtime / "mic_freq/assets/idle.png"), str(poses)],

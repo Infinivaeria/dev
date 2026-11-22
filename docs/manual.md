@@ -1,6 +1,6 @@
 # Selenite instruction manual
 
-For **Selenite 18.0.0-rc.1** as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, Linux host/appliance support, and the Audio Studio companion. Some features require a build with Ruby scripting enabled. See the [IDE guide](ide.md), [project guide](projects.md), and [Linux appliance guide](linux-appliance.md).
+For **Selenite 19.0.0-rc.1** as implemented in this checkout. This manual covers the desktop application, its command-line modes, local data, Ruby automation, plugins, games, Linux host/appliance support, and the Audio Studio companion. Some features require a build with Ruby scripting enabled. See the [IDE guide](ide.md), [project guide](projects.md), and [Linux appliance guide](linux-appliance.md).
 
 ## Contents
 

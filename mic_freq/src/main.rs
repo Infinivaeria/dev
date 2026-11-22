@@ -10,7 +10,9 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 const WINDOW_SAMPLES: usize = 2048;
-const BASE_WINDOW_SIZE: f32 = 900.0;
+const BASE_WINDOW_WIDTH: f32 = 1280.0;
+const BASE_WINDOW_HEIGHT: f32 = 960.0;
+const SIDE_PANEL_WIDTH: f32 = 340.0;
 // Render at twice the width and height, then average four samples per pixel.
 // This also smooths textures/text and avoids the driver's GLX MSAA crash.
 const SUPERSAMPLE_SCALE: u32 = 2;
@@ -161,7 +163,7 @@ fn resolve_assets(
 }
 
 fn ui_scale(width: f32, height: f32) -> f32 {
-    width.max(1.0).min(height.max(1.0)) / BASE_WINDOW_SIZE
+    (width.max(1.0) / BASE_WINDOW_WIDTH).min(height.max(1.0) / BASE_WINDOW_HEIGHT)
 }
 
 fn avatar_rect(width: f32, height: f32, texture_width: f32, texture_height: f32) -> Rectangle {
@@ -415,7 +417,7 @@ impl PresetMenu {
 }
 
 fn control_rect(panel: f32, top: f32) -> Rectangle {
-    Rectangle::new(panel, top, 258.0, 34.0)
+    Rectangle::new(panel, top, 298.0, 34.0)
 }
 
 fn button(d: &mut impl RaylibDraw, rect: Rectangle, text: &str, selected: bool, mouse: Vector2) {
@@ -693,12 +695,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok();
 
     let (mut rl, thread) = raylib::init()
-        .size(900, 900)
+        .size(BASE_WINDOW_WIDTH as i32, BASE_WINDOW_HEIGHT as i32)
         .title("mic_freq - Selenite Audio Studio")
         .resizable()
         .build();
     rl.set_target_fps(60);
-    rl.set_window_min_size(720, 600);
+    rl.set_window_min_size(960, 720);
     rl.set_exit_key(None);
     rl.get_font_default()
         .texture()
@@ -732,16 +734,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         let (width, height) = (rl.get_screen_width().max(1), rl.get_screen_height().max(1));
         let (w, h) = (width as f32, height as f32);
         let ui = ui_scale(w, h);
-        let panel = w / ui - 278.0;
+        let panel = w / ui - SIDE_PANEL_WIDTH + 22.0;
         let position = rl.get_mouse_position();
         let mouse = Vector2::new(position.x / ui, position.y / ui);
         let mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let presets_were_open = presets.open;
-        let preset_button = Rectangle::new(panel, 56.0, 82.0, 28.0);
-        let composer_button = Rectangle::new(panel + 88.0, 56.0, 82.0, 28.0);
-        let graphics_button = Rectangle::new(panel + 176.0, 56.0, 82.0, 28.0);
-        let analysis_button = Rectangle::new(panel, 748.0, 126.0, 34.0);
-        let capture_button = Rectangle::new(panel + 132.0, 748.0, 126.0, 34.0);
+        let preset_button = Rectangle::new(panel, 56.0, 94.0, 28.0);
+        let composer_button = Rectangle::new(panel + 100.0, 56.0, 94.0, 28.0);
+        let graphics_button = Rectangle::new(panel + 200.0, 56.0, 94.0, 28.0);
+        let analysis_button = Rectangle::new(panel, 916.0, 146.0, 34.0);
+        let capture_button = Rectangle::new(panel + 152.0, 916.0, 146.0, 34.0);
         if !capture && mouse_clicked && preset_button.check_collision_point_rec(mouse) {
             presets.open = true;
         }
@@ -795,14 +797,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             if !capture && clicked && analysis_button.check_collision_point_rec(mouse) {
                 analysis_visible = !analysis_visible;
             }
-            if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(410.0) {
+            if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(605.0) {
                 muted = !muted;
             }
-            if rl.is_key_pressed(KeyboardKey::KEY_X) || hit(450.0) {
+            if rl.is_key_pressed(KeyboardKey::KEY_X) || hit(645.0) {
                 settings.mirror = !settings.mirror;
                 changed = true;
             }
-            if hit(490.0) {
+            if hit(685.0) {
                 settings.blink = !settings.blink;
                 changed = true;
             }
@@ -819,7 +821,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .into_iter()
             .enumerate()
             {
-                let rect = Rectangle::new(panel + index as f32 * 65.0, 130.0, 63.0, 34.0);
+                let rect = Rectangle::new(panel + index as f32 * 74.0, 130.0, 72.0, 34.0);
                 if rl.is_key_pressed(key) || (clicked && rect.check_collision_point_rec(mouse)) {
                     forced = index.checked_sub(1).map(|index| AvatarState::ALL[index]);
                 }
@@ -832,7 +834,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 settings.gate_db = (settings.gate_db - 2.0).max(-90.0);
                 changed = true;
             }
-            for (index, top) in [246.0, 309.0, 372.0, 830.0].into_iter().enumerate() {
+            for (index, top) in [246.0, 306.0, 354.0, 402.0, 450.0, 504.0, 557.0]
+                .into_iter()
+                .enumerate()
+            {
                 if hit(top) {
                     active_slider = Some(index);
                 }
@@ -841,23 +846,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                 active_slider = None;
             }
             if let Some(index) = active_slider {
-                let amount = ((mouse.x - panel) / 258.0).clamp(0.0, 1.0);
+                let amount = ((mouse.x - panel) / 298.0).clamp(0.0, 1.0);
                 match index {
                     0 => settings.gate_db = -90.0 + amount * 64.0,
-                    1 => settings.bounce = amount * 2.0,
-                    2 => settings.scale = 0.2 + amount * 0.8,
-                    _ => settings.loud_delta_db = 8.0 + amount * 28.0,
+                    1 => settings.low_voice_gain_db = -18.0 + amount * 36.0,
+                    2 => settings.mid_voice_gain_db = -18.0 + amount * 36.0,
+                    3 => settings.high_voice_gain_db = -18.0 + amount * 36.0,
+                    4 => settings.loud_delta_db = 8.0 + amount * 28.0,
+                    5 => settings.bounce = amount * 2.0,
+                    6 => settings.scale = 0.2 + amount * 0.8,
+                    _ => unreachable!(),
                 }
                 changed = true;
             }
             for index in 0..3 {
-                let rect = Rectangle::new(panel + index as f32 * 86.0, 554.0, 76.0, 30.0);
+                let rect = Rectangle::new(panel + index as f32 * 101.0, 757.0, 96.0, 30.0);
                 if clicked && rect.check_collision_point_rec(mouse) {
                     settings.background = index;
                     changed = true;
                 }
             }
-            if hit(657.0) {
+            if hit(831.0) {
                 match MicCapture::devices() {
                     Ok(devices) => {
                         let next = settings
@@ -898,7 +907,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Err(failure) => error = Some(format!("Devices: {failure}")),
                 }
             }
-            if hit(704.0) && mic.as_ref().is_some_and(|mic| !mic.has_failed()) {
+            if hit(871.0) && mic.as_ref().is_some_and(|mic| !mic.has_failed()) {
                 calibration = Some((0.0, -90.0));
             }
             let mut reload = rl.is_key_pressed(KeyboardKey::KEY_R);
@@ -966,7 +975,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         voice.gate_db = settings.gate_db;
         voice.loud_delta_db = settings.loud_delta_db;
-        let detected = voice.update(if muted { -180.0 } else { db }, dt);
+        let (voice_db, voice_band, voice_gain) = voice::frequency_adjusted_db(
+            db,
+            live_analysis.fundamental_hz,
+            settings.low_voice_gain_db,
+            settings.mid_voice_gain_db,
+            settings.high_voice_gain_db,
+        );
+        let detected = voice.update(if muted { -180.0 } else { voice_db }, dt);
         let state = if muted {
             AvatarState::Idle
         } else {
@@ -1005,7 +1021,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             &images.poses[state.index()]
         };
         let (tw, th) = (texture.width() as f32, texture.height() as f32);
-        let canvas_width = if capture { w } else { w - 300.0 * ui };
+        let canvas_width = if capture {
+            w
+        } else {
+            w - SIDE_PANEL_WIDTH * ui
+        };
         let avatar = framed_avatar(canvas_width, h, tw, th, settings.scale, offset);
         let backgrounds = [
             Color::new(0, 255, 0, 255),
@@ -1041,7 +1061,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             d.draw_rectangle(
                 (panel - 22.0) as i32,
                 0,
-                300,
+                SIDE_PANEL_WIDTH as i32,
                 (h / ui).ceil() as i32,
                 Color::new(25, 27, 31, 255),
             );
@@ -1050,7 +1070,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             button(&mut d, composer_button, "Composer", false, mouse);
             button(&mut d, graphics_button, "Graphics", false, mouse);
             d.draw_text(
-                state.label(),
+                &format!(
+                    "{} · {}{}",
+                    state.label(),
+                    voice_band.label(),
+                    if voice_gain == 0.0 {
+                        String::new()
+                    } else {
+                        format!(" {voice_gain:+.0} dB")
+                    }
+                ),
                 panel as i32,
                 94,
                 20,
@@ -1060,20 +1089,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let selected = forced.map_or(0, |state| state.index() + 1) == index;
                 button(
                     &mut d,
-                    Rectangle::new(panel + index as f32 * 65.0, 130.0, 63.0, 34.0),
+                    Rectangle::new(panel + index as f32 * 74.0, 130.0, 72.0, 34.0),
                     label,
                     selected,
                     mouse,
                 );
             }
             d.draw_text(
-                &format!("Input  {db:.0} dBFS"),
+                &format!(
+                    "Input  {db:.0} dBFS  ·  Pitch  {}",
+                    live_analysis
+                        .fundamental_hz
+                        .map_or("—".to_owned(), |frequency| format!("{frequency:.0} Hz"))
+                ),
                 panel as i32,
                 180,
                 18,
                 Color::LIGHTGRAY,
             );
-            slider(&mut d, control_rect(panel, 194.0), (db + 90.0) / 90.0);
+            slider(&mut d, control_rect(panel, 194.0), (voice_db + 90.0) / 90.0);
             for (top, label, amount) in [
                 (
                     246.0,
@@ -1081,44 +1115,59 @@ fn main() -> Result<(), Box<dyn Error>> {
                     (settings.gate_db + 90.0) / 64.0,
                 ),
                 (
-                    309.0,
-                    format!("Bounce  {:.0}%", settings.bounce * 100.0),
-                    settings.bounce / 2.0,
+                    306.0,
+                    format!("Low voice gain  {:+.0} dB", settings.low_voice_gain_db),
+                    (settings.low_voice_gain_db + 18.0) / 36.0,
                 ),
                 (
-                    372.0,
-                    format!("Avatar size  {:.0}%", settings.scale * 100.0),
-                    (settings.scale - 0.2) / 0.8,
+                    354.0,
+                    format!("Mid voice gain  {:+.0} dB", settings.mid_voice_gain_db),
+                    (settings.mid_voice_gain_db + 18.0) / 36.0,
                 ),
                 (
-                    830.0,
+                    402.0,
+                    format!("High voice gain  {:+.0} dB", settings.high_voice_gain_db),
+                    (settings.high_voice_gain_db + 18.0) / 36.0,
+                ),
+                (
+                    450.0,
                     format!(
                         "Loud threshold  {:.0} dB",
                         settings.gate_db + settings.loud_delta_db
                     ),
                     (settings.loud_delta_db - 8.0) / 28.0,
                 ),
+                (
+                    504.0,
+                    format!("Bounce  {:.0}%", settings.bounce * 100.0),
+                    settings.bounce / 2.0,
+                ),
+                (
+                    557.0,
+                    format!("Avatar size  {:.0}%", settings.scale * 100.0),
+                    (settings.scale - 0.2) / 0.8,
+                ),
             ] {
                 d.draw_text(&label, panel as i32, top as i32 - 22, 18, Color::LIGHTGRAY);
                 slider(&mut d, control_rect(panel, top), amount);
             }
-            toggle(&mut d, control_rect(panel, 410.0), "Mute microphone", muted);
+            toggle(&mut d, control_rect(panel, 605.0), "Mute microphone", muted);
             toggle(
                 &mut d,
-                control_rect(panel, 450.0),
+                control_rect(panel, 645.0),
                 "Mirror avatar",
                 settings.mirror,
             );
-            toggle(&mut d, control_rect(panel, 490.0), "Blink", settings.blink);
-            d.draw_text("Background", panel as i32, 532, 18, Color::LIGHTGRAY);
+            toggle(&mut d, control_rect(panel, 685.0), "Blink", settings.blink);
+            d.draw_text("Background", panel as i32, 735, 18, Color::LIGHTGRAY);
             for (index, color) in backgrounds.into_iter().enumerate() {
-                let rect = Rectangle::new(panel + index as f32 * 86.0, 554.0, 76.0, 30.0);
+                let rect = Rectangle::new(panel + index as f32 * 101.0, 757.0, 96.0, 30.0);
                 d.draw_rectangle_rec(rect, color);
                 if settings.background == index {
                     d.draw_rectangle_lines_ex(rect, 3.0, Color::RAYWHITE);
                 }
             }
-            d.draw_text("Microphone", panel as i32, 598, 18, Color::LIGHTGRAY);
+            d.draw_text("Microphone", panel as i32, 800, 18, Color::LIGHTGRAY);
             let input_name = mic.as_ref().map_or("Unavailable", |input| {
                 if input.has_failed() {
                     "Disconnected"
@@ -1126,18 +1175,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     &input.device_name
                 }
             });
-            let short_name: String = input_name.chars().take(23).collect();
-            d.draw_text(&short_name, panel as i32, 626, 18, Color::GRAY);
+            let short_name: String = input_name.chars().take(30).collect();
+            d.draw_text(&short_name, panel as i32, 819, 16, Color::GRAY);
             button(
                 &mut d,
-                control_rect(panel, 657.0),
+                control_rect(panel, 831.0),
                 "Next input / reconnect",
                 false,
                 mouse,
             );
             button(
                 &mut d,
-                control_rect(panel, 704.0),
+                control_rect(panel, 871.0),
                 if calibration.is_some() {
                     "Measuring room noise..."
                 } else {
@@ -1213,7 +1262,11 @@ mod tests {
         assert!(composer.composer);
         assert_eq!(composer.assets, Some(PathBuf::from("song.json")));
         assert!(options(["--self-test"].map(Into::into)).unwrap().self_test);
-        assert!(options(["--graphics-studio"].map(Into::into)).unwrap().graphics);
+        assert!(
+            options(["--graphics-studio"].map(Into::into))
+                .unwrap()
+                .graphics
+        );
         assert!(options(["--device"].map(Into::into)).is_err());
         assert!(options(["--unknown"].map(Into::into)).is_err());
         assert!(options(["one", "two"].map(Into::into)).is_err());
@@ -1234,13 +1287,26 @@ mod tests {
 
     #[test]
     fn layout_scales_proportionally_when_window_grows() {
-        assert_eq!(ui_scale(900.0, 900.0), 1.0);
-        assert_eq!(ui_scale(1800.0, 1800.0), 2.0);
-        assert_eq!(ui_scale(450.0, 450.0), 0.5);
-        let normal = avatar_rect(900.0, 900.0, 512.0, 512.0);
-        let large = avatar_rect(1800.0, 1800.0, 512.0, 512.0);
-        assert_eq!(normal, Rectangle::new(75.0, 75.0, 750.0, 750.0));
-        assert_eq!(large, Rectangle::new(150.0, 150.0, 1500.0, 1500.0));
+        assert_eq!(ui_scale(BASE_WINDOW_WIDTH, BASE_WINDOW_HEIGHT), 1.0);
+        assert_eq!(
+            ui_scale(BASE_WINDOW_WIDTH * 2.0, BASE_WINDOW_HEIGHT * 2.0),
+            2.0
+        );
+        assert_eq!(
+            ui_scale(BASE_WINDOW_WIDTH / 2.0, BASE_WINDOW_HEIGHT / 2.0),
+            0.5
+        );
+        assert_eq!(ui_scale(960.0, 720.0), 0.75);
+        assert!(916.0 + 34.0 <= BASE_WINDOW_HEIGHT);
+        let normal = avatar_rect(BASE_WINDOW_WIDTH, BASE_WINDOW_HEIGHT, 512.0, 512.0);
+        let large = avatar_rect(
+            BASE_WINDOW_WIDTH * 2.0,
+            BASE_WINDOW_HEIGHT * 2.0,
+            512.0,
+            512.0,
+        );
+        assert_eq!(normal, Rectangle::new(235.0, 75.0, 810.0, 810.0));
+        assert_eq!(large, Rectangle::new(470.0, 150.0, 1620.0, 1620.0));
     }
 
     #[test]

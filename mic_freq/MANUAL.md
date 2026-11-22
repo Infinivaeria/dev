@@ -2,9 +2,12 @@
 
 ## Requirements
 
-In the full Selenite extraction package, run `./run-mic-freq.sh` from its root.
-It launches `mic_freq/mic_freq` and uses adjacent `mic_freq/assets` by default.
-Use `./run-mic-freq.sh /path/to/avatar --capture` to override the artwork.
+In the full Selenite extraction package, run `./mic_freq/mic_freq` directly from
+its root. It resolves the package root, adjacent `mic_freq/assets`, portable
+tools and preferences without a launcher script or working-directory setup.
+Use `./mic_freq/mic_freq /path/to/avatar --capture` to override the artwork.
+The legacy `run-mic-freq.sh` wrapper, when present, remains only a compatibility
+shim.
 Rust and development headers are only needed to build from source, not to run
 the extracted executable. The host still supplies graphics, ALSA and microphone
 permissions. The dedicated game-only package does not contain this studio.
@@ -41,13 +44,13 @@ avatar workflow.
 | X | Mirror avatar horizontally |
 | Esc | Quit and save preferences |
 
-Hotkeys work only while the app has keyboard focus. The mouse-accessible sidebar includes pose selection, gate/bounce/size/loud-threshold sliders, mute/mirror/blink checkboxes, background swatches, device selection, calibration, and clean capture.
+Hotkeys work only while the app has keyboard focus. The mouse-accessible sidebar includes pose selection, gate/Low/Mid/High gain/loud-threshold/bounce/size sliders, mute/mirror/blink checkboxes, background swatches, device selection, calibration, and clean capture. The studio opens at 1280 x 960 and scales its entire 340-logical-pixel sidebar and hit areas together down to its 960 x 720 minimum.
 
 The default gate is -45 dBFS. Talking starts at gate + 4 dB and returns to idle below the gate. Loud talking requires 300 ms of sustained input above gate + 24 dB by default and returns to talking 4 dB below its entry threshold. A drop below the loud threshold resets the entry timer. Idle enters talking first, even for loud input. The loud-threshold slider adjusts that offset from 8 to 36 dB without changing the gate; raise it if normal speech reaches loud too easily. Volume smoothing reduces flicker. Mute overrides both microphone input and forced poses; it does not mute the system microphone or OBS audio.
 
 Each state bounces continuously with smoothly changing strength. At 100%, idle rises up to 3 logical pixels, talking 16, and loud talking 30. Strength can be set from 0 to 200%. The avatar reserves bounce headroom, scales with the window, and preserves aspect ratio. Blink art switches without changing bounce phase.
 
-The image choice depends on microphone *loudness*, not the words you say or the pitch of your voice. Speech is not recorded or transcribed.
+The image choice depends on microphone loudness after the selected frequency response is applied. Low fundamental pitches below 160 Hz use **Low voice gain**, pitches from 160 through 300 Hz use **Mid voice gain**, and higher pitches use **High voice gain**. Each adjustment ranges from -18 to +18 dB; a missing or unpitched signal uses the raw level. This allows different sensitivity for deeper, mid-range, and brighter voices without recording or transcribing speech.
 
 ## Composer
 
@@ -147,6 +150,6 @@ See [OBS setup](README.md#obs-setup) for capture and chroma-key steps. Clean cap
 
 Run `cargo run -p mic_freq -- --help` for launch options. A folder argument or `--device NAME` overrides and updates saved preferences. `--list-devices` prints the available input names without opening a window. `--capture` starts without controls.
 
-Preferences save after changes and on normal exit using an atomic file replacement. Linux stores them at `$XDG_CONFIG_HOME/mic_freq/settings.json`, defaulting to `~/.config/mic_freq/settings.json`. Delete that file while the app is closed to reset preferences. Mute, forced poses, and capture mode are not restored on startup.
+Preferences, including Low/Mid/High voice gains, save after changes and on normal exit using an atomic file replacement. Linux stores them at `$XDG_CONFIG_HOME/mic_freq/settings.json`, defaulting to `~/.config/mic_freq/settings.json`. Delete that file while the app is closed to reset preferences. Mute, forced poses, and capture mode are not restored on startup.
 
 This executable focuses on PNGTuber streaming. Existing time-tool and grid-launch source modules remain in the repository but are not connected to its UI. Webcam face tracking, Live2D/VRM models, animated GIF playback, global hotkeys, and direct OBS control are outside its current capabilities.

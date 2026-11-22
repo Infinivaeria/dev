@@ -7352,7 +7352,8 @@ fn terminal_file_command(path: &Path) -> Command {
 /// Makes `selenite` resolvable and identifiable from commands run in a terminal.
 fn export_terminal_environment() {
     let Ok(exe) = env::current_exe() else { return };
-    env::set_var("SELENITE_EXE", &exe);
+    // SAFETY: These terminal modes run from startup before creating application threads.
+    unsafe { env::set_var("SELENITE_EXE", &exe) };
     let Some(directory) = exe.parent() else {
         return;
     };
@@ -7362,7 +7363,8 @@ fn export_terminal_environment() {
     if !paths.iter().any(|path| path == directory) {
         paths.push(directory.to_path_buf());
         if let Ok(joined) = env::join_paths(paths) {
-            env::set_var("PATH", joined);
+            // SAFETY: These terminal modes run from startup before creating application threads.
+            unsafe { env::set_var("PATH", joined) };
         }
 
     }

@@ -73,11 +73,14 @@ fn target_size((width, height): (i32, i32)) -> Result<(i32, i32), String> {
 // Scale via projection, not a 2D camera: EndMode3D restores this projection
 // and overlays continue to use the same window coordinates afterwards.
 unsafe fn projection((width, height): (i32, i32)) {
-    ffi::rlMatrixMode(ffi::RL_PROJECTION as i32);
-    ffi::rlLoadIdentity();
-    ffi::rlOrtho(0.0, width as f64, height as f64, 0.0, 0.0, 1.0);
-    ffi::rlMatrixMode(ffi::RL_MODELVIEW as i32);
-    ffi::rlLoadIdentity();
+    // SAFETY: raylib rendering is active and these calls use valid matrix-state arguments.
+    unsafe {
+        ffi::rlMatrixMode(ffi::RL_PROJECTION as i32);
+        ffi::rlLoadIdentity();
+        ffi::rlOrtho(0.0, width as f64, height as f64, 0.0, 0.0, 1.0);
+        ffi::rlMatrixMode(ffi::RL_MODELVIEW as i32);
+        ffi::rlLoadIdentity();
+    }
 }
 
 pub struct Frame<'a, 'b> {

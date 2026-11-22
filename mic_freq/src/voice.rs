@@ -55,6 +55,57 @@ pub fn amplitude_to_db(amplitude: f32) -> f32 {
     20.0 * amplitude.max(1e-9).log10()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoiceBand {
+    Low,
+    Mid,
+    High,
+    Unknown,
+}
+
+impl VoiceBand {
+    pub fn from_frequency(frequency_hz: Option<f32>) -> Self {
+        match frequency_hz {
+            Some(frequency) if frequency.is_finite() && frequency > 0.0 && frequency < 160.0 => {
+                Self::Low
+            }
+            Some(frequency)
+                if frequency.is_finite() && frequency >= 160.0 && frequency <= 300.0 =>
+            {
+                Self::Mid
+            }
+            Some(frequency) if frequency.is_finite() && frequency > 300.0 => Self::High,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Mid => "Mid",
+            Self::High => "High",
+            Self::Unknown => "Unpitched",
+        }
+    }
+}
+
+pub fn frequency_adjusted_db(
+    db: f32,
+    frequency_hz: Option<f32>,
+    low_gain_db: f32,
+    mid_gain_db: f32,
+    high_gain_db: f32,
+) -> (f32, VoiceBand, f32) {
+    let band = VoiceBand::from_frequency(frequency_hz);
+    let gain = match band {
+        VoiceBand::Low => low_gain_db,
+        VoiceBand::Mid => mid_gain_db,
+        VoiceBand::High => high_gain_db,
+        VoiceBand::Unknown => 0.0,
+    };
+    (db + gain, band, gain)
+}
+
 #[derive(Default)]
 pub struct AvatarMotion {
     phase: f32,
@@ -240,5 +291,30 @@ mod tests {
         assert_eq!(voice.update(-35.0, 1.0), AvatarState::Idle);
         voice.gate_db = -45.0;
         assert_eq!(voice.update(-35.0, 1.0), AvatarState::Talking);
+    }
+
+    #[test]
+    fn voice_frequency_bands_apply_independent_gain() {
+        assert_eq!(VoiceBand::from_frequency(Some(125.0)), VoiceBand::Low);
+        assert_eq!(VoiceBand::from_frequency(Some(220.0)), VoiceBand::Mid);
+        assert_eq!(VoiceBand::from_frequency(Some(440.0)), VoiceBand::High);
+        assert_eq!(VoiceBand::from_frequency(Some(0.0)), VoiceBand::Unknown);
+        assert_eq!(
+            VoiceBand::from_frequency(Some(f32::NAN)),
+            VoiceBand::Unknown
+        );
+        assert_eq!(VoiceBand::from_frequency(None), VoiceBand::Unknown);
+        assert_eq!(
+            frequency_adjusted_db(-30.0, Some(125.0), 6.0, 0.0, -4.0),
+            (-24.0, VoiceBand::Low, 6.0)
+        );
+        assert_eq!(
+            frequency_adjusted_db(-30.0, Some(440.0), 6.0, 0.0, -4.0),
+            (-34.0, VoiceBand::High, -4.0)
+        );
+        assert_eq!(
+            frequency_adjusted_db(-30.0, None, 6.0, 0.0, -4.0),
+            (-30.0, VoiceBand::Unknown, 0.0)
+        );
     }
 }

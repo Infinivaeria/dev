@@ -27,15 +27,19 @@ fn prepend_paths(name: &str, paths: Vec<PathBuf>) -> Result<(), String> {
     let mut seen = HashSet::new();
     let paths = paths.into_iter().chain(env::split_paths(&inherited).filter(|path| !path.as_os_str().is_empty())).filter(|path| seen.insert(path.clone()));
     let joined = env::join_paths(paths).map_err(|error| format!("Invalid {name}: {error}"))?;
-    env::set_var(name, joined);
+    // SAFETY: initialize() is called at process startup before any worker threads exist.
+    unsafe { env::set_var(name, joined) };
     Ok(())
 }
 
 pub fn initialize() -> Result<(), String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     let root = package_root(&executable);
-    env::set_var("SELENITE_ROOT", &root);
-    env::set_var("SELENITE_EXE", &executable);
+    // SAFETY: Both executable entry points call initialize() before creating threads.
+    unsafe {
+        env::set_var("SELENITE_ROOT", &root);
+        env::set_var("SELENITE_EXE", &executable);
+    }
     if root.join("lib").is_dir() {
         prepend_paths(if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" }, vec![root.join("lib")])?;
     }
@@ -47,9 +51,13 @@ pub fn initialize() -> Result<(), String> {
         }
     }
     prepend_paths("PATH", command_paths)?;
-    if env::var_os("RUBY_YJIT_ENABLE").is_none() { env::set_var("RUBY_YJIT_ENABLE", "1"); }
+    if env::var_os("RUBY_YJIT_ENABLE").is_none() {
+        // SAFETY: This startup-time mutation happens before application threads exist.
+        unsafe { env::set_var("RUBY_YJIT_ENABLE", "1") };
+    }
     if env::var_os("SELENITE_PARTITIONED_ARRAY_LIB").is_none() && root.join("partitioned_array/lib").is_dir() {
-        env::set_var("SELENITE_PARTITIONED_ARRAY_LIB", root.join("partitioned_array/lib"));
+        // SAFETY: This startup-time mutation happens before application threads exist.
+        unsafe { env::set_var("SELENITE_PARTITIONED_ARRAY_LIB", root.join("partitioned_array/lib")) };
     }
     Ok(())
 }

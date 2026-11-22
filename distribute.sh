@@ -225,6 +225,10 @@ def main():
         mic_component = metadata.get("components", {}).get("mic_freq", {}) if isinstance(metadata, dict) else {}
         if not isinstance(metadata, dict) or metadata.get("schema") != 1 or metadata.get("name") != "selenite" or metadata.get("version") != version or mic_component.get("version") != mic_freq_version:
             raise ValueError(f"Expected a full Selenite {version} package with mic_freq {mic_freq_version}")
+        if (mic_component.get("binary") != "mic_freq/mic_freq"
+                or mic_component.get("launcher") != "mic_freq/mic_freq"
+                or mic_component.get("manuals") != ["mic_freq/README.md", "mic_freq/MANUAL.md"]):
+            raise ValueError("mic_freq component must launch directly and include its README and manual")
         capabilities = metadata.get("capabilities", {})
         required_capabilities = {
             "mic_freq", "audio_composer", "pitch_analysis", "harmonic_analysis",
@@ -241,7 +245,7 @@ def main():
         if not any(name.startswith("lib/libavcodec.so") for name in names) or not any(
                 name.startswith("lib/libavutil.so") for name in names):
             raise ValueError("Incomplete suite: portable ffmpeg codec libraries are missing")
-        for name in required_binaries | required_tools | set(launchers) | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md"}:
+        for name in required_binaries | required_tools | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md"}:
             if name not in names:
                 raise ValueError(f"Incomplete suite: missing {name}")
         for name in ("lib/ruby", "lib/ruby-arch", "mic_freq/assets", "docs", "examples"):
@@ -288,10 +292,14 @@ def main():
                 raise ValueError(f"Refusing to preserve assets through a symlink: {mic_freq_directory}")
             if existing_assets.is_symlink() or (existing_assets.exists() and not existing_assets.is_dir()):
                 raise ValueError(f"Refusing to preserve invalid mic_freq assets path: {existing_assets}")
-            for name in required_binaries | set(launchers):
+            for name in required_binaries:
                 path = extracted / name
                 if not path.is_file() or not path.stat().st_mode & stat.S_IXUSR:
                     raise ValueError(f"Missing or non-executable suite component: {name}")
+            for name in launchers:
+                path = extracted / name
+                if path.exists() and (not path.is_file() or not path.stat().st_mode & stat.S_IXUSR):
+                    raise ValueError(f"Invalid optional shell shim: {name}")
             extracted.chmod(0o755)
             record = {"schema": 1, "version": version, "archive": copied_archive.name, "sha256": checksum,
                       "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -319,8 +327,10 @@ def main():
                 raise ValueError("Distributed archive checksum mismatch")
             staged_checksum.replace(parent / staged_checksum.name)
     print(f"Updated Selenite {version}: {destination} (package files replaced in place; existing mic_freq assets left untouched)")
+    print(f"  {destination / 'mic_freq/mic_freq'}")
     for launcher in launchers:
-        print(f"  {destination / launcher}")
+        if (destination / launcher).is_file():
+            print(f"  {destination / launcher} (compatibility shim)")
 
 
 try:

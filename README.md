@@ -1,6 +1,6 @@
 # Selenite
 
-**Version 18.0.0-rc.1**. See [CHANGELOG.md](CHANGELOG.md).
+**Version 19.0.0-rc.1**. See [CHANGELOG.md](CHANGELOG.md).
 
 Selenite is now a **pure Rust** desktop application built with
 [`raylib-rs`](https://crates.io/crates/raylib). It provides an infinite,
@@ -128,7 +128,9 @@ Remaining requested usability work:
 - **Complete extraction package:** `package.sh` bundles the organizer, IDE, game
   runtime and `mic_freq` PNGTuber Studio together, with launchers, Ruby libraries,
   artwork and guides. After extraction use `run.sh`, `run-ide.sh`,
-  `run-game.sh` or `run-mic-freq.sh`. `distribute.sh` copies and safely extracts
+  `run-game.sh` or `run-mic-freq.sh`. Those scripts are optional compatibility
+  shims; `selenite`, `selenite-game`, and `mic_freq/mic_freq` run directly.
+  `distribute.sh` copies and safely extracts
   the full suite under `$HOME/selenite` (or a chosen destination),
   replacing package files while preserving unmatched user files and existing
   avatar assets. See
@@ -907,11 +909,11 @@ This script:
 4. Generates a portable launcher script `dist/run.sh` that sets up `LD_LIBRARY_PATH` and `RUBYLIB`.
 5. Copies `docs/`, `examples/`, `README.md` and `CHANGELOG.md` into the bundle.
 6. Compresses the release bundle into `selenite-<version>-portable.tar.gz`
-  (for example `selenite-18.0.0-rc.1-portable.tar.gz`).
+  (for example `selenite-19.0.0-rc.1-portable.tar.gz`).
 
 To test or run the standalone package on any Linux machine:
 ```sh
-mkdir selenite && tar -xzf selenite-18.0.0-rc.1-portable.tar.gz -C selenite
+mkdir selenite && tar -xzf selenite-19.0.0-rc.1-portable.tar.gz -C selenite
 cd selenite
 ./run.sh [--profile NAME | --grid FILE.json | --script FILE.rb | --game GAME.rb ...]
 ./run.sh --game examples/games/pong.rb
