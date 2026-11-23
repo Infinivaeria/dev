@@ -1,5 +1,16 @@
 # Changelog
 
+## mic_freq 4.0.0
+
+### Improved
+
+- Frequency animation windows use a fully scaled 900 x 760 logical layout,
+  keeping High voice instructions clear of the gain controls at every size.
+- Global and per-frequency artwork can be replaced through an in-app browser.
+- Blinks remain visible for about 220 ms with a randomized 2–5 second interval.
+- Music Composer is now owned by the global Selenite suite; Audio Studio remains
+  focused on microphone-driven PNGTuber presentation.
+
 ## 19.0.0-rc.1 (2026-11-20)
 
 ### Added

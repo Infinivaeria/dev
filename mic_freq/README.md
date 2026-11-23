@@ -8,6 +8,7 @@ the dialog without exiting the studio.
 mic_freq --save-preset "Quiet room"
 mic_freq --list-presets
 mic_freq --preset "Quiet room"
+mic_freq --version
 ```
 
 Save/list commands do not need a display or microphone. Presets live beside the
@@ -15,19 +16,20 @@ studio settings in a `presets` directory.
 
 # Selenite Audio Studio
 
-mic_freq is **Selenite Audio Studio**: an offline PNGTuber and chiptune
-composition suite built with raylib and cpal. Microphone volume selects idle,
-talking, or loud talking artwork, the Composer button opens a separate
-multitrack music workspace, and Graphics opens Selenite Graphics Studio for
-creating pose artwork. It does not require an internet connection.
+mic_freq is **Selenite Audio Studio**: an offline PNGTuber studio built with
+raylib and cpal. Microphone volume selects idle,
+talking, or loud talking artwork, and detected low/mid/high pitch can select a
+different open and closed-eye animation set. The Music Composer and Graphics
+Studio are separate global Selenite tools, while Audio Studio focuses on live
+voice-driven artwork. It does not require an internet connection.
 
 ## Chiptune Composer
 
-Click **Composer** in the Audio Studio sidebar, or launch:
+Open the Music Composer from the global Selenite toolbar/suite menu, or launch:
 
 ```sh
-mic_freq --composer
-mic_freq --composer song.json
+selenite --composer
+selenite --composer song.json
 mic_freq --self-test
 ```
 
@@ -51,7 +53,7 @@ or a WAV/OGG file to assign it as the selected track's sampler source. Audio is
 resampled to 44.1 kHz and mixed to stereo. WAV export uses the same deterministic
 renderer used for playback.
 
-Projects are saved under `$XDG_CONFIG_HOME/mic_freq/projects` by default. Save
+Projects are saved under `$XDG_CONFIG_HOME/selenite/projects` by default. Save
 places the WAV export beside the project. `Ctrl+S` saves, Space starts/stops
 playback, arrow keys select the track/step, and Escape closes the Composer.
 
@@ -99,17 +101,26 @@ For distribution, copy any of these executables and your `assets/` folder togeth
 
 Put `idle.png`, `talking.png`, and `loud.png` in your avatar folder. Folder priority is: an explicit folder argument, an existing `assets/` folder beside the executable, then an existing saved folder. Missing saved folders are ignored. This means a copied executable uses its own adjacent artwork instead of an old installation's saved path. The selected directory is printed as `Avatar images: ...` at startup. This workspace builds into the root `target/` directory. Relative folder arguments are resolved from the working directory. Missing artwork uses a transparent, animated demo character, so the app works out of the box.
 
-PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transparent PNGs and identically sized canvases for consistent framing. Optional `idle_blink.png`, `talking_blink.png`, and `loud_blink.png` provide closed-eye variants; each must match its base pose's dimensions. Missing blink art falls back to the base pose. Only one image per name is allowed, case-insensitively.
+PNG, JPG/JPEG, BMP, GIF (first frame), QOI, and TGA are supported. Use transparent PNGs and identically sized canvases for consistent framing. Optional `idle_blink.png`, `talking_blink.png`, and `loud_blink.png` provide closed-eye variants; each must match its base pose's dimensions. Missing blink art falls back to the base pose. Only one image per name is allowed, case-insensitively. Click **Artwork** to replace any global open or closed-eye slot by browsing directories or dropping a file.
+
+For pitch-specific animation, add images named `low_idle`, `low_talking`, and
+`low_loud` (and the corresponding `mid_` and `high_` names). Each can also have
+a `_blink` closed-eye variant, such as `low_talking_blink.png`. All supported
+image formats are accepted. An absent pitch pose falls back to the matching
+global pose, and an absent pitch blink falls back to that pitch's open pose.
 
 ## Studio controls
 
-- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, loud threshold, and independent Low/Mid/High voice gains. Detected low voices (below 160 Hz), mid voices (160-300 Hz), and high voices (above 300 Hz) receive their selected dB adjustment before the gate and loud threshold are evaluated. The input meter shows the resulting level in dBFS and the detected pitch. **Composer** opens the music workspace without interrupting the PNGTuber process.
+- Sliders adjust the noise gate, bounce strength (0-200%), avatar size, loud threshold, and independent Low/Mid/High voice gains. Detected low voices (below 160 Hz), mid voices (160-300 Hz), and high voices (above 300 Hz) receive their selected dB adjustment before the gate and loud threshold are evaluated. The input meter shows the resulting level in dBFS and the detected pitch.
+- The **Edit** button beside each Low/Mid/High gain opens an independent frequency-animation window. Configure that pitch band's gain, bounce, avatar size, mirroring and blinking, then select one of the Idle/Talking/Loud open or closed-eye artwork slots and drop an image into it. **Custom animation** starts off so existing global controls continue to apply; turning it on or moving a per-band animation control enables that override. Remove Selected returns an artwork slot to the global pose. Closing the editor reloads its artwork and settings into Audio Studio.
+- **Help** or **F1** opens the in-app mic_freq guide. Its PNGTuber box section explains the capture-only mode and every exit shortcut.
+- Artwork and frequency editor controls use a fixed logical canvas that scales proportionally with their windows, so labels, buttons, sliders, and browse hit targets remain aligned at any size.
 - **Calibrate noise gate** measures three seconds of room noise. Stay quiet during calibration, then test normal speech and adjust as needed.
 - Checkboxes toggle microphone mute, horizontal mirroring, and automatic blinking.
 - **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.
 - **Next input / reconnect** cycles available microphones and the system default. Capture failure does not close the app; manual poses still work.
 - Drop one avatar folder or pose image into the window to switch sets. **R** reloads edited artwork. Failed reloads preserve the current set.
-- Background swatches select green, magenta, or dark. **Clean capture** hides every control, meter, and error message. Press **C** or click the canvas to return.
+- Background swatches select green, magenta, or dark. **PNGTuber box** hides every control, meter, error, and the operating-system title bar/frame. Press **C** or click the canvas once to restore them.
 
 The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Low, Mid and High voice gains each range from -18 to +18 dB, allowing deeper or brighter microphones and voices to use different sensitivities. Unpitched input receives no frequency adjustment. Smoothing and 4 dB hysteresis reduce flicker.
 
@@ -124,15 +135,15 @@ See [MANUAL.md](MANUAL.md) for shortcuts and troubleshooting. Run `cargo test -p
 ## OBS setup
 
 1. Select green or magenta, avoiding colors in your artwork.
-2. Click **Clean capture**, or launch with `--capture`.
+2. Click **PNGTuber box**, or launch with `--capture`.
 3. Add an OBS Window Capture source for **mic_freq - PNGTuber Studio**. On Wayland, use the capture method supported by your compositor and OBS, such as portal Screen Capture.
 4. Add a **Chroma Key** filter matching the background; adjust similarity and spill reduction around the edges. Crop window decorations if your capture method includes them.
-5. Press **C** in the app to edit settings, then return to clean capture before going live.
+5. Press **C** in the app to restore its controls/frame, then return to the PNGTuber box before going live.
 
 The window itself is opaque: image transparency is composited onto the selected background. This is a PNGTuber application, not a Live2D/VRM renderer or webcam face tracker. Hotkeys require the app window to be focused; global shortcuts and direct OBS integration are not implemented. GIFs are still images, not animated playback.
 
 ## Saved preferences
 
-Gate, loud sensitivity, Low/Mid/High voice gains, bounce, size, mirror, blink, background, input device, and avatar folder save automatically after edits and on normal exit. Linux uses `$XDG_CONFIG_HOME/mic_freq/settings.json`, or `~/.config/mic_freq/settings.json`. Mute, manual pose, and clean-capture mode are session-only; `--capture` enables clean capture at startup. `--device` and a folder argument override saved choices and become the new preferences.
+Gate, loud sensitivity, Low/Mid/High voice gains, frequency-specific animation controls, bounce, size, mirror, blink, background, input device, and avatar folder save automatically after edits and on normal exit. Pitch-specific images remain in the selected avatar folder. Linux uses `$XDG_CONFIG_HOME/mic_freq/settings.json`, or `~/.config/mic_freq/settings.json`. Mute, manual pose, and PNGTuber-box mode are session-only; `--capture` enables the box at startup. `--device` and a folder argument override saved choices and become the new preferences.
 
 Existing alarm/timer/stopwatch and grid-launch source modules are preserved, but are not wired into this PNGTuber executable.

@@ -64,6 +64,8 @@ pub enum VoiceBand {
 }
 
 impl VoiceBand {
+    pub const ALL: [Self; 3] = [Self::Low, Self::Mid, Self::High];
+
     pub fn from_frequency(frequency_hz: Option<f32>) -> Self {
         match frequency_hz {
             Some(frequency) if frequency.is_finite() && frequency > 0.0 && frequency < 160.0 => {
@@ -85,6 +87,42 @@ impl VoiceBand {
             Self::Mid => "Mid",
             Self::High => "High",
             Self::Unknown => "Unpitched",
+        }
+    }
+
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Mid => "mid",
+            Self::High => "high",
+            Self::Unknown => "unpitched",
+        }
+    }
+
+    pub fn range_label(self) -> &'static str {
+        match self {
+            Self::Low => "below 160 Hz",
+            Self::Mid => "160-300 Hz",
+            Self::High => "above 300 Hz",
+            Self::Unknown => "no stable pitch",
+        }
+    }
+
+    pub fn from_cli_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "low" => Some(Self::Low),
+            "mid" => Some(Self::Mid),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    pub fn index(self) -> Option<usize> {
+        match self {
+            Self::Low => Some(0),
+            Self::Mid => Some(1),
+            Self::High => Some(2),
+            Self::Unknown => None,
         }
     }
 }

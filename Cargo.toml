@@ -32,6 +32,11 @@ arboard = "3.6.1"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "rustls"] }
 symbolica = { version = "3.0.2", default-features = false, features = ["integer-malachite", "float-astro"] }
 nalgebra = "0.33"
+cpal = "0.16"
+hound = "3.5"
+lewton = "0.10"
+midly = "0.5"
+rustfft = "6.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -40,8 +45,10 @@ libc = "0.2"
 resolver = "2"
 members = [
     "mic_freq",
+    "partitioned_array_rs",
 ]
 default-members = [
     ".",
     "mic_freq",
+    "partitioned_array_rs",
 ]

@@ -1681,7 +1681,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mic_freq"
-version = "3.2.0-rc.1"
+version = "4.0.0"
 dependencies = [
  "chrono",
  "cpal",
@@ -2214,6 +2214,14 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "partitioned_array"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2983,14 +2991,19 @@ name = "selenite"
 version = "19.0.0-rc.1"
 dependencies = [
  "arboard",
+ "cpal",
+ "hound",
  "image",
  "imageproc",
+ "lewton",
  "libc",
  "magnus",
+ "midly",
  "nalgebra 0.33.3",
  "ndarray",
  "raylib",
  "reqwest",
+ "rustfft",
  "serde",
  "serde_json",
  "symbolica",

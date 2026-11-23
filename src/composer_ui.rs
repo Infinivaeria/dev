@@ -1,4 +1,4 @@
-//! Interactive raylib front-end for the music composer engine.
+//! Selenite music Composer front end.
 
 use crate::analysis::{self, Analysis, RhythmAnalysis, RhythmTracker};
 use crate::composer::{
@@ -131,7 +131,7 @@ impl UiState {
         if stem.is_empty() {
             stem = "untitled".into();
         }
-        Ok(root.join("mic_freq/projects").join(format!("{stem}.json")))
+        Ok(root.join("selenite/projects").join(format!("{stem}.json")))
     }
 
     fn save(&mut self) {
@@ -998,7 +998,7 @@ fn draw_help(d: &mut impl RaylibDraw) {
 pub fn run(project_path: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     let (mut rl, thread) = raylib::init()
         .size(LOGICAL_WIDTH as i32, LOGICAL_HEIGHT as i32)
-        .title("mic_freq - Composer")
+        .title("Selenite Music Composer")
         .resizable()
         .build();
     rl.set_target_fps(60);

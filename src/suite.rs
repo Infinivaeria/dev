@@ -19,6 +19,7 @@ enum Action {
     NewGame,
     NewApp,
     Audio,
+    Composer,
     Graphics,
     Cas,
     Assets,
@@ -60,6 +61,7 @@ impl Menu {
             ("New Game Project".into(), Action::NewGame),
             ("New Application Project".into(), Action::NewApp),
             ("Audio Studio".into(), Action::Audio),
+            ("Music Composer".into(), Action::Composer),
             ("Graphics Studio".into(), Action::Graphics),
             ("CAS Notebook".into(), Action::Cas),
             ("Asset Manager".into(), Action::Assets),
@@ -95,6 +97,7 @@ impl Menu {
                 Action::Terminal => "terminal shell command console raylib gpu",
                 Action::NewGame | Action::NewApp => "create project",
                 Action::Audio => "audio music composer chiptune midi wav ogg microphone avatar voice presets",
+                Action::Composer => "audio music composer chiptune midi wav ogg arrangement tracks",
                 Action::Graphics => "graphics image photo video gif layer filter pngtuber ffmpeg",
                 Action::Cas => "computer algebra cas symbolic math matrix determinant solve derivative integral notebook symbolica nalgebra",
                 Action::Assets => "inventory files images search",
@@ -130,6 +133,7 @@ impl Menu {
             ("IDE", "ide"),
             ("Terminal", "terminal"),
             ("Audio Studio", "audio"),
+            ("Music Composer", "composer"),
             ("Graphics Studio", "graphics"),
             ("CAS Notebook", "cas"),
             ("Starter Game", "game"),
@@ -293,6 +297,12 @@ impl Menu {
                 let audio = [parent.join("mic_freq/mic_freq"), parent.join("mic_freq")]
                     .into_iter().find(|path| path.is_file()).ok_or("Audio Studio is not installed beside Selenite. Build the full suite package first.")?;
                 command = Command::new(audio);
+            }
+            Action::Composer => {
+                command.arg("--composer");
+                if let Some(path) = source {
+                    command.arg(path);
+                }
             }
             Action::Graphics => {
                 command.arg("--graphics-studio");

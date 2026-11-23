@@ -72,11 +72,12 @@ def shortcut_tools(root, tool, target=None, grid=None):
         "ide": ("selenite-ide", "Selenite IDE", *launcher("selenite", "run-ide.sh", ["--ide", str(target)] if target else ["--ide"], [str(target)] if target else [])),
         "terminal": ("selenite-consolegpu", "Selenite Terminal", *launcher("selenite", "run.sh", ["--terminal-window"])),
         "audio": ("selenite-audio", "Selenite Audio Studio", *launcher("mic_freq/mic_freq", "run-mic-freq.sh")),
+        "composer": ("selenite-composer", "Selenite Music Composer", *launcher("selenite", "run.sh", ["--composer"])),
         "graphics": ("selenite-graphics", "Selenite Graphics Studio", *launcher("selenite", "run.sh", ["--graphics-studio"])),
         "cas": ("selenite-cas", "Selenite CAS Notebook", *launcher("selenite", "run.sh", ["--cas"])),
     }
     if tool == "all":
-        result = [tools[key] for key in ("organizer", "ide", "terminal", "audio", "graphics", "cas")]
+        result = [tools[key] for key in ("organizer", "ide", "terminal", "audio", "composer", "graphics", "cas")]
         result.append(("selenite-assets", "Selenite Asset Manager", *launcher("selenite", "run.sh", ["--inventory"])))
         starter = root / "examples/games/starter.rb"
         if ((root / "selenite-game").is_file() or (root / "run-game.sh").is_file()) and starter.is_file():
@@ -129,7 +130,7 @@ def main():
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--desktop", action="store_true", help="Also create desktop shortcuts")
     parser.add_argument("--desktop-only", action="store_true", help="Create only desktop shortcuts")
-    parser.add_argument("--tool", choices=("all", "organizer", "ide", "terminal", "audio", "graphics", "cas", "game", "assets", "grid", "file", "project", "project-ide"), default="all")
+    parser.add_argument("--tool", choices=("all", "organizer", "ide", "terminal", "audio", "composer", "graphics", "cas", "game", "assets", "grid", "file", "project", "project-ide"), default="all")
     parser.add_argument("--target", type=Path)
     parser.add_argument("--grid", type=Path)
     parser.add_argument("--json", action="store_true", help="Return shortcut paths as JSON")

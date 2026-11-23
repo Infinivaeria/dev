@@ -4,7 +4,7 @@ use mic_freq::audio::MicCapture;
 #[allow(dead_code)]
 mod portable;
 use mic_freq::studio::{self, BlinkState, Settings};
-use mic_freq::voice::{self, AvatarMotion, AvatarState, VoiceState};
+use mic_freq::voice::{self, AvatarMotion, AvatarState, VoiceBand, VoiceState};
 use raylib::prelude::*;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,36 @@ const IMAGE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "gif", "qoi", 
 
 fn image_file(dir: &Path, state: AvatarState) -> Result<Option<PathBuf>, Box<dyn Error>> {
     image_named(dir, state.file_stem())
+}
+
+fn capture_window_flag() -> WindowState {
+    WindowState::default().set_window_undecorated(true)
+}
+
+fn set_capture_window(rl: &mut RaylibHandle, enabled: bool) {
+    if rl.get_window_state().window_undecorated() == enabled {
+        return;
+    }
+    if enabled {
+        rl.set_window_state(capture_window_flag());
+    } else {
+        rl.clear_window_state(capture_window_flag());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaptureTransition {
+    Stable(bool),
+    Pending,
+}
+
+impl CaptureTransition {
+    fn request(current: bool, applied: bool, elapsed_since_apply: f32) -> Self {
+        if current != applied && elapsed_since_apply < 0.25 {
+            return Self::Pending;
+        }
+        Self::Stable(current)
+    }
 }
 
 fn image_named(dir: &Path, stem: &str) -> Result<Option<PathBuf>, Box<dyn Error>> {
@@ -53,9 +83,43 @@ fn image_named(dir: &Path, stem: &str) -> Result<Option<PathBuf>, Box<dyn Error>
     Ok(found)
 }
 
-struct AvatarImages {
+struct AvatarImageSet {
     poses: [Texture2D; 3],
     blinks: [Option<Texture2D>; 3],
+}
+
+struct FrequencyImageSet {
+    poses: [Option<Texture2D>; 3],
+    blinks: [Option<Texture2D>; 3],
+}
+
+struct AvatarImages {
+    base: AvatarImageSet,
+    frequencies: [FrequencyImageSet; 3],
+}
+
+impl AvatarImages {
+    fn texture(&self, band: VoiceBand, state: AvatarState, closed: bool) -> &Texture2D {
+        let state_index = state.index();
+        if let Some(index) = band.index() {
+            let profile = &self.frequencies[index];
+            if profile.poses[state_index].is_some() {
+                if closed {
+                    return profile.blinks[state_index]
+                        .as_ref()
+                        .unwrap_or_else(|| profile.poses[state_index].as_ref().unwrap());
+                }
+                return profile.poses[state_index].as_ref().unwrap();
+            }
+        }
+        if closed {
+            self.base.blinks[state_index]
+                .as_ref()
+                .unwrap_or(&self.base.poses[state_index])
+        } else {
+            &self.base.poses[state_index]
+        }
+    }
 }
 
 fn placeholder(state: AvatarState, closed: bool) -> Image {
@@ -134,9 +198,74 @@ fn load_images(
                 .transpose()?,
         );
     }
-    Ok(AvatarImages {
+    let base = AvatarImageSet {
         poses: textures.try_into().unwrap_or_else(|_| unreachable!()),
         blinks: blinks.try_into().unwrap_or_else(|_| unreachable!()),
+    };
+    let mut frequencies = Vec::new();
+    for band in VoiceBand::ALL {
+        let mut poses = Vec::new();
+        let mut frequency_blinks = Vec::new();
+        for state in AvatarState::ALL {
+            let open_stem = format!("{}_{}", band.cli_name(), state.file_stem());
+            let open = image_named(dir, &open_stem)?;
+            let blink_stem = format!("{open_stem}_blink");
+            let blink_path = image_named(dir, &blink_stem)?;
+            if blink_path.is_some() && open.is_none() {
+                return Err(format!(
+                    "{} needs a matching {open_stem} image",
+                    dir.join(blink_stem).display()
+                )
+                .into());
+            }
+            let open_image = if let Some(path) = &open {
+                Some(
+                    Image::load_image(&path.to_string_lossy())
+                        .map_err(|error| format!("could not load {}: {error}", path.display()))?,
+                )
+            } else {
+                None
+            };
+            let blink_image = if let Some(path) = &blink_path {
+                Some(
+                    Image::load_image(&path.to_string_lossy())
+                        .map_err(|error| format!("could not load {}: {error}", path.display()))?,
+                )
+            } else {
+                None
+            };
+            if let (Some(open), Some(blink)) = (&open_image, &blink_image) {
+                if open.width != blink.width || open.height != blink.height {
+                    return Err(format!(
+                        "{} must match its base pose dimensions",
+                        blink_path.as_ref().expect("blink path for image").display()
+                    )
+                    .into());
+                }
+            }
+            poses.push(
+                open_image
+                    .as_ref()
+                    .map(|image| texture_from_image(rl, thread, image))
+                    .transpose()?,
+            );
+            frequency_blinks.push(
+                blink_image
+                    .as_ref()
+                    .map(|image| texture_from_image(rl, thread, image))
+                    .transpose()?,
+            );
+        }
+        frequencies.push(FrequencyImageSet {
+            poses: poses.try_into().unwrap_or_else(|_| unreachable!()),
+            blinks: frequency_blinks
+                .try_into()
+                .unwrap_or_else(|_| unreachable!()),
+        });
+    }
+    Ok(AvatarImages {
+        base,
+        frequencies: frequencies.try_into().unwrap_or_else(|_| unreachable!()),
     })
 }
 
@@ -197,12 +326,13 @@ struct Options {
     capture: bool,
     list_devices: bool,
     help: bool,
+    version: bool,
     preset: Option<String>,
     save_preset: Option<String>,
     list_presets: bool,
     self_test: bool,
-    graphics: bool,
-    composer: bool,
+    artwork: bool,
+    frequency: Option<VoiceBand>,
 }
 
 fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options, Box<dyn Error>> {
@@ -211,12 +341,23 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help" | "-h") => options.help = true,
+            Some("--version" | "-V") => options.version = true,
             Some("--capture") => options.capture = true,
             Some("--list-devices") => options.list_devices = true,
             Some("--list-presets") => options.list_presets = true,
             Some("--self-test") => options.self_test = true,
-            Some("--composer") => options.composer = true,
-            Some("--graphics-studio") => options.graphics = true,
+            Some("--artwork") => options.artwork = true,
+            Some("--frequency") => {
+                let name = args
+                    .next()
+                    .ok_or("--frequency requires low, mid, or high")?
+                    .to_string_lossy()
+                    .into_owned();
+                options.frequency = Some(
+                    VoiceBand::from_cli_name(&name)
+                        .ok_or(format!("unknown frequency profile: {name}"))?,
+                );
+            }
             Some("--preset" | "--save-preset") => {
                 let name = args
                     .next()
@@ -238,7 +379,7 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
                 );
             }
             Some(flag) if flag.starts_with('-') => {
-                return Err(format!("unknown option: {flag}").into())
+                return Err(format!("unknown option: {flag}").into());
             }
             _ if options.assets.is_none() => options.assets = Some(PathBuf::from(arg)),
             _ => return Err("only one avatar folder may be supplied".into()),
@@ -258,6 +399,128 @@ struct PresetMenu {
     names: Vec<String>,
     offset: usize,
     message: String,
+}
+
+#[derive(Default)]
+struct HelpTab {
+    open: bool,
+    offset: usize,
+}
+
+impl HelpTab {
+    const LINES: [&'static str; 22] = [
+        "Selenite Audio Studio / mic_freq",
+        "",
+        "The microphone chooses Idle, Talking, or Loud artwork. Pitch also selects",
+        "the Low (<160 Hz), Mid (160-300 Hz), or High (>300 Hz) animation profile.",
+        "",
+        "Artwork",
+        "Use Artwork to browse and replace the six global open/closed-eye poses.",
+        "Each Low/Mid/High Edit window has the same image slots and controls.",
+        "Supported files: PNG, JPG/JPEG, BMP, GIF, QOI and TGA.",
+        "",
+        "Controls",
+        "C: PNGTuber box / studio controls. M: mute. R: reload artwork.",
+        "Up/Down: gate. B: bounce. X: mirror. 0: auto. 1/2/3: force pose.",
+        "Esc: close the open Help/Presets panel, or quit from the main studio.",
+        "",
+        "PNGTuber box",
+        "Click PNGTuber box at the bottom, or press C, to hide every control,",
+        "meter, error, panel and the operating-system window frame. The remaining",
+        "window is a clean avatar-only capture box.",
+        "",
+        "Press C or click the avatar box once to restore its frame and controls.",
+        "In OBS, capture this window and chroma-key its green/magenta background.",
+    ];
+
+    fn update(
+        &mut self,
+        rl: &mut RaylibHandle,
+        mouse: Vector2,
+        clicked: bool,
+        width: f32,
+        height: f32,
+    ) -> bool {
+        if rl.is_key_pressed(KeyboardKey::KEY_F1) {
+            self.open = !self.open;
+        }
+        if !self.open {
+            return false;
+        }
+        if rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+            self.open = false;
+            return false;
+        }
+        self.offset = (self.offset as isize - rl.get_mouse_wheel_move() as isize)
+            .clamp(0, Self::LINES.len().saturating_sub(18) as isize) as usize;
+        let bounds = Rectangle::new((width - 760.0) / 2.0, (height - 620.0) / 2.0, 760.0, 620.0);
+        let launch = Rectangle::new(
+            bounds.x + bounds.width - 212.0,
+            bounds.y + bounds.height - 54.0,
+            194.0,
+            36.0,
+        );
+        if clicked && launch.check_collision_point_rec(mouse) {
+            self.open = false;
+            return true;
+        }
+        false
+    }
+
+    fn draw(&self, d: &mut impl RaylibDraw, width: f32, height: f32, mouse: Vector2) {
+        if !self.open {
+            return;
+        }
+        d.draw_rectangle(0, 0, width as i32, height as i32, Color::new(0, 0, 0, 185));
+        let bounds = Rectangle::new((width - 760.0) / 2.0, (height - 620.0) / 2.0, 760.0, 620.0);
+        d.draw_rectangle_rec(bounds, Color::new(28, 29, 35, 255));
+        d.draw_text(
+            "mic_freq Help",
+            bounds.x as i32 + 18,
+            bounds.y as i32 + 14,
+            24,
+            Color::RAYWHITE,
+        );
+        d.draw_text(
+            "F1 or Esc closes · Scroll for more",
+            bounds.x as i32 + 18,
+            bounds.y as i32 + 48,
+            16,
+            Color::GRAY,
+        );
+        for (index, line) in Self::LINES.iter().skip(self.offset).take(18).enumerate() {
+            d.draw_text(
+                line,
+                bounds.x as i32 + 18,
+                bounds.y as i32 + 84 + index as i32 * 27,
+                if index == 0 && self.offset == 0 {
+                    19
+                } else {
+                    17
+                },
+                if line.ends_with("Controls")
+                    || line.ends_with("Artwork")
+                    || line.ends_with("PNGTuber box")
+                {
+                    Color::new(100, 220, 160, 255)
+                } else {
+                    Color::LIGHTGRAY
+                },
+            );
+        }
+        button(
+            d,
+            Rectangle::new(
+                bounds.x + bounds.width - 212.0,
+                bounds.y + bounds.height - 54.0,
+                194.0,
+                36.0,
+            ),
+            "Open PNGTuber box",
+            false,
+            mouse,
+        );
+    }
 }
 
 impl PresetMenu {
@@ -418,6 +681,14 @@ impl PresetMenu {
 
 fn control_rect(panel: f32, top: f32) -> Rectangle {
     Rectangle::new(panel, top, 298.0, 34.0)
+}
+
+fn frequency_slider_rect(panel: f32, top: f32) -> Rectangle {
+    Rectangle::new(panel, top, 238.0, 34.0)
+}
+
+fn frequency_button_rect(panel: f32, top: f32) -> Rectangle {
+    Rectangle::new(panel + 246.0, top, 52.0, 34.0)
 }
 
 fn button(d: &mut impl RaylibDraw, rect: Rectangle, text: &str, selected: bool, mouse: Vector2) {
@@ -623,29 +894,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     if options.help {
         println!(
             "mic_freq [avatar-folder] [--device NAME] [--capture] [--list-devices]\n\
-            C: clean capture  M: mute  0/1/2/3: auto/idle/talking/loud\n\
-            Up/Down: gate  B: bounce  X: mirror  R: reload  F2: presets  Esc: quit\n\
-            --composer [PROJECT.json] opens the multitrack chiptune composer\n\
-            --graphics-studio opens the adjacent Selenite Graphics Studio\n\
+            C: PNGTuber box  M: mute  0/1/2/3: auto/idle/talking/loud\n\
+            Up/Down: gate  B: bounce  X: mirror  R: reload  F1: help  F2: presets  Esc: quit\n\
+            --artwork opens the browsable global pose editor\n\
+            --frequency low|mid|high opens that pitch-animation editor\n\
             --self-test validates synthesis, media, theory and analysis offline\n\
             --preset NAME  --save-preset NAME  --list-presets\n\
+            --version prints the mic_freq package version\n\
             Drop an avatar folder or pose image to switch sets. Settings save automatically."
         );
         return Ok(());
     }
-    if options.composer {
-        return mic_freq::composer_ui::run(options.assets);
-    }
-    if options.graphics {
-        let root = portable::package_root(&std::env::current_exe()?);
-        let executable = root.join("selenite");
-        if !executable.is_file() {
-            return Err("Graphics Studio is not installed beside Audio Studio".into());
-        }
-        std::process::Command::new(executable)
-            .arg("--graphics-studio")
-            .spawn()
-            .map_err(|error| format!("Could not open Graphics Studio: {error}"))?;
+    if options.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     if options.self_test {
@@ -688,6 +949,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     asset_dir = std::fs::canonicalize(&asset_dir).unwrap_or(asset_dir);
     settings.assets = Some(asset_dir.clone());
     println!("Avatar images: {}", asset_dir.display());
+    if options.artwork {
+        return mic_freq::frequency_ui::run_avatar(asset_dir);
+    }
+    if let Some(band) = options.frequency {
+        return mic_freq::frequency_ui::run(band, asset_dir, &config_path);
+    }
     let mut mic = open_mic(&settings)
         .map_err(|failure| {
             error = Some(format!("Microphone: {failure}"));
@@ -728,9 +995,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut analysis_delay = 0.0;
     let mut analysis_visible = true;
     let mut presets = PresetMenu::default();
+    let mut help = HelpTab::default();
+    let mut frequency_children = Vec::<std::process::Child>::new();
+    let mut active_voice_band = VoiceBand::Unknown;
+    set_capture_window(&mut rl, capture);
+    let mut applied_capture = capture;
+    let mut capture_apply_elapsed = 0.25;
 
     while !rl.window_should_close() {
         let dt = rl.get_frame_time();
+        capture_apply_elapsed = (capture_apply_elapsed + dt).min(0.25);
         let (width, height) = (rl.get_screen_width().max(1), rl.get_screen_height().max(1));
         let (w, h) = (width as f32, height as f32);
         let ui = ui_scale(w, h);
@@ -739,31 +1013,63 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mouse = Vector2::new(position.x / ui, position.y / ui);
         let mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let presets_were_open = presets.open;
+        let help_was_open = help.open;
         let preset_button = Rectangle::new(panel, 56.0, 94.0, 28.0);
-        let composer_button = Rectangle::new(panel + 100.0, 56.0, 94.0, 28.0);
-        let graphics_button = Rectangle::new(panel + 200.0, 56.0, 94.0, 28.0);
+        let artwork_button = Rectangle::new(panel + 100.0, 56.0, 132.0, 28.0);
+        let help_button = Rectangle::new(panel + 238.0, 56.0, 60.0, 28.0);
         let analysis_button = Rectangle::new(panel, 916.0, 146.0, 34.0);
         let capture_button = Rectangle::new(panel + 152.0, 916.0, 146.0, 34.0);
+        let mut frequency_editor_finished = false;
+        frequency_children.retain_mut(|child| match child.try_wait() {
+            Ok(Some(_)) => {
+                frequency_editor_finished = true;
+                false
+            }
+            Ok(None) => true,
+            Err(failure) => {
+                error = Some(format!("Frequency editor: {failure}"));
+                false
+            }
+        });
+        if frequency_editor_finished {
+            let mut reload_failed = false;
+            match Settings::load(&config_path) {
+                Ok(updated) => settings = updated,
+                Err(failure) => {
+                    error = Some(format!("Settings reload failed: {failure}"));
+                    reload_failed = true;
+                }
+            }
+            match load_images(&mut rl, &thread, &asset_dir) {
+                Ok(updated) => images = updated,
+                Err(failure) => {
+                    error = Some(format!("Frequency artwork reload failed: {failure}"));
+                    reload_failed = true;
+                }
+            }
+            if !reload_failed {
+                error = None;
+            }
+            voice.gate_db = settings.gate_db;
+            voice.loud_delta_db = settings.loud_delta_db;
+        }
         if !capture && mouse_clicked && preset_button.check_collision_point_rec(mouse) {
             presets.open = true;
+            help.open = false;
         }
-        if !capture && mouse_clicked && composer_button.check_collision_point_rec(mouse) {
-            std::process::Command::new(std::env::current_exe()?)
-                .arg("--composer")
-                .spawn()
-                .map_err(|failure| format!("Could not open Composer: {failure}"))?;
+        if !capture && mouse_clicked && help_button.check_collision_point_rec(mouse) {
+            help.open = true;
+            presets.open = false;
         }
-        if !capture && mouse_clicked && graphics_button.check_collision_point_rec(mouse) {
-            let executable = std::env::current_exe()?;
-            let parent = executable.parent().unwrap_or_else(|| Path::new("."));
-            let selenite = [parent.join("selenite"), parent.join("../selenite")]
-                .into_iter()
-                .find(|path| path.is_file())
-                .ok_or("Graphics Studio is not installed beside Audio Studio")?;
-            std::process::Command::new(selenite)
-                .arg("--graphics-studio")
+        if !capture && mouse_clicked && artwork_button.check_collision_point_rec(mouse) {
+            match std::process::Command::new(std::env::current_exe()?)
+                .arg("--artwork")
+                .arg(&asset_dir)
                 .spawn()
-                .map_err(|failure| format!("Could not open Graphics Studio: {failure}"))?;
+            {
+                Ok(child) => frequency_children.push(child),
+                Err(failure) => error = Some(format!("Could not open Artwork editor: {failure}")),
+            }
         }
         let mut changed = presets.update(
             &mut rl,
@@ -772,23 +1078,27 @@ fn main() -> Result<(), Box<dyn Error>> {
             &config_path,
             &mut settings,
         );
+        let open_capture_from_help = help.update(&mut rl, mouse, mouse_clicked, w / ui, h / ui);
         let preset_active = presets.open || presets_were_open;
-        if !preset_active && rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+        let help_active = help.open || help_was_open;
+        if !preset_active && !help_active && rl.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
             break;
         }
         if presets.open {
             capture = false;
             active_slider = None;
         }
+        if help.open {
+            capture = false;
+            active_slider = None;
+        }
+        if open_capture_from_help {
+            capture = true;
+        }
         let clicked = !capture && mouse_clicked;
         let hit = |top| clicked && control_rect(panel, top).check_collision_point_rec(mouse);
-        if !preset_active {
-            let mut capture_key_pressed = false;
-            while let Some(key) = rl.get_key_pressed() {
-                capture_key_pressed |= key == KeyboardKey::KEY_C;
-            }
-            if capture_key_pressed
-                || rl.is_key_pressed(KeyboardKey::KEY_C)
+        if !preset_active && !help_active {
+            if rl.is_key_pressed(KeyboardKey::KEY_C)
                 || (!capture && clicked && capture_button.check_collision_point_rec(mouse))
                 || (capture && mouse_clicked)
             {
@@ -838,8 +1148,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .into_iter()
                 .enumerate()
             {
-                if hit(top) {
+                let bounds = if (1..=3).contains(&index) {
+                    frequency_slider_rect(panel, top)
+                } else {
+                    control_rect(panel, top)
+                };
+                if clicked && bounds.check_collision_point_rec(mouse) {
                     active_slider = Some(index);
+                }
+                if (1..=3).contains(&index)
+                    && clicked
+                    && frequency_button_rect(panel, top).check_collision_point_rec(mouse)
+                {
+                    let band = VoiceBand::ALL[index - 1];
+                    match std::process::Command::new(std::env::current_exe()?)
+                        .arg("--frequency")
+                        .arg(band.cli_name())
+                        .arg(&asset_dir)
+                        .spawn()
+                    {
+                        Ok(child) => frequency_children.push(child),
+                        Err(failure) => {
+                            error = Some(format!(
+                                "Could not open {} frequency editor: {failure}",
+                                band.label()
+                            ));
+                        }
+                    }
+                    active_slider = None;
                 }
             }
             if !rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) || capture {
@@ -982,14 +1318,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             settings.mid_voice_gain_db,
             settings.high_voice_gain_db,
         );
+        if voice_band != VoiceBand::Unknown {
+            active_voice_band = voice_band;
+        }
         let detected = voice.update(if muted { -180.0 } else { voice_db }, dt);
         let state = if muted {
             AvatarState::Idle
         } else {
             forced.unwrap_or(detected)
         };
-        let offset = motion.update(state, dt, settings.bounce);
-        let closed = blink.update(dt, settings.blink);
+        let frequency_profile = settings
+            .frequency_profile(active_voice_band)
+            .filter(|profile| profile.enabled);
+        let bounce = frequency_profile.map_or(settings.bounce, |profile| profile.bounce);
+        let avatar_scale = frequency_profile.map_or(settings.scale, |profile| profile.scale);
+        let mirror = frequency_profile.map_or(settings.mirror, |profile| profile.mirror);
+        let blinking = frequency_profile.map_or(settings.blink, |profile| profile.blink);
+        let offset = motion.update(state, dt, bounce);
+        let closed = blink.update(dt, blinking);
         if changed {
             save_delay = Some(0.5);
         }
@@ -1013,20 +1359,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             scene = Some(scene_target(&mut rl, &thread, render_width, render_height)?);
         }
         let scene = scene.as_mut().expect("scene target initialized above");
-        let texture = if closed {
-            images.blinks[state.index()]
-                .as_ref()
-                .unwrap_or(&images.poses[state.index()])
-        } else {
-            &images.poses[state.index()]
-        };
+        let texture = images.texture(active_voice_band, state, closed);
         let (tw, th) = (texture.width() as f32, texture.height() as f32);
         let canvas_width = if capture {
             w
         } else {
             w - SIDE_PANEL_WIDTH * ui
         };
-        let avatar = framed_avatar(canvas_width, h, tw, th, settings.scale, offset);
+        let avatar = framed_avatar(canvas_width, h, tw, th, avatar_scale, offset);
         let backgrounds = [
             Color::new(0, 255, 0, 255),
             Color::new(255, 0, 255, 255),
@@ -1043,7 +1383,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             d.clear_background(backgrounds[settings.background]);
             d.draw_texture_pro(
                 texture,
-                Rectangle::new(0.0, 0.0, if settings.mirror { -tw } else { tw }, th),
+                Rectangle::new(0.0, 0.0, if mirror { -tw } else { tw }, th),
                 avatar,
                 Vector2::zero(),
                 0.0,
@@ -1067,8 +1407,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
             d.draw_text("Audio Studio", panel as i32, 24, 24, Color::RAYWHITE);
             button(&mut d, preset_button, "Presets", presets.open, mouse);
-            button(&mut d, composer_button, "Composer", false, mouse);
-            button(&mut d, graphics_button, "Graphics", false, mouse);
+            button(&mut d, artwork_button, "Artwork", false, mouse);
+            button(&mut d, help_button, "Help", help.open, mouse);
             d.draw_text(
                 &format!(
                     "{} · {}{}",
@@ -1108,7 +1448,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Color::LIGHTGRAY,
             );
             slider(&mut d, control_rect(panel, 194.0), (voice_db + 90.0) / 90.0);
-            for (top, label, amount) in [
+            for (index, (top, label, amount)) in [
                 (
                     246.0,
                     format!("Noise gate  {:.0} dB", settings.gate_db),
@@ -1147,9 +1487,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                     format!("Avatar size  {:.0}%", settings.scale * 100.0),
                     (settings.scale - 0.2) / 0.8,
                 ),
-            ] {
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 d.draw_text(&label, panel as i32, top as i32 - 22, 18, Color::LIGHTGRAY);
-                slider(&mut d, control_rect(panel, top), amount);
+                if (1..=3).contains(&index) {
+                    slider(&mut d, frequency_slider_rect(panel, top), amount);
+                    button(
+                        &mut d,
+                        frequency_button_rect(panel, top),
+                        "Edit",
+                        false,
+                        mouse,
+                    );
+                } else {
+                    slider(&mut d, control_rect(panel, top), amount);
+                }
             }
             toggle(&mut d, control_rect(panel, 605.0), "Mute microphone", muted);
             toggle(
@@ -1196,7 +1550,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 mouse,
             );
             button(&mut d, analysis_button, "Analyzer", analysis_visible, mouse);
-            button(&mut d, capture_button, "Clean capture", false, mouse);
+            button(&mut d, capture_button, "PNGTuber box", false, mouse);
             if analysis_visible {
                 draw_live_analysis(
                     &mut d,
@@ -1228,18 +1582,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                 h / ui,
                 mouse,
             );
+            help.draw(&mut d, w / ui, h / ui, mouse);
         }
-        let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::BLACK);
-        // Render textures are vertically flipped in OpenGL.
-        d.draw_texture_pro(
-            scene.texture(),
-            Rectangle::new(0.0, 0.0, render_width as f32, -(render_height as f32)),
-            Rectangle::new(0.0, 0.0, w, h),
-            Vector2::zero(),
-            0.0,
-            Color::WHITE,
-        );
+        {
+            let mut d = rl.begin_drawing(&thread);
+            d.clear_background(Color::BLACK);
+            // Render textures are vertically flipped in OpenGL.
+            d.draw_texture_pro(
+                scene.texture(),
+                Rectangle::new(0.0, 0.0, render_width as f32, -(render_height as f32)),
+                Rectangle::new(0.0, 0.0, w, h),
+                Vector2::zero(),
+                0.0,
+                Color::WHITE,
+            );
+        }
+        let transition =
+            CaptureTransition::request(capture, applied_capture, capture_apply_elapsed);
+        if let CaptureTransition::Stable(target) = transition {
+            if target != applied_capture {
+                set_capture_window(&mut rl, target);
+                applied_capture = target;
+                capture_apply_elapsed = 0.0;
+            }
+        }
     }
     if let Err(failure) = settings.save(&config_path) {
         eprintln!("Could not save settings: {failure}");
@@ -1258,15 +1624,28 @@ mod tests {
         assert_eq!(parsed.assets.unwrap(), PathBuf::from("/tmp/avatar"));
         assert_eq!(parsed.device.as_deref(), Some("USB mic"));
         assert!(parsed.capture);
-        let composer = options(["--composer", "song.json"].map(Into::into)).unwrap();
-        assert!(composer.composer);
-        assert_eq!(composer.assets, Some(PathBuf::from("song.json")));
+        let artwork = options(["--artwork", "/tmp/avatar"].map(Into::into)).unwrap();
+        assert!(artwork.artwork);
+        assert_eq!(artwork.assets, Some(PathBuf::from("/tmp/avatar")));
         assert!(options(["--self-test"].map(Into::into)).unwrap().self_test);
-        assert!(
-            options(["--graphics-studio"].map(Into::into))
-                .unwrap()
-                .graphics
+        assert!(options(["--version"].map(Into::into)).unwrap().version);
+        assert!(capture_window_flag().window_undecorated());
+        assert_eq!(
+            CaptureTransition::request(true, false, 0.1),
+            CaptureTransition::Pending
         );
+        assert_eq!(
+            CaptureTransition::request(true, false, 0.25),
+            CaptureTransition::Stable(true)
+        );
+        assert!(options(["--composer"].map(Into::into)).is_err());
+        assert_eq!(
+            options(["--frequency", "MID"].map(Into::into))
+                .unwrap()
+                .frequency,
+            Some(VoiceBand::Mid)
+        );
+        assert!(options(["--frequency", "noise"].map(Into::into)).is_err());
         assert!(options(["--device"].map(Into::into)).is_err());
         assert!(options(["--unknown"].map(Into::into)).is_err());
         assert!(options(["one", "two"].map(Into::into)).is_err());
@@ -1368,6 +1747,8 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("IDLE.PNG"), []).unwrap();
         std::fs::write(dir.join("talking.jpg"), []).unwrap();
+        std::fs::write(dir.join("low_idle.qoi"), []).unwrap();
+        std::fs::write(dir.join("high_talking_blink.tga"), []).unwrap();
         assert_eq!(
             image_file(&dir, AvatarState::Idle).unwrap(),
             Some(dir.join("IDLE.PNG"))
@@ -1377,9 +1758,23 @@ mod tests {
             Some(dir.join("talking.jpg"))
         );
         assert!(image_file(&dir, AvatarState::Loud).unwrap().is_none());
+        assert_eq!(
+            image_named(&dir, "low_idle").unwrap(),
+            Some(dir.join("low_idle.qoi"))
+        );
+        assert_eq!(
+            image_named(&dir, "high_talking_blink").unwrap(),
+            Some(dir.join("high_talking_blink.tga"))
+        );
         std::fs::write(dir.join("idle.jpg"), []).unwrap();
         assert!(image_file(&dir, AvatarState::Idle).is_err());
-        for file in ["IDLE.PNG", "talking.jpg", "idle.jpg"] {
+        for file in [
+            "IDLE.PNG",
+            "talking.jpg",
+            "idle.jpg",
+            "low_idle.qoi",
+            "high_talking_blink.tga",
+        ] {
             std::fs::remove_file(dir.join(file)).unwrap();
         }
         std::fs::remove_dir(dir).unwrap();

@@ -34,6 +34,12 @@ fn preset_commands_work_without_a_display_or_microphone() {
     let listed = run(&["--list-presets"]);
     assert!(listed.status.success());
     assert_eq!(String::from_utf8_lossy(&listed.stdout).trim(), "Quiet room");
+    let version = run(&["--version"]);
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        env!("CARGO_PKG_VERSION")
+    );
     let copied = run(&["--preset", "Quiet room", "--save-preset", "Broadcast"]);
     assert!(copied.status.success());
     assert!(directory.join("mic_freq/presets/Broadcast.json").is_file());
@@ -111,14 +117,80 @@ fn preset_dialog_saves_and_loads_with_the_mouse() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn composer_window_saves_and_exports_with_scaled_controls() {
+fn pngtuber_box_survives_repeated_capture_toggles() {
     if std::env::var_os("DISPLAY").is_none() {
         return;
     }
     let _serial_gui = GUI_TEST_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let directory = scratch("composer-dialog");
+    let directory = scratch("capture-toggle");
+    let driver = directory.join("keys");
+    let compiled = Command::new("cc")
+        .args(["-Wall", "-Wextra", "-Werror"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/x11_key_driver.c"
+        ))
+        .args(["-lX11", "-o"])
+        .arg(&driver)
+        .status()
+        .unwrap();
+    assert!(compiled.success());
+    let mut window = Window(
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .env("XDG_CONFIG_HOME", &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let sent = Command::new(&driver)
+        .arg(window.0.id().to_string())
+        .args([
+            "wait:900",
+            "key:c",
+            "wait:300",
+            "key:c",
+            "key:c",
+            "wait:300",
+            "key:c",
+            "key:c",
+            "wait:300",
+            "key:c",
+            "key:c",
+            "key:c",
+            "wait:400",
+            "key:c",
+            "wait:300",
+            "key:Escape",
+        ])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while window.0.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "Audio Studio did not close");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let status = window.0.try_wait().unwrap().unwrap();
+    assert!(
+        status.success(),
+        "Audio Studio crashed during capture toggles"
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn artwork_browser_scales_with_resized_window() {
+    if std::env::var_os("DISPLAY").is_none() {
+        return;
+    }
+    let _serial_gui = GUI_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = scratch("artwork-dialog");
     let driver = directory.join("keys");
     let compiled = Command::new("cc")
         .args(["-Wall", "-Wextra", "-Werror"])
@@ -134,7 +206,8 @@ fn composer_window_saves_and_exports_with_scaled_controls() {
 
     let mut window = Window(
         Command::new(env!("CARGO_BIN_EXE_mic_freq"))
-            .arg("--composer")
+            .arg("--artwork")
+            .arg(&directory)
             .env("XDG_CONFIG_HOME", &directory)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -146,13 +219,10 @@ fn composer_window_saves_and_exports_with_scaled_controls() {
         .args([
             "wait:900",
             "resize:1200,900",
-            "click:270,220",
-            "key:ctrl+s",
-            "wait:250",
-            "click:1030,92",
-            "wait:250",
-            "click:275,92",
-            "wait:500",
+            "click:545,625",
+            "wait:300",
+            "click:916,108",
+            "wait:200",
             "key:Escape",
         ])
         .status()
@@ -160,10 +230,8 @@ fn composer_window_saves_and_exports_with_scaled_controls() {
     assert!(sent.success());
     let deadline = Instant::now() + Duration::from_secs(20);
     while window.0.try_wait().unwrap().is_none() {
-        assert!(Instant::now() < deadline, "Composer did not close");
+        assert!(Instant::now() < deadline, "Artwork editor did not close");
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(directory.join("mic_freq/projects/Untitled.json").is_file());
-    assert!(directory.join("mic_freq/projects/Untitled.wav").is_file());
     std::fs::remove_dir_all(directory).unwrap();
 }

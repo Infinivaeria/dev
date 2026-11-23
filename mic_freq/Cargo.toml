@@ -1,9 +1,9 @@
 [package]
 name = "mic_freq"
-version = "3.2.0-rc.1"
+version = "4.0.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Selenite Audio Studio with PNGTuber creation, chiptune composition, graphics and pitch/rhythm analysis"
+description = "Selenite voice-reactive PNGTuber studio with per-frequency artwork and pitch/rhythm analysis"
 license = "MIT"
 
 [dependencies]

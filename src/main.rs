@@ -1,6 +1,11 @@
+#[path = "../mic_freq/src/analysis.rs"]
+mod analysis;
 mod camera;
 mod cas;
 mod cas_ui;
+#[path = "../mic_freq/src/composer.rs"]
+mod composer;
+mod composer_ui;
 mod desktop;
 mod download;
 mod editor;
@@ -208,7 +213,7 @@ impl ToolbarAction {
             Self::GraphicsStudio => "Open Selenite Graphics Studio for layered image editing, animation, video frames and PNGTuber artwork.",
             Self::Composer => "Open the multitrack Composer to create, analyze and export music.",
             Self::CasNotebook => "Open the Selenite CAS Notebook for Symbolica algebra and nalgebra matrix computation.",
-            Self::AudioStudio => "Open Selenite Audio Studio and its PNGTuber, Composer, and Graphics workflows.",
+            Self::AudioStudio => "Open mic_freq Audio Studio for microphone-driven PNGTuber voice and artwork controls.",
         }
     }
 }
@@ -3770,7 +3775,14 @@ impl App {
                     .map_err(|error| format!("could not open Graphics Studio: {error}"))?;
                 Ok(())
             }
-            ToolbarAction::Composer => launch_audio_studio(&["--composer".into()]),
+            ToolbarAction::Composer => {
+                let program = env::current_exe().map_err(|error| error.to_string())?;
+                Command::new(program)
+                    .arg("--composer")
+                    .spawn()
+                    .map_err(|error| format!("could not open Composer: {error}"))?;
+                Ok(())
+            }
             ToolbarAction::CasNotebook => {
                 let program = env::current_exe().map_err(|error| error.to_string())?;
                 Command::new(program)
@@ -7194,6 +7206,7 @@ fn run() -> Result<(), String> {
         StartupMode::GraphicsStudio(path) => {
             graphics_ui::run(path).map_err(|error| error.to_string())
         }
+        StartupMode::Composer(path) => composer_ui::run(path).map_err(|error| error.to_string()),
         StartupMode::CasNotebook(path) => {
             cas_ui::run(path).map_err(|error| error.to_string())
         }
@@ -7480,6 +7493,7 @@ enum StartupMode {
     #[cfg(target_os = "linux")]
     HostAppliance,
     GraphicsStudio(Option<PathBuf>),
+    Composer(Option<PathBuf>),
     CasNotebook(Option<PathBuf>),
     Image(PathBuf),
     Edit(PathBuf),
@@ -7526,6 +7540,7 @@ fn usage() -> String {
         "                                   build a Rust/Magnus executable with embedded Ruby bytecode",
         "  selenite --inventory [FILE.json] open the inventory window (defaults to the last-used profile)",
         "  selenite --graphics-studio [FILE|PROJECT.json] open Selenite Graphics Studio",
+        "  selenite --composer [PROJECT.json] open the Selenite music Composer",
         "  selenite --cas [NOTEBOOK.json]   open the Selenite CAS Notebook",
         "  selenite --cas-run COMMAND      print a CAS command result",
         "  selenite --cas-notebook FILE    evaluate and save every CAS notebook cell",
@@ -7534,7 +7549,7 @@ fn usage() -> String {
         "  selenite --bootstrap-suite [ARGS] run bootstrap.sh directly from a source checkout",
         "  selenite --bootstrap-game-suite [ARGS] run bootstrap-game.sh directly",
         "  selenite --install-appliance [ARGS] run tools/install-appliance.sh directly",
-        "  selenite --audio-studio [ARGS...] open mic_freq Audio Studio directly",
+        "  selenite --audio-studio [ARGS...] open mic_freq PNGTuber Audio Studio directly",
         "  selenite --graphics-export PROJECT.json OUTPUT.png flatten a graphics project",
         "  selenite --graphics-pngtuber IMAGE OUTPUT_DIR create mic_freq pose artwork",
         "  selenite --graphics-extract VIDEO OUTPUT_DIR [COUNT] extract representative PNG frames",
@@ -7596,6 +7611,11 @@ fn parse_mode(args: &[OsString]) -> Result<StartupMode, String> {
             ["--graphics-studio"] => StartupMode::GraphicsStudio(None),
             ["--graphics-studio", path] => StartupMode::GraphicsStudio(Some(PathBuf::from(path))),
             _ => return Err("--graphics-studio accepts at most one file or project".into()),
+        },
+        Some("--composer") => match rest.as_slice() {
+            ["--composer"] => StartupMode::Composer(None),
+            ["--composer", path] => StartupMode::Composer(Some(PathBuf::from(path))),
+            _ => return Err("--composer accepts at most one project path".into()),
         },
         Some("--cas") => match rest.as_slice() {
             ["--cas"] => StartupMode::CasNotebook(None),
@@ -9578,6 +9598,12 @@ mod tests {
             StartupMode::GraphicsStudio(Some("art.png".into()))
         );
         assert!(parse(&["--graphics-studio", "one", "two"]).is_err());
+        assert_eq!(parse(&["--composer"]).unwrap(), StartupMode::Composer(None));
+        assert_eq!(
+            parse(&["--composer", "song.json"]).unwrap(),
+            StartupMode::Composer(Some("song.json".into()))
+        );
+        assert!(parse(&["--composer", "one", "two"]).is_err());
         assert_eq!(parse(&["--cas"]).unwrap(), StartupMode::CasNotebook(None));
         assert_eq!(
             parse(&["--cas", "notebook.json"]).unwrap(),
