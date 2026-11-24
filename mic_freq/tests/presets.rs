@@ -48,6 +48,73 @@ fn preset_commands_work_without_a_display_or_microphone() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn scripts_validate_headlessly_and_report_invalid_programs() {
+    let directory = scratch("script-cli");
+    let valid = directory.join("valid.rhai");
+    let invalid = directory.join("invalid.rhai");
+    std::fs::write(
+        &valid,
+        r#"
+            fn update(input) {
+                let n = 0;
+                while n < 25 { n += 1; }
+                #{ pose: "auto", bounce: 1.5 }
+            }
+        "#,
+    )
+    .unwrap();
+    std::fs::write(&invalid, "fn update(input) { #{ surprise: 1 } }").unwrap();
+    let check = |path: &PathBuf| {
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .arg("--check-script")
+            .arg(path)
+            .env_remove("DISPLAY")
+            .output()
+            .unwrap()
+    };
+    let checked = check(&valid);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("script OK"));
+    let failed = check(&invalid);
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("unknown field"));
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn every_distributed_script_example_checks_headlessly() {
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/mic_freq");
+    let mut scripts = std::fs::read_dir(&examples)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "rhai")
+        })
+        .collect::<Vec<_>>();
+    scripts.sort();
+    assert!(scripts.len() >= 30);
+    for script in scripts {
+        let output = Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .arg("--check-script")
+            .arg(&script)
+            .env_remove("DISPLAY")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} failed: {}",
+            script.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 struct Window(Child);
 
 impl Drop for Window {
@@ -112,6 +179,83 @@ fn preset_dialog_saves_and_loads_with_the_mouse() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(directory.join("mic_freq/presets/GUI preset.json").is_file());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn microphone_tools_panel_opens_with_f3() {
+    if std::env::var_os("DISPLAY").is_none() {
+        return;
+    }
+    let _serial_gui = GUI_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = scratch("microphone-tools");
+    let driver = directory.join("keys");
+    let script = directory.join("live.rhai");
+    std::fs::write(
+        &script,
+        "fn update(input) { #{ bounce: if input.db > input.gate_db { 1.0 } else { 0.25 } } }",
+    )
+    .unwrap();
+    assert!(
+        Command::new("cc")
+            .args(["-Wall", "-Wextra", "-Werror"])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tests/x11_key_driver.c"
+            ))
+            .args(["-lX11", "-o"])
+            .arg(&driver)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut window = Window(
+        Command::new(env!("CARGO_BIN_EXE_mic_freq"))
+            .arg("--script")
+            .arg(&script)
+            .env("XDG_CONFIG_HOME", &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let screenshot = directory.join("tools.ppm");
+    assert!(
+        Command::new(&driver)
+            .arg(window.0.id().to_string())
+            .args(["wait:1000", "key:F3", "wait:500"])
+            .arg(format!("capture:{}", screenshot.display()))
+            .arg("key:Escape")
+            .status()
+            .unwrap()
+            .success()
+    );
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while window.0.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "Audio Studio did not close");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let bytes = std::fs::read(&screenshot).unwrap();
+    let mut parts = bytes.splitn(4, |byte| *byte == b'\n');
+    assert_eq!(parts.next().unwrap(), b"P6");
+    let dimensions = std::str::from_utf8(parts.next().unwrap()).unwrap();
+    let mut dimensions = dimensions
+        .split_whitespace()
+        .map(|value| value.parse::<usize>().unwrap());
+    let width = dimensions.next().unwrap();
+    let height = dimensions.next().unwrap();
+    assert_eq!(parts.next().unwrap(), b"255");
+    let pixels = parts.next().unwrap();
+    let scale = (width as f32 / 1280.0).min(height as f32 / 960.0);
+    let offset = ((400.0 * scale) as usize * width + (500.0 * scale) as usize) * 3;
+    let pixel = &pixels[offset..offset + 3];
+    assert!(
+        pixel.iter().all(|value| *value < 50),
+        "panel pixel: {pixel:?}"
+    );
     std::fs::remove_dir_all(directory).unwrap();
 }
 

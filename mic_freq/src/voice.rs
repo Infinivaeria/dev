@@ -125,6 +125,48 @@ impl VoiceBand {
             Self::Unknown => None,
         }
     }
+
+    pub fn gain_db(self, low: f32, mid: f32, high: f32) -> f32 {
+        match self {
+            Self::Low => low,
+            Self::Mid => mid,
+            Self::High => high,
+            Self::Unknown => 0.0,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct VoiceBandTracker {
+    band: Option<VoiceBand>,
+    unpitched_elapsed: f32,
+}
+
+impl VoiceBandTracker {
+    pub fn update(&mut self, frequency_hz: Option<f32>, dt: f32) -> VoiceBand {
+        let detected = VoiceBand::from_frequency(frequency_hz);
+        if detected != VoiceBand::Unknown {
+            self.band = Some(detected);
+            self.unpitched_elapsed = 0.0;
+        } else {
+            self.unpitched_elapsed += dt.max(0.0);
+            if self.unpitched_elapsed >= 0.3 {
+                self.band = None;
+            }
+        }
+        self.band.unwrap_or(VoiceBand::Unknown)
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn active_for_state(&mut self, state: AvatarState, muted: bool) -> VoiceBand {
+        if muted || state == AvatarState::Idle {
+            self.reset();
+        }
+        self.band.unwrap_or(VoiceBand::Unknown)
+    }
 }
 
 pub fn frequency_adjusted_db(
@@ -135,12 +177,7 @@ pub fn frequency_adjusted_db(
     high_gain_db: f32,
 ) -> (f32, VoiceBand, f32) {
     let band = VoiceBand::from_frequency(frequency_hz);
-    let gain = match band {
-        VoiceBand::Low => low_gain_db,
-        VoiceBand::Mid => mid_gain_db,
-        VoiceBand::High => high_gain_db,
-        VoiceBand::Unknown => 0.0,
-    };
+    let gain = band.gain_db(low_gain_db, mid_gain_db, high_gain_db);
     (db + gain, band, gain)
 }
 
@@ -186,6 +223,10 @@ impl Default for VoiceState {
 }
 
 impl VoiceState {
+    pub fn current(&self) -> AvatarState {
+        self.state
+    }
+
     pub fn update(&mut self, db: f32, dt: f32) -> AvatarState {
         // Smooth in decibels to avoid switching frames on brief pauses and plosives.
         let previous = self.smoothed_db.unwrap_or(db);
@@ -321,6 +362,32 @@ mod tests {
     }
 
     #[test]
+    fn expanded_gate_and_loud_thresholds_control_pose_transitions() {
+        let mut quiet = VoiceState {
+            gate_db: -120.0,
+            loud_delta_db: 4.0,
+            ..Default::default()
+        };
+        assert_eq!(settle(&mut quiet, -115.0), AvatarState::Loud);
+        assert_eq!(settle(&mut quiet, -130.0), AvatarState::Idle);
+
+        let mut loud = VoiceState {
+            gate_db: -120.0,
+            loud_delta_db: 120.0,
+            ..Default::default()
+        };
+        assert_eq!(settle(&mut loud, -1.0), AvatarState::Talking);
+        assert_eq!(settle(&mut loud, 1.0), AvatarState::Loud);
+
+        let mut high_gate = VoiceState {
+            gate_db: 0.0,
+            ..Default::default()
+        };
+        assert_eq!(settle(&mut high_gate, 3.0), AvatarState::Idle);
+        assert_eq!(settle(&mut high_gate, 5.0), AvatarState::Talking);
+    }
+
+    #[test]
     fn gate_adjustment_changes_sensitivity() {
         let mut voice = VoiceState {
             gate_db: -30.0,
@@ -354,5 +421,82 @@ mod tests {
             frequency_adjusted_db(-30.0, None, 6.0, 0.0, -4.0),
             (-30.0, VoiceBand::Unknown, 0.0)
         );
+    }
+
+    #[test]
+    fn pitch_dropouts_keep_the_same_gain_briefly_then_expire() {
+        for (frequency, band, gain) in [
+            (120.0, VoiceBand::Low, 6.0),
+            (220.0, VoiceBand::Mid, -3.0),
+            (440.0, VoiceBand::High, 12.0),
+        ] {
+            let mut tracker = VoiceBandTracker::default();
+            assert_eq!(tracker.update(Some(frequency), 0.1), band);
+            assert_eq!(tracker.update(None, 0.1), band);
+            assert_eq!(tracker.update(None, 0.1).gain_db(6.0, -3.0, 12.0), gain);
+            assert_eq!(tracker.update(None, 0.11), VoiceBand::Unknown);
+            assert_eq!(tracker.update(Some(frequency), 0.1), band);
+            tracker.reset();
+            assert_eq!(tracker.update(None, 0.01), VoiceBand::Unknown);
+        }
+    }
+
+    #[test]
+    fn idle_and_mute_restore_global_artwork_and_animation() {
+        let mut tracker = VoiceBandTracker::default();
+        assert_eq!(tracker.update(Some(120.0), 0.1), VoiceBand::Low);
+        assert_eq!(
+            tracker.active_for_state(AvatarState::Talking, false),
+            VoiceBand::Low
+        );
+        assert_eq!(
+            tracker.active_for_state(AvatarState::Idle, false),
+            VoiceBand::Unknown
+        );
+        assert_eq!(tracker.update(None, 0.01), VoiceBand::Unknown);
+        tracker.update(Some(440.0), 0.1);
+        assert_eq!(
+            tracker.active_for_state(AvatarState::Loud, true),
+            VoiceBand::Unknown
+        );
+        assert_eq!(tracker.update(None, 0.01), VoiceBand::Unknown);
+    }
+
+    #[test]
+    fn loud_voice_preserves_band_gain_across_short_pitch_dropouts() {
+        let mut tracker = VoiceBandTracker::default();
+        let mut voice = VoiceState::default();
+        for frame in 0..60 {
+            let pitch = if frame % 12 < 6 { Some(120.0) } else { None };
+            let band = tracker.update(pitch, 1.0 / 60.0);
+            assert_eq!(band, VoiceBand::Low);
+            voice.update(-25.0 + band.gain_db(8.0, 0.0, 0.0), 1.0 / 60.0);
+        }
+        assert_eq!(voice.update(-17.0, 1.0 / 60.0), AvatarState::Loud);
+        assert_eq!(settle(&mut voice, -90.0), AvatarState::Idle);
+        tracker.reset();
+        assert_eq!(tracker.update(None, 1.0 / 60.0), VoiceBand::Unknown);
+    }
+
+    #[test]
+    fn pitch_band_is_detected_for_quiet_and_loud_input() {
+        let sample_rate = 48_000.0;
+        for (frequency, expected) in [
+            (120.0, VoiceBand::Low),
+            (220.0, VoiceBand::Mid),
+            (440.0, VoiceBand::High),
+        ] {
+            for amplitude in [0.02_f32, 0.9, 1.8] {
+                let samples: Vec<f32> = (0..2048)
+                    .map(|index| {
+                        ((index as f32 * frequency * std::f32::consts::TAU / sample_rate).sin()
+                            * amplitude)
+                            .clamp(-1.0, 1.0)
+                    })
+                    .collect();
+                let analysis = crate::analysis::try_analyze_samples(&samples, sample_rate).unwrap();
+                assert_eq!(VoiceBand::from_frequency(analysis.fundamental_hz), expected);
+            }
+        }
     }
 }

@@ -915,4 +915,80 @@ mod tests {
         );
         assert!(CONTROL_TOPS[2] + 34.0 <= 286.0);
     }
+
+    #[test]
+    fn same_named_sources_are_isolated_by_band_and_pose() {
+        let root = std::env::temp_dir().join(format!("mic-freq-band-art-{}", std::process::id()));
+        let assets = root.join("assets");
+        let low_source = root.join("low/pose.png");
+        let mid_source = root.join("mid/pose.png");
+        let high_source = root.join("high/pose.png");
+        for source in [&low_source, &mid_source, &high_source] {
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        }
+        let low = include_bytes!("../assets/idle.png");
+        let mid = include_bytes!("../assets/talking.png");
+        let high = include_bytes!("../assets/loud.png");
+        std::fs::write(&low_source, low).unwrap();
+        std::fs::write(&mid_source, mid).unwrap();
+        std::fs::write(&high_source, high).unwrap();
+        for (band, source) in [
+            (VoiceBand::Low, &low_source),
+            (VoiceBand::Mid, &mid_source),
+            (VoiceBand::High, &high_source),
+        ] {
+            install_image(
+                &assets,
+                source,
+                ArtworkSet::Frequency(band),
+                AvatarState::Talking,
+                false,
+            )
+            .unwrap();
+        }
+        install_image(
+            &assets,
+            &high_source,
+            ArtworkSet::Global,
+            AvatarState::Talking,
+            false,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(assets.join("low_talking.png")).unwrap(), low);
+        assert_eq!(std::fs::read(assets.join("mid_talking.png")).unwrap(), mid);
+        assert_eq!(
+            std::fs::read(assets.join("high_talking.png")).unwrap(),
+            high
+        );
+        assert_eq!(std::fs::read(assets.join("talking.png")).unwrap(), high);
+        install_image(
+            &assets,
+            &mid_source,
+            ArtworkSet::Frequency(VoiceBand::Low),
+            AvatarState::Talking,
+            false,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(assets.join("low_talking.png")).unwrap(), mid);
+        assert_eq!(std::fs::read(assets.join("mid_talking.png")).unwrap(), mid);
+        assert_eq!(
+            std::fs::read(assets.join("high_talking.png")).unwrap(),
+            high
+        );
+        remove_image(
+            &assets,
+            ArtworkSet::Frequency(VoiceBand::Low),
+            AvatarState::Talking,
+            false,
+        )
+        .unwrap();
+        assert!(!assets.join("low_talking.png").exists());
+        assert_eq!(std::fs::read(assets.join("mid_talking.png")).unwrap(), mid);
+        assert_eq!(
+            std::fs::read(assets.join("high_talking.png")).unwrap(),
+            high
+        );
+        assert_eq!(std::fs::read(assets.join("talking.png")).unwrap(), high);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

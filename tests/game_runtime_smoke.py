@@ -268,6 +268,13 @@ def main():
         assert package_info["capabilities"]["harmonic_analysis"] == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["rhythm_analysis"] == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["live_audio_analysis"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["microphone_tools"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["pitch_tuner"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["frequency_spectrum"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["input_diagnostics"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["guided_mic_calibration"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["microphone_scripting"] == ("selenite" in expected_binaries)
+        assert package_info["capabilities"]["mic_freq_turing_complete"] == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["graphics_studio"] == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["image_layers"] == ("selenite" in expected_binaries)
         assert package_info["capabilities"]["image_filters"] == ("selenite" in expected_binaries)
@@ -295,6 +302,11 @@ def main():
             assert component["shell_shim"] == "run-mic-freq.sh"
             assert component["assets"] == "mic_freq/assets"
             assert component["manuals"] == ["mic_freq/README.md", "mic_freq/MANUAL.md"]
+            assert component["examples"] == "mic_freq/examples"
+            examples = runtime / component["examples"]
+            assert (examples / "README.md").is_file()
+            scripts = list(examples.glob("*.rhai"))
+            assert len(scripts) >= 30
             assert all((runtime / manual).is_file() for manual in component["manuals"])
             assert (runtime / component["assets"]).is_dir()
             for source in (repository / "mic_freq/assets").rglob("*"):

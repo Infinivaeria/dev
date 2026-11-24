@@ -227,12 +227,16 @@ def main():
             raise ValueError(f"Expected a full Selenite {version} package with mic_freq {mic_freq_version}")
         if (mic_component.get("binary") != "mic_freq/mic_freq"
                 or mic_component.get("launcher") != "mic_freq/mic_freq"
+                or mic_component.get("examples") != "mic_freq/examples"
                 or mic_component.get("manuals") != ["mic_freq/README.md", "mic_freq/MANUAL.md"]):
-            raise ValueError("mic_freq component must launch directly and include its README and manual")
+            raise ValueError("mic_freq component must launch directly and include manuals and examples")
         capabilities = metadata.get("capabilities", {})
         required_capabilities = {
             "mic_freq", "audio_composer", "pitch_analysis", "harmonic_analysis",
-            "rhythm_analysis", "graphics_studio", "image_layers", "image_filters",
+            "rhythm_analysis", "live_audio_analysis", "microphone_tools", "pitch_tuner",
+            "frequency_spectrum", "input_diagnostics", "guided_mic_calibration",
+            "microphone_scripting", "mic_freq_turing_complete",
+            "graphics_studio", "image_layers", "image_filters",
             "animated_gif", "video_tools", "portable_ffmpeg", "pngtuber_graphics", "direct_suite_launch",
             "computer_algebra", "symbolic_math", "numerical_linear_algebra", "cas_notebook",
             "direct_executables", "shell_shims",
@@ -241,11 +245,11 @@ def main():
         }
         if (not required_binaries.issubset(set(metadata.get("binaries", [])))
                 or any(capabilities.get(name) is not True for name in required_capabilities)):
-            raise ValueError("Incomplete suite: Selenite binaries, Audio Studio, Graphics Studio and Linux Host are required")
+            raise ValueError("Incomplete suite: Selenite binaries, Microphone Suite, Graphics Studio and Linux Host are required")
         if not any(name.startswith("lib/libavcodec.so") for name in names) or not any(
                 name.startswith("lib/libavutil.so") for name in names):
             raise ValueError("Incomplete suite: portable ffmpeg codec libraries are missing")
-        for name in required_binaries | required_tools | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md"}:
+        for name in required_binaries | required_tools | {"partitioned_array/lib/managed_partitioned_array.rb", "mic_freq/README.md", "mic_freq/MANUAL.md", "mic_freq/examples/README.md", "mic_freq/examples/minimal.rhai"}:
             if name not in names:
                 raise ValueError(f"Incomplete suite: missing {name}")
         for name in ("lib/ruby", "lib/ruby-arch", "mic_freq/assets", "docs", "examples"):

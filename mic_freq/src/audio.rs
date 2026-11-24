@@ -197,9 +197,9 @@ impl MicCapture {
 
     pub fn since(&self, sequence: &mut u64, out: &mut Vec<f32>) -> u64 {
         out.clear();
+        let buf = self.buffer.lock().unwrap();
         let current = self.sequence.load(Ordering::Relaxed);
         let skipped = current.saturating_sub(*sequence) as usize;
-        let buf = self.buffer.lock().unwrap();
         let available = skipped.min(buf.len()).min(self.capacity);
         out.extend(buf.range(buf.len() - available..));
         *sequence = current;

@@ -16,12 +16,40 @@ studio settings in a `presets` directory.
 
 # Selenite Audio Studio
 
-mic_freq is **Selenite Audio Studio**: an offline PNGTuber studio built with
+mic_freq is the **Selenite Microphone Suite**: an offline voice-reactive
+PNGTuber studio plus input diagnostics, spectrum analysis, pitch tuning and
+guided microphone calibration. It also includes a sandboxed, Turing-complete
+Rhai scripting runtime for live presentation automation. It is built with
 raylib and cpal. Microphone volume selects idle,
 talking, or loud talking artwork, and detected low/mid/high pitch can select a
 different open and closed-eye animation set. The Music Composer and Graphics
 Studio are separate global Selenite tools, while Audio Studio focuses on live
 voice-driven artwork. It does not require an internet connection.
+
+## Live scripting
+
+Run a script alongside the suite:
+
+```sh
+mic_freq --check-script examples/mic_freq-script.rhai
+mic_freq --script examples/mic_freq-script.rhai
+```
+
+The package includes 30 ready-to-run scripts in `mic_freq/examples/` (also
+available from the package's top-level `examples/mic_freq/`), with an index and
+usage notes in their README.
+
+Scripts implement `update(input)` and return a map. Input fields expose `frame`,
+`time`, `dt`, `db`, `adjusted_db`, `pitch_hz` (`()` when unknown), `band`,
+`pose`, `muted`, `gate_db`, and `loud_delta_db`. Optional output fields are
+`pose`, `band`, `bounce`, `scale`, `mirror`, `blink`, `gate_db`,
+`loud_delta_db`, and `gain_db`. Manual pose selection and mute take priority.
+
+Rhai supplies variables, arithmetic, recursion, functions, loops, arrays and
+maps, so scripts are computationally Turing complete. mic_freq bounds operation
+counts, nesting, calls, variables and collection/string sizes. Scripts have no
+filesystem, process, network or Selenite-setting APIs; they only return
+validated presentation overrides for the current run.
 
 ## Chiptune Composer
 
@@ -72,6 +100,25 @@ display-window overlap does not inflate its tempo estimate. In Composer,
 export. Polyphonic/noisy material can legitimately have no stable single pitch
 or tempo; Selenite reports that uncertainty instead of inventing a result.
 
+## Microphone tools
+
+Click **Mic tools** or press **F3** to open the live microphone suite. It shows
+the input device and sample rate, level and clipping warning, an eight-band
+spectrum, and a pitch tuner with note, frequency and cents relative to A4 =
+440 Hz. The tuner detects pitched signals from 50 to 2,000 Hz; silence or
+unpitched sound shows no stable pitch. The panel is hidden in PNGTuber capture.
+
+For guided calibration, select **Noise 3s** and stay quiet, then select
+**Voice 3s** and speak normally. Review the recommended gate and loud offset,
+then select **Apply** to use them. Noise uses a high percentile to ignore
+typical quiet moments; voice uses a robust upper percentile so brief pauses do
+not lower the recommendation. Apply restores Low/Mid/High gains to 0 dB so a
+previously negative band override cannot suppress the calibrated talking pose.
+Insufficient input, inadequate separation between voice and noise, and clipping
+are reported instead of applied.
+Calibration does not change system microphone gain; reduce that gain in system
+audio settings if the clipping warning appears.
+
 ## Run
 
 The full Selenite extraction package includes this executable, adjacent artwork,
@@ -108,6 +155,8 @@ For pitch-specific animation, add images named `low_idle`, `low_talking`, and
 a `_blink` closed-eye variant, such as `low_talking_blink.png`. All supported
 image formats are accepted. An absent pitch pose falls back to the matching
 global pose, and an absent pitch blink falls back to that pitch's open pose.
+Artwork slots are independent: files with the same original name are copied
+under their band-specific names, so editing one band does not replace another.
 
 ## Studio controls
 
@@ -116,13 +165,16 @@ global pose, and an absent pitch blink falls back to that pitch's open pose.
 - **Help** or **F1** opens the in-app mic_freq guide. Its PNGTuber box section explains the capture-only mode and every exit shortcut.
 - Artwork and frequency editor controls use a fixed logical canvas that scales proportionally with their windows, so labels, buttons, sliders, and browse hit targets remain aligned at any size.
 - **Calibrate noise gate** measures three seconds of room noise. Stay quiet during calibration, then test normal speech and adjust as needed.
+- The sidebar shows the currently active band and the detected fundamental pitch.
+  Voice pitch uses an 80 ms window updated every 50 ms; the separate signal
+  analyzer uses its own window and may report a different instantaneous pitch.
 - Checkboxes toggle microphone mute, horizontal mirroring, and automatic blinking.
 - **Auto / Idle / Talk / Loud** select microphone control or a manual pose. Mute always forces idle.
 - **Next input / reconnect** cycles available microphones and the system default. Capture failure does not close the app; manual poses still work.
 - Drop one avatar folder or pose image into the window to switch sets. **R** reloads edited artwork. Failed reloads preserve the current set.
 - Background swatches select green, magenta, or dark. **PNGTuber box** hides every control, meter, error, and the operating-system title bar/frame. Press **C** or click the canvas once to restore them.
 
-The default gate is -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 8 to 36 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Low, Mid and High voice gains each range from -18 to +18 dB, allowing deeper or brighter microphones and voices to use different sensitivities. Unpitched input receives no frequency adjustment. Smoothing and 4 dB hysteresis reduce flicker.
+The gate ranges from -120 to 0 dBFS and defaults to -45 dBFS; talking starts 4 dB above it. Loud talking starts 24 dB above it by default, independently adjustable from 4 to 120 dB above the gate. It requires 300 ms of sustained loud input while talking; brief peaks do not trigger it, and idle never jumps directly to loud. Very high settings may be unreachable for your microphone, even with voice gain. Lower the loud threshold if your microphone never reaches the loud pose, or raise it if normal speech triggers loud too easily. Low, Mid and High voice gains each range from -18 to +18 dB, allowing deeper or brighter microphones and voices to use different sensitivities. During speech, a detected band and its gain are retained for up to 300 ms of unpitched input; longer dropouts use the global artwork and no frequency gain. Idle and mute use global artwork and animation. Smoothing and 4 dB hysteresis reduce flicker.
 
 Full-scene anti-aliasing uses 4-sample supersampling: the avatar and text render at twice the window's width and height before being smoothly downsampled. Avatar textures also use mipmaps and trilinear filtering. The render buffer follows window resizing; this avoids requesting a window MSAA mode that can fail on some GLX drivers.
 

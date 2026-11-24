@@ -739,6 +739,7 @@ mod tests {
             editing: false,
             status: String::new(),
             error: false,
+            help_open: false,
             close: false,
         };
         state.run_selected();

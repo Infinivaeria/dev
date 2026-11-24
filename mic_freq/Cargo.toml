@@ -1,9 +1,9 @@
 [package]
 name = "mic_freq"
-version = "4.0.0"
+version = "6.0.0-rc.1"
 edition = "2024"
 rust-version = "1.88"
-description = "Selenite voice-reactive PNGTuber studio with per-frequency artwork and pitch/rhythm analysis"
+description = "Selenite microphone suite with voice-reactive PNGTuber artwork, pitch tuning, spectrum analysis and guided calibration"
 license = "MIT"
 
 [dependencies]
@@ -16,3 +16,4 @@ hound = "3.5"
 lewton = "0.10"
 midly = "0.5"
 rustfft = "6.4"
+rhai = "1.23"

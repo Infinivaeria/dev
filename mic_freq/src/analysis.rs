@@ -1,7 +1,7 @@
 //! Deterministic, allocation-bounded audio analysis for recordings and Composer renders.
 
 use crate::composer::RenderedAudio;
-use rustfft::{num_complex::Complex32, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex32};
 use std::fmt;
 
 const MIN_PITCH_HZ: f32 = 50.0;
@@ -202,6 +202,70 @@ pub fn try_analyze_samples(samples: &[f32], sample_rate: f32) -> Result<Analysis
         f32::INFINITY
     };
     Ok(result)
+}
+
+/// Detect voice pitch from a short microphone window at a bounded analysis rate.
+pub fn try_voice_pitch(samples: &[f32], sample_rate: f32) -> Result<Option<f32>, AnalysisError> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(AnalysisError::InvalidSampleRate);
+    }
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        return Err(AnalysisError::NonFiniteSample);
+    }
+    let samples = &samples[samples.len().saturating_sub(MAX_ANALYSIS_SAMPLES)..];
+    let factor = (sample_rate / 12_000.0).floor().max(1.0) as usize;
+    let mut downsampled = Vec::with_capacity(samples.len() / factor);
+    for chunk in samples.chunks_exact(factor) {
+        downsampled.push(chunk.iter().sum::<f32>() / factor as f32);
+    }
+    let mean = downsampled.iter().sum::<f32>() / downsampled.len().max(1) as f32;
+    let power = downsampled
+        .iter()
+        .map(|sample| (sample - mean).powi(2))
+        .sum::<f32>()
+        / downsampled.len().max(1) as f32;
+    if power.sqrt() < MIN_RMS {
+        return Ok(None);
+    }
+    Ok(yin_pitch(&downsampled, sample_rate / factor as f32).0)
+}
+
+pub const SPECTRUM_BANDS_HZ: [f32; 9] = [
+    40.0, 90.0, 180.0, 355.0, 710.0, 1420.0, 2840.0, 5680.0, 11360.0,
+];
+
+/// Return relative band levels in dBFS for a live mono microphone window.
+pub fn try_frequency_spectrum(
+    samples: &[f32],
+    sample_rate: f32,
+) -> Result<[f32; 8], AnalysisError> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(AnalysisError::InvalidSampleRate);
+    }
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        return Err(AnalysisError::NonFiniteSample);
+    }
+    let samples = &samples[samples.len().saturating_sub(MAX_ANALYSIS_SAMPLES)..];
+    let mut levels = [-120.0; 8];
+    if samples.len() < 2 {
+        return Ok(levels);
+    }
+    let spectrum = magnitude_spectrum(samples);
+    let bin_hz = sample_rate / samples.len().next_power_of_two() as f32;
+    for (index, level) in levels.iter_mut().enumerate() {
+        let power: f32 = spectrum
+            .iter()
+            .enumerate()
+            .filter(|(bin, _)| {
+                let hz = *bin as f32 * bin_hz;
+                hz >= SPECTRUM_BANDS_HZ[index] && hz < SPECTRUM_BANDS_HZ[index + 1]
+            })
+            .map(|(_, amplitude)| amplitude * amplitude)
+            .sum();
+        let amplitude = 2.0 * power.sqrt() / samples.len() as f32;
+        *level = (20.0 * amplitude.max(1.0e-6).log10()).clamp(-120.0, 0.0);
+    }
+    Ok(levels)
 }
 
 fn yin_pitch(samples: &[f32], sample_rate: f32) -> (Option<f32>, f32) {
@@ -568,6 +632,55 @@ mod tests {
         assert_eq!(
             try_analyze_samples(&[0.0], 0.0),
             Err(AnalysisError::InvalidSampleRate)
+        );
+    }
+
+    #[test]
+    fn voice_pitch_handles_high_sample_rates_and_voice_harmonics() {
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            for frequency in [80.0, 120.0, 220.0, 440.0] {
+                let samples: Vec<f32> = (0..(sample_rate * 0.08) as usize)
+                    .map(|index| {
+                        let phase = std::f32::consts::TAU * frequency * index as f32 / sample_rate;
+                        (0.25 * phase.sin()
+                            + 0.15 * (2.0 * phase).sin()
+                            + 0.08 * (3.0 * phase).sin())
+                        .clamp(-1.0, 1.0)
+                    })
+                    .collect();
+                let detected = try_voice_pitch(&samples, sample_rate).unwrap().unwrap();
+                assert!(
+                    (detected - frequency).abs() < 3.0,
+                    "{sample_rate} Hz input: expected {frequency} Hz, got {detected} Hz"
+                );
+            }
+        }
+        assert_eq!(try_voice_pitch(&[0.0; 2048], 48_000.0), Ok(None));
+        assert_eq!(
+            try_voice_pitch(&[f32::NAN], 48_000.0),
+            Err(AnalysisError::NonFiniteSample)
+        );
+    }
+
+    #[test]
+    fn frequency_spectrum_identifies_tone_band_and_silence() {
+        let samples = sine(440.0, 0.1, 48_000.0);
+        let spectrum = try_frequency_spectrum(&samples, 48_000.0).unwrap();
+        let strongest = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .unwrap()
+            .0;
+        assert_eq!(strongest, 3);
+        assert!(spectrum[3] > -12.0);
+        assert_eq!(
+            try_frequency_spectrum(&[0.0; 1024], 48_000.0).unwrap(),
+            [-120.0; 8]
+        );
+        assert_eq!(
+            try_frequency_spectrum(&[f32::NAN], 48_000.0),
+            Err(AnalysisError::NonFiniteSample)
         );
     }
 

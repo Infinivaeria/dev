@@ -1,4 +1,4 @@
-# Selenite Audio Studio manual
+# Selenite Microphone Suite manual
 
 ## Requirements
 
@@ -14,6 +14,28 @@ permissions. The dedicated game-only package does not contain this studio.
 
 - A microphone input device for voice animation. Manual poses and the demo avatar work without one.
 - Rust nightly, `cmake`, `clang`; on Linux: `libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
+
+## Programmable microphone suite
+
+`mic_freq --script FILE` evaluates a Rhai script for every live frame.
+Each script defines `fn update(input) { ... }` and returns a map of overrides,
+or unit for no changes. Use `--check-script FILE` for a headless compile/runtime
+check. Execution is bounded; invalid output or runtime-limit errors disable the
+script and show an explicit studio error.
+
+Input fields are `frame`, `time`, `dt`, `db`, `adjusted_db`, `pitch_hz`, `band`,
+`pose`, `muted`, `gate_db`, and `loud_delta_db`. Outputs may set:
+
+- `pose`: `auto`, `idle`, `talking`, or `loud`;
+- `band`: `auto`, `global`, `low`, `mid`, or `high`;
+- `bounce`, `scale`, `gate_db`, `loud_delta_db`, `gain_db` within UI limits;
+- `mirror` and `blink` booleans.
+
+Script overrides apply only to the current run and are not written to settings.
+Manual poses and mute take priority. The sandbox excludes filesystem, process,
+network and evaluation APIs. General-purpose Rhai functions, conditionals,
+recursion and loops remain available, making the live control language Turing
+complete.
 
 ## Avatar images
 
@@ -35,6 +57,9 @@ Pitch-specific poses use a `low_`, `mid_`, or `high_` prefix:
 variants such as `low_talking_blink.png`. They accept every image format listed
 above. Missing frequency poses use the global pose; missing closed-eye frequency
 poses use that frequency's open pose.
+Images chosen for different bands are stored separately under their band-prefixed
+names, even if the original files have the same name. Changing one band's slot
+does not replace another band's artwork.
 
 ## Controls
 
@@ -51,6 +76,7 @@ Audio Studio focused on microphone-driven PNGTuber presentation.
 | C | Toggle PNGTuber-only box / studio controls; click the avatar box to return |
 | F1 | Open/close the in-app mic_freq Help tab |
 | M | Mute microphone animation (forces idle) |
+| F3 | Toggle the microphone tools panel |
 | 0 | Automatic microphone-driven pose |
 | 1 / 2 / 3 | Force idle / talking / loud pose |
 | B | Toggle bounce off / normal strength |
@@ -59,11 +85,16 @@ Audio Studio focused on microphone-driven PNGTuber presentation.
 
 Hotkeys work only while the app has keyboard focus. The mouse-accessible sidebar includes pose selection, gate/Low/Mid/High gain/loud-threshold/bounce/size sliders, mute/mirror/blink checkboxes, background swatches, device selection, calibration, Help, and PNGTuber-only capture. The studio opens at 1280 x 960 and scales its entire 340-logical-pixel sidebar and hit areas together down to its 960 x 720 minimum.
 
-The default gate is -45 dBFS. Talking starts at gate + 4 dB and returns to idle below the gate. Loud talking requires 300 ms of sustained input above gate + 24 dB by default and returns to talking 4 dB below its entry threshold. A drop below the loud threshold resets the entry timer. Idle enters talking first, even for loud input. The loud-threshold slider adjusts that offset from 8 to 36 dB without changing the gate; raise it if normal speech reaches loud too easily. Volume smoothing reduces flicker. Mute overrides both microphone input and forced poses; it does not mute the system microphone or OBS audio.
+The gate ranges from -120 to 0 dBFS and defaults to -45 dBFS. Talking starts at gate + 4 dB and returns to idle below the gate. Loud talking requires 300 ms of sustained input above gate + 24 dB by default and returns to talking 4 dB below its entry threshold. A drop below the loud threshold resets the entry timer. Idle enters talking first, even for loud input. The loud-threshold slider adjusts that offset from 4 to 120 dB without changing the gate; raise it if normal speech reaches loud too easily. Very high thresholds can exceed the level your microphone and voice gain can produce, preventing the corresponding pose from appearing. Volume smoothing reduces flicker. Mute overrides both microphone input and forced poses; it does not mute the system microphone or OBS audio.
 
 Each state bounces continuously with smoothly changing strength. At 100%, idle rises up to 3 logical pixels, talking 16, and loud talking 30. Strength can be set from 0 to 200%. The avatar reserves bounce headroom, scales with the window, and preserves aspect ratio. Blink art switches without changing bounce phase.
 
-The image choice depends on microphone loudness after the selected frequency response is applied. Low fundamental pitches below 160 Hz use **Low voice gain**, pitches from 160 through 300 Hz use **Mid voice gain**, and higher pitches use **High voice gain**. Each adjustment ranges from -18 to +18 dB; a missing or unpitched signal uses the raw level. This allows different sensitivity for deeper, mid-range, and brighter voices without recording or transcribing speech.
+The image choice depends on microphone loudness after the selected frequency response is applied. Low fundamental pitches below 160 Hz use **Low voice gain**, pitches from 160 through 300 Hz use **Mid voice gain**, and higher pitches use **High voice gain**. Each adjustment ranges from -18 to +18 dB. During speech, brief pitch dropouts retain the last detected band's gain and artwork for up to 300 ms; longer unpitched input uses the raw level and global artwork. Idle and mute use global artwork and animation. This allows different sensitivity for deeper, mid-range, and brighter voices without recording or transcribing speech.
+
+The sidebar shows the active band and detected voice pitch, using an 80 ms
+window updated every 50 ms. The signal analyzer uses a separate window, so its
+instantaneous pitch can differ. Pitch is not detected for unvoiced speech or
+noise; a missing band-specific pose uses the corresponding global pose.
 
 Click **Edit** beside a Low, Mid, or High gain slider to open a separate
 frequency window. That window configures the band's gain, bounce, avatar size,
@@ -126,6 +157,25 @@ without requiring a microphone, output device or display.
 Playback uses the selected output device explicitly. If no device is available
 or project/sample data is invalid, the status bar reports the host or format
 error without changing the current project.
+
+## Microphone tools
+
+Click **Mic tools** or press **F3** to open the microphone suite over the avatar.
+It shows the selected input and sample rate, input level, clipping warning,
+eight-band spectrum and a pitch tuner. The tuner displays the nearest note,
+frequency and cents from A4 = 440 Hz, with a centered indicator for in-tune
+signals. It uses the voice-pitch detector (50–2,000 Hz); silence and unpitched
+sound display no stable pitch. Capture mode hides the panel.
+
+Select **Noise 3s** and remain quiet, then select **Voice 3s** and speak
+normally. The panel recommends a gate and loud offset based on the measurements.
+Noise uses a high percentile and voice uses an upper-middle percentile so
+individual pauses and peaks do not dominate. Select **Apply** to save those
+settings and reset Low/Mid/High gains to neutral 0 dB; nothing is changed
+automatically.
+Clipped input, missing samples, or voice too close to the noise floor prevent a
+recommendation. Lower system microphone gain if clipping is reported, then
+measure again. The suite does not adjust the system gain.
 
 ## Signal analyzer
 

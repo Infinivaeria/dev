@@ -213,7 +213,7 @@ impl ToolbarAction {
             Self::GraphicsStudio => "Open Selenite Graphics Studio for layered image editing, animation, video frames and PNGTuber artwork.",
             Self::Composer => "Open the multitrack Composer to create, analyze and export music.",
             Self::CasNotebook => "Open the Selenite CAS Notebook for Symbolica algebra and nalgebra matrix computation.",
-            Self::AudioStudio => "Open mic_freq Audio Studio for microphone-driven PNGTuber voice and artwork controls.",
+            Self::AudioStudio => "Open the mic_freq Microphone Suite for tuning, spectrum, diagnostics, calibration and voice-driven PNGTuber artwork.",
         }
     }
 }
@@ -7549,7 +7549,7 @@ fn usage() -> String {
         "  selenite --bootstrap-suite [ARGS] run bootstrap.sh directly from a source checkout",
         "  selenite --bootstrap-game-suite [ARGS] run bootstrap-game.sh directly",
         "  selenite --install-appliance [ARGS] run tools/install-appliance.sh directly",
-        "  selenite --audio-studio [ARGS...] open mic_freq PNGTuber Audio Studio directly",
+        "  selenite --audio-studio [ARGS...] open the mic_freq Microphone Suite directly",
         "  selenite --graphics-export PROJECT.json OUTPUT.png flatten a graphics project",
         "  selenite --graphics-pngtuber IMAGE OUTPUT_DIR create mic_freq pose artwork",
         "  selenite --graphics-extract VIDEO OUTPUT_DIR [COUNT] extract representative PNG frames",

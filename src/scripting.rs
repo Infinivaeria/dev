@@ -1836,8 +1836,8 @@ mod tests {
         assert_eq!(engine.eval("$inv.has?('Gold', 31)"), "false");
         engine.eval("$inv['Arrow'] = 12");
         assert_eq!(
-            engine.eval("$inv.to_h"),
-            "{\"Arrow\" => 12, \"Gold\" => 30, \"Potion\" => 1}"
+            engine.eval("$inv.to_h").replace(" => ", "=>"),
+            "{\"Arrow\"=>12, \"Gold\"=>30, \"Potion\"=>1}"
         );
         assert_eq!(engine.eval("$inv.set_meta('Potion', 'heal', 25)"), "true");
         assert_eq!(
@@ -1845,8 +1845,8 @@ mod tests {
             "true"
         );
         assert_eq!(
-            engine.eval("$inv.meta('Potion')"),
-            "{\"heal\" => 25, \"tags\" => [\"red\"]}"
+            engine.eval("$inv.meta('Potion')").replace(" => ", "=>"),
+            "{\"heal\"=>25, \"tags\"=>[\"red\"]}"
         );
         assert!(engine
             .eval("$inv.set_meta('Nope', 'x', 1)")

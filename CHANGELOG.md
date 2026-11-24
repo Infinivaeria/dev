@@ -1,5 +1,36 @@
 # Changelog
 
+## mic_freq 6.0.0-rc.1 (2026-11-23)
+
+- Embedded a sandboxed Rhai runtime, making the microphone suite computationally
+  Turing complete through per-frame scripts loaded with `--script FILE`.
+- Added live script inputs for frame/time, level, pitch, band, pose, mute state
+  and thresholds; scripts can override pose, band, gains, thresholds, bounce,
+  scale, mirror and blink.
+- Added bounded execution, strict variables, operation/call/memory limits and
+  no host I/O API. Invalid scripts disable themselves with an explicit UI error.
+- Added `--check-script FILE`, headless script validation in `--self-test`, and
+  a complete example script for the packaged documentation/examples.
+
+## mic_freq 5.0.0-rc.1 (2026-11-23)
+
+- mic_freq is now a complete microphone suite with its existing
+  voice-reactive PNGTuber studio plus a dedicated live tools panel.
+- Added a 50–2,000 Hz pitch tuner with nearest note, frequency and cents from
+  concert A 440, an eight-band spectrum, input-level/clipping display, and
+  input-device/sample-rate diagnostics.
+- Added guided, opt-in two-stage calibration: measure room noise, measure voice,
+  review the recommendation, then explicitly apply the gate and loud offset.
+- Microphone pitch uses a time-based 80 ms window with downsampling for stable
+  low/mid/high band switching at common and high input sample rates.
+- Extended gate and loud sensitivity ranges, aligned all frequency gain
+  controls, and retained band artwork through short pitch dropouts.
+- Frequency artwork slots are isolated by band and pose, including when source
+  files have identical names. Quiet, muted and unpitched states return to
+  global artwork.
+- System microphone gain is never changed automatically. Clipping is diagnosed
+  explicitly so input gain can be corrected at the host audio layer.
+
 ## mic_freq 4.0.0
 
 ### Improved

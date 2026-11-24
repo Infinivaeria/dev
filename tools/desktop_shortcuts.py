@@ -71,7 +71,7 @@ def shortcut_tools(root, tool, target=None, grid=None):
         "organizer": ("selenite", "Selenite", *launcher("selenite", "run.sh")),
         "ide": ("selenite-ide", "Selenite IDE", *launcher("selenite", "run-ide.sh", ["--ide", str(target)] if target else ["--ide"], [str(target)] if target else [])),
         "terminal": ("selenite-consolegpu", "Selenite Terminal", *launcher("selenite", "run.sh", ["--terminal-window"])),
-        "audio": ("selenite-audio", "Selenite Audio Studio", *launcher("mic_freq/mic_freq", "run-mic-freq.sh")),
+        "audio": ("selenite-audio", "Selenite Microphone Suite", *launcher("mic_freq/mic_freq", "run-mic-freq.sh")),
         "composer": ("selenite-composer", "Selenite Music Composer", *launcher("selenite", "run.sh", ["--composer"])),
         "graphics": ("selenite-graphics", "Selenite Graphics Studio", *launcher("selenite", "run.sh", ["--graphics-studio"])),
         "cas": ("selenite-cas", "Selenite CAS Notebook", *launcher("selenite", "run.sh", ["--cas"])),

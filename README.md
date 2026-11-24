@@ -98,7 +98,10 @@ Remaining requested usability work:
   `--host`, `--terminal-window`, project and game modes launch without shell
   wrappers. Compatibility `run*.sh` files remain available for existing users.
 
-- **Selenite Audio Studio 2.0:** PNGTuber controls plus a complete four-track
+- **Selenite Audio Studio 6.0 RC:** a Turing-complete microphone suite with
+  bounded Rhai scripting, pitch
+  tuning, spectrum, input diagnostics, clipping detection and opt-in calibration,
+  plus PNGTuber controls and a complete four-track
   chiptune composer with piano-roll entry, five oscillator waveforms, envelopes,
   track volume/pan/mute, scales, chords and inversions, progressions,
   arpeggiation, key/chord analysis, MIDI import, WAV/OGG sample import, JSON

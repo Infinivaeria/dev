@@ -1,15 +1,19 @@
 use mic_freq::analysis::{self, Analysis, RhythmAnalysis, RhythmTracker};
 use mic_freq::audio::MicCapture;
+use mic_freq::mic_tools::MicTools;
+use mic_freq::scripting::{ScriptInput, ScriptRuntime};
 #[path = "../../src/portable.rs"]
 #[allow(dead_code)]
 mod portable;
 use mic_freq::studio::{self, BlinkState, Settings};
-use mic_freq::voice::{self, AvatarMotion, AvatarState, VoiceBand, VoiceState};
+use mic_freq::voice::{self, AvatarMotion, AvatarState, VoiceBand, VoiceBandTracker, VoiceState};
 use raylib::prelude::*;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 const WINDOW_SAMPLES: usize = 2048;
+const MIC_CAPACITY: usize = 32_768;
+const VOICE_WINDOW_SECONDS: f32 = 0.08;
 const BASE_WINDOW_WIDTH: f32 = 1280.0;
 const BASE_WINDOW_HEIGHT: f32 = 960.0;
 const SIDE_PANEL_WIDTH: f32 = 340.0;
@@ -333,6 +337,8 @@ struct Options {
     self_test: bool,
     artwork: bool,
     frequency: Option<VoiceBand>,
+    script: Option<PathBuf>,
+    check_script: Option<PathBuf>,
 }
 
 fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options, Box<dyn Error>> {
@@ -347,6 +353,16 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
             Some("--list-presets") => options.list_presets = true,
             Some("--self-test") => options.self_test = true,
             Some("--artwork") => options.artwork = true,
+            Some("--script") => {
+                options.script = Some(PathBuf::from(
+                    args.next().ok_or("--script requires a Rhai script")?,
+                ));
+            }
+            Some("--check-script") => {
+                options.check_script = Some(PathBuf::from(
+                    args.next().ok_or("--check-script requires a Rhai script")?,
+                ));
+            }
             Some("--frequency") => {
                 let name = args
                     .next()
@@ -389,7 +405,7 @@ fn options(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options
 }
 
 fn open_mic(settings: &Settings) -> Result<MicCapture, Box<dyn Error>> {
-    MicCapture::start_device(WINDOW_SAMPLES * 2, settings.device.as_deref())
+    MicCapture::start_device(MIC_CAPACITY, settings.device.as_deref())
 }
 
 #[derive(Default)]
@@ -408,8 +424,8 @@ struct HelpTab {
 }
 
 impl HelpTab {
-    const LINES: [&'static str; 22] = [
-        "Selenite Audio Studio / mic_freq",
+    const LINES: [&'static str; 23] = [
+        "Selenite Audio Studio / mic_freq Microphone Suite",
         "",
         "The microphone chooses Idle, Talking, or Loud artwork. Pitch also selects",
         "the Low (<160 Hz), Mid (160-300 Hz), or High (>300 Hz) animation profile.",
@@ -421,11 +437,12 @@ impl HelpTab {
         "",
         "Controls",
         "C: PNGTuber box / studio controls. M: mute. R: reload artwork.",
+        "F3: microphone tools and pitch tuner.",
         "Up/Down: gate. B: bounce. X: mirror. 0: auto. 1/2/3: force pose.",
         "Esc: close the open Help/Presets panel, or quit from the main studio.",
         "",
         "PNGTuber box",
-        "Click PNGTuber box at the bottom, or press C, to hide every control,",
+        "Click PNGTuber at the bottom, or press C, to hide every control,",
         "meter, error, panel and the operating-system window frame. The remaining",
         "window is a clean avatar-only capture box.",
         "",
@@ -687,6 +704,33 @@ fn frequency_slider_rect(panel: f32, top: f32) -> Rectangle {
     Rectangle::new(panel, top, 238.0, 34.0)
 }
 
+fn slider_amount(bounds: Rectangle, x: f32) -> f32 {
+    ((x - bounds.x) / bounds.width).clamp(0.0, 1.0)
+}
+
+fn range_value(amount: f32, min: f32, max: f32) -> f32 {
+    min + amount * (max - min)
+}
+
+fn range_amount(value: f32, min: f32, max: f32) -> f32 {
+    (value - min) / (max - min)
+}
+
+fn calibrated_gate(peak_db: f32) -> f32 {
+    (peak_db + 6.0).clamp(studio::GATE_MIN_DB, studio::GATE_MAX_DB)
+}
+
+fn apply_microphone_recommendation(
+    settings: &mut Settings,
+    recommendation: mic_freq::mic_tools::Recommendation,
+) {
+    settings.gate_db = recommendation.gate_db;
+    settings.loud_delta_db = recommendation.loud_delta_db;
+    settings.low_voice_gain_db = 0.0;
+    settings.mid_voice_gain_db = 0.0;
+    settings.high_voice_gain_db = 0.0;
+}
+
 fn frequency_button_rect(panel: f32, top: f32) -> Rectangle {
     Rectangle::new(panel + 246.0, top, 52.0, 34.0)
 }
@@ -881,8 +925,12 @@ fn audio_studio_self_test() -> Result<(), Box<dyn Error>> {
     for _ in 0..8 {
         rhythm.update(&click);
     }
+    let mut runtime = ScriptRuntime::from_source(
+        "fn update(input) { let n = 0; while n < 10 { n += 1; } #{ pose: \"auto\" } }",
+    )?;
+    runtime.update(ScriptInput::default())?;
     println!(
-        "Selenite Audio Studio self-test: OK (A4 {:.2} Hz, WAV, theory, render, analysis)",
+        "Selenite mic_freq Microphone Suite self-test: OK (A4 {:.2} Hz, WAV, theory, render, analysis)",
         signal.fundamental_hz.unwrap_or(0.0)
     );
     Ok(())
@@ -895,10 +943,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!(
             "mic_freq [avatar-folder] [--device NAME] [--capture] [--list-devices]\n\
             C: PNGTuber box  M: mute  0/1/2/3: auto/idle/talking/loud\n\
+            F3: microphone tools and pitch tuner\n\
             Up/Down: gate  B: bounce  X: mirror  R: reload  F1: help  F2: presets  Esc: quit\n\
             --artwork opens the browsable global pose editor\n\
             --frequency low|mid|high opens that pitch-animation editor\n\
-            --self-test validates synthesis, media, theory and analysis offline\n\
+            --script FILE controls live poses and presentation with Rhai\n\
+            --check-script FILE validates a Rhai script without microphone or display\n\
+            --self-test validates synthesis, media, scripting, theory and analysis offline\n\
             --preset NAME  --save-preset NAME  --list-presets\n\
             --version prints the mic_freq package version\n\
             Drop an avatar folder or pose image to switch sets. Settings save automatically."
@@ -911,6 +962,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if options.self_test {
         return audio_studio_self_test();
+    }
+    if let Some(path) = options.check_script.as_ref() {
+        let mut runtime = ScriptRuntime::load(path)?;
+        runtime.update(ScriptInput::default())?;
+        println!("mic_freq script OK: {}", path.display());
+        return Ok(());
     }
     if options.list_devices {
         for device in MicCapture::devices()? {
@@ -955,6 +1012,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(band) = options.frequency {
         return mic_freq::frequency_ui::run(band, asset_dir, &config_path);
     }
+    let mut script_runtime = options
+        .script
+        .as_ref()
+        .map(|path| ScriptRuntime::load(path))
+        .transpose()?;
     let mut mic = open_mic(&settings)
         .map_err(|failure| {
             error = Some(format!("Microphone: {failure}"));
@@ -963,7 +1025,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (mut rl, thread) = raylib::init()
         .size(BASE_WINDOW_WIDTH as i32, BASE_WINDOW_HEIGHT as i32)
-        .title("mic_freq - Selenite Audio Studio")
+        .title("mic_freq - Selenite Microphone Suite")
         .resizable()
         .build();
     rl.set_target_fps(60);
@@ -981,10 +1043,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut capture = options.capture;
     let mut muted = false;
     let mut forced: Option<AvatarState> = None;
-    let mut calibration: Option<(f32, f32)> = None;
+    let mut calibration: Option<(f32, Option<f32>)> = None;
     let mut save_delay: Option<f32> = None;
     let mut active_slider = None;
-    let mut samples = Vec::with_capacity(WINDOW_SAMPLES);
+    let mut samples = Vec::with_capacity(MIC_CAPACITY);
     let mut rhythm_samples = Vec::with_capacity(WINDOW_SAMPLES);
     let mut live_analysis = Analysis::default();
     let mut rhythm: Option<RhythmTracker> = mic
@@ -993,17 +1055,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut rhythm_sequence = 0;
     let mut rhythm_analysis = RhythmAnalysis::default();
     let mut analysis_delay = 0.0;
+    let mut pitch_delay = 0.0;
+    let mut voice_pitch = None;
     let mut analysis_visible = true;
+    let mut mic_tools = MicTools::default();
     let mut presets = PresetMenu::default();
     let mut help = HelpTab::default();
     let mut frequency_children = Vec::<std::process::Child>::new();
-    let mut active_voice_band = VoiceBand::Unknown;
+    let mut voice_band_tracker = VoiceBandTracker::default();
+    let mut script_frame = 0_u64;
+    let mut suite_elapsed = 0.0_f32;
     set_capture_window(&mut rl, capture);
     let mut applied_capture = capture;
     let mut capture_apply_elapsed = 0.25;
 
     while !rl.window_should_close() {
         let dt = rl.get_frame_time();
+        suite_elapsed += dt;
         capture_apply_elapsed = (capture_apply_elapsed + dt).min(0.25);
         let (width, height) = (rl.get_screen_width().max(1), rl.get_screen_height().max(1));
         let (w, h) = (width as f32, height as f32);
@@ -1017,8 +1085,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let preset_button = Rectangle::new(panel, 56.0, 94.0, 28.0);
         let artwork_button = Rectangle::new(panel + 100.0, 56.0, 132.0, 28.0);
         let help_button = Rectangle::new(panel + 238.0, 56.0, 60.0, 28.0);
-        let analysis_button = Rectangle::new(panel, 916.0, 146.0, 34.0);
-        let capture_button = Rectangle::new(panel + 152.0, 916.0, 146.0, 34.0);
+        let analysis_button = Rectangle::new(panel, 916.0, 94.0, 34.0);
+        let tools_button = Rectangle::new(panel + 98.0, 916.0, 96.0, 34.0);
+        let capture_button = Rectangle::new(panel + 198.0, 916.0, 100.0, 34.0);
         let mut frequency_editor_finished = false;
         frequency_children.retain_mut(|child| match child.try_wait() {
             Ok(Some(_)) => {
@@ -1105,7 +1174,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                 capture = !capture;
             }
             if !capture && clicked && analysis_button.check_collision_point_rec(mouse) {
-                analysis_visible = !analysis_visible;
+                if mic_tools.open {
+                    mic_tools.open = false;
+                    analysis_visible = true;
+                } else {
+                    analysis_visible = !analysis_visible;
+                }
+            }
+            if !capture
+                && (rl.is_key_pressed(KeyboardKey::KEY_F3)
+                    || (clicked && tools_button.check_collision_point_rec(mouse)))
+            {
+                mic_tools.open = !mic_tools.open;
+            }
+            if !capture && mic_tools.open && clicked {
+                if let Some(recommendation) = mic_tools.click(mouse) {
+                    apply_microphone_recommendation(&mut settings, recommendation);
+                    changed = true;
+                }
             }
             if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(605.0) {
                 muted = !muted;
@@ -1137,11 +1223,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             if rl.is_key_pressed(KeyboardKey::KEY_UP) {
-                settings.gate_db = (settings.gate_db + 2.0).min(-26.0);
+                settings.gate_db = (settings.gate_db + 2.0).min(studio::GATE_MAX_DB);
                 changed = true;
             }
             if rl.is_key_pressed(KeyboardKey::KEY_DOWN) {
-                settings.gate_db = (settings.gate_db - 2.0).max(-90.0);
+                settings.gate_db = (settings.gate_db - 2.0).max(studio::GATE_MIN_DB);
                 changed = true;
             }
             for (index, top) in [246.0, 306.0, 354.0, 402.0, 450.0, 504.0, 557.0]
@@ -1182,13 +1268,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                 active_slider = None;
             }
             if let Some(index) = active_slider {
-                let amount = ((mouse.x - panel) / 298.0).clamp(0.0, 1.0);
+                let bounds = if (1..=3).contains(&index) {
+                    frequency_slider_rect(panel, 0.0)
+                } else {
+                    control_rect(panel, 0.0)
+                };
+                let amount = slider_amount(bounds, mouse.x);
                 match index {
-                    0 => settings.gate_db = -90.0 + amount * 64.0,
+                    0 => {
+                        settings.gate_db =
+                            range_value(amount, studio::GATE_MIN_DB, studio::GATE_MAX_DB)
+                    }
                     1 => settings.low_voice_gain_db = -18.0 + amount * 36.0,
                     2 => settings.mid_voice_gain_db = -18.0 + amount * 36.0,
                     3 => settings.high_voice_gain_db = -18.0 + amount * 36.0,
-                    4 => settings.loud_delta_db = 8.0 + amount * 28.0,
+                    4 => {
+                        settings.loud_delta_db = range_value(
+                            amount,
+                            studio::LOUD_OFFSET_MIN_DB,
+                            studio::LOUD_OFFSET_MAX_DB,
+                        )
+                    }
                     5 => settings.bounce = amount * 2.0,
                     6 => settings.scale = 0.2 + amount * 0.8,
                     _ => unreachable!(),
@@ -1239,12 +1339,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                         voice = VoiceState::default();
+                        voice_band_tracker.reset();
+                        voice_pitch = None;
+                        pitch_delay = 0.0;
                     }
                     Err(failure) => error = Some(format!("Devices: {failure}")),
                 }
             }
             if hit(871.0) && mic.as_ref().is_some_and(|mic| !mic.has_failed()) {
-                calibration = Some((0.0, -90.0));
+                calibration = Some((0.0, None));
             }
             let mut reload = rl.is_key_pressed(KeyboardKey::KEY_R);
             let mut new_dir = None;
@@ -1282,58 +1385,131 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         samples.clear();
+        rhythm_samples.clear();
         if let Some(input) = &mic {
             if !input.has_failed() {
-                input.latest(WINDOW_SAMPLES, &mut samples);
+                let window = (input.sample_rate * VOICE_WINDOW_SECONDS).ceil() as usize;
+                input.latest(window.min(MIC_CAPACITY), &mut samples);
                 input.since(&mut rhythm_sequence, &mut rhythm_samples);
                 if let Some(tracker) = &mut rhythm {
                     rhythm_analysis = tracker.update(&rhythm_samples);
                 }
             }
         }
+        let level_samples = &samples[samples.len().saturating_sub(WINDOW_SAMPLES)..];
+        pitch_delay -= dt;
+        if pitch_delay <= 0.0 {
+            let sample_rate = mic.as_ref().map_or(44_100.0, |input| input.sample_rate);
+            match analysis::try_voice_pitch(&samples, sample_rate) {
+                Ok(pitch) => voice_pitch = pitch,
+                Err(failure) => {
+                    voice_pitch = None;
+                    error = Some(format!("Voice pitch analysis: {failure}"));
+                }
+            }
+            pitch_delay = 0.05;
+        }
         analysis_delay -= dt;
         if analysis_delay <= 0.0 {
             let sample_rate = mic.as_ref().map_or(44_100.0, |input| input.sample_rate);
-            live_analysis = analysis::analyze_samples(&samples, sample_rate);
+            live_analysis = analysis::analyze_samples(level_samples, sample_rate);
             analysis_delay = 0.1;
         }
-        let db = voice::amplitude_to_db(voice::rms(&samples));
+        let db = voice::amplitude_to_db(voice::rms(level_samples));
         if let Some((elapsed, peak)) = calibration.as_mut() {
             *elapsed += dt;
             if !samples.is_empty() {
-                *peak = peak.max(db);
+                *peak = Some(peak.map_or(db, |previous| previous.max(db)));
             }
             if *elapsed >= 3.0 {
-                settings.gate_db = (*peak + 6.0).clamp(-90.0, -26.0);
+                if let Some(peak) = *peak {
+                    settings.gate_db = calibrated_gate(peak);
+                    changed = true;
+                } else {
+                    error = Some("Noise gate calibration failed: no microphone samples".into());
+                }
                 calibration = None;
-                changed = true;
             }
         }
-        voice.gate_db = settings.gate_db;
-        voice.loud_delta_db = settings.loud_delta_db;
-        let (voice_db, voice_band, voice_gain) = voice::frequency_adjusted_db(
-            db,
-            live_analysis.fundamental_hz,
+        let pitch = if muted || samples.is_empty() {
+            voice_band_tracker.reset();
+            None
+        } else {
+            voice_pitch
+        };
+        let voice_band = voice_band_tracker.update(pitch, dt);
+        let voice_gain = voice_band.gain_db(
             settings.low_voice_gain_db,
             settings.mid_voice_gain_db,
             settings.high_voice_gain_db,
         );
-        if voice_band != VoiceBand::Unknown {
-            active_voice_band = voice_band;
+        let mut script_controls = mic_freq::scripting::ScriptControls::default();
+        if let Some(runtime) = script_runtime.as_mut() {
+            match runtime.update(ScriptInput {
+                frame: script_frame,
+                time: suite_elapsed,
+                dt,
+                db,
+                adjusted_db: db + voice_gain,
+                pitch_hz: voice_pitch,
+                band: voice_band,
+                pose: voice.current(),
+                muted,
+                gate_db: settings.gate_db,
+                loud_delta_db: settings.loud_delta_db,
+            }) {
+                Ok(controls) => script_controls = controls,
+                Err(failure) => {
+                    error = Some(format!("Script disabled: {failure}"));
+                    script_runtime = None;
+                }
+            }
+        }
+        script_frame = script_frame.saturating_add(1);
+        voice.gate_db = script_controls.gate_db.unwrap_or(settings.gate_db);
+        voice.loud_delta_db = script_controls
+            .loud_delta_db
+            .unwrap_or(settings.loud_delta_db);
+        let effective_gain = script_controls.gain_db.unwrap_or(voice_gain);
+        let voice_db = db + effective_gain;
+        if !capture {
+            if let Err(failure) = mic_tools.update(
+                dt,
+                &samples,
+                &rhythm_samples,
+                mic.as_ref().map_or(44_100.0, |input| input.sample_rate),
+                0.0,
+            ) {
+                error = Some(format!("Microphone tools: {failure}"));
+            }
         }
         let detected = voice.update(if muted { -180.0 } else { voice_db }, dt);
+        let tracked_voice_band = voice_band_tracker.active_for_state(detected, muted);
+        let active_voice_band = if muted {
+            VoiceBand::Unknown
+        } else {
+            script_controls.band.unwrap_or(tracked_voice_band)
+        };
         let state = if muted {
             AvatarState::Idle
         } else {
-            forced.unwrap_or(detected)
+            forced.or(script_controls.pose).unwrap_or(detected)
         };
         let frequency_profile = settings
             .frequency_profile(active_voice_band)
             .filter(|profile| profile.enabled);
-        let bounce = frequency_profile.map_or(settings.bounce, |profile| profile.bounce);
-        let avatar_scale = frequency_profile.map_or(settings.scale, |profile| profile.scale);
-        let mirror = frequency_profile.map_or(settings.mirror, |profile| profile.mirror);
-        let blinking = frequency_profile.map_or(settings.blink, |profile| profile.blink);
+        let bounce = script_controls
+            .bounce
+            .unwrap_or_else(|| frequency_profile.map_or(settings.bounce, |profile| profile.bounce));
+        let avatar_scale = script_controls
+            .scale
+            .unwrap_or_else(|| frequency_profile.map_or(settings.scale, |profile| profile.scale));
+        let mirror = script_controls
+            .mirror
+            .unwrap_or_else(|| frequency_profile.map_or(settings.mirror, |profile| profile.mirror));
+        let blinking = script_controls
+            .blink
+            .unwrap_or_else(|| frequency_profile.map_or(settings.blink, |profile| profile.blink));
         let offset = motion.update(state, dt, bounce);
         let closed = blink.update(dt, blinking);
         if changed {
@@ -1405,7 +1581,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (h / ui).ceil() as i32,
                 Color::new(25, 27, 31, 255),
             );
-            d.draw_text("Audio Studio", panel as i32, 24, 24, Color::RAYWHITE);
+            d.draw_text("Mic Frequency Suite", panel as i32, 24, 24, Color::RAYWHITE);
             button(&mut d, preset_button, "Presets", presets.open, mouse);
             button(&mut d, artwork_button, "Artwork", false, mouse);
             button(&mut d, help_button, "Help", help.open, mouse);
@@ -1413,8 +1589,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 &format!(
                     "{} · {}{}",
                     state.label(),
-                    voice_band.label(),
-                    if voice_gain == 0.0 {
+                    if active_voice_band == VoiceBand::Unknown {
+                        "Global"
+                    } else {
+                        active_voice_band.label()
+                    },
+                    if active_voice_band == VoiceBand::Unknown || voice_gain == 0.0 {
                         String::new()
                     } else {
                         format!(" {voice_gain:+.0} dB")
@@ -1438,21 +1618,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             d.draw_text(
                 &format!(
                     "Input  {db:.0} dBFS  ·  Pitch  {}",
-                    live_analysis
-                        .fundamental_hz
-                        .map_or("—".to_owned(), |frequency| format!("{frequency:.0} Hz"))
+                    voice_pitch.map_or("—".to_owned(), |frequency| format!("{frequency:.0} Hz"))
                 ),
                 panel as i32,
                 180,
                 18,
                 Color::LIGHTGRAY,
             );
-            slider(&mut d, control_rect(panel, 194.0), (voice_db + 90.0) / 90.0);
+            slider(
+                &mut d,
+                control_rect(panel, 194.0),
+                range_amount(voice_db, studio::GATE_MIN_DB, 18.0),
+            );
             for (index, (top, label, amount)) in [
                 (
                     246.0,
                     format!("Noise gate  {:.0} dB", settings.gate_db),
-                    (settings.gate_db + 90.0) / 64.0,
+                    range_amount(settings.gate_db, studio::GATE_MIN_DB, studio::GATE_MAX_DB),
                 ),
                 (
                     306.0,
@@ -1475,7 +1657,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         "Loud threshold  {:.0} dB",
                         settings.gate_db + settings.loud_delta_db
                     ),
-                    (settings.loud_delta_db - 8.0) / 28.0,
+                    range_amount(
+                        settings.loud_delta_db,
+                        studio::LOUD_OFFSET_MIN_DB,
+                        studio::LOUD_OFFSET_MAX_DB,
+                    ),
                 ),
                 (
                     504.0,
@@ -1550,8 +1736,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 mouse,
             );
             button(&mut d, analysis_button, "Analyzer", analysis_visible, mouse);
-            button(&mut d, capture_button, "PNGTuber box", false, mouse);
-            if analysis_visible {
+            button(&mut d, tools_button, "Mic tools", mic_tools.open, mouse);
+            button(&mut d, capture_button, "PNGTuber", false, mouse);
+            if analysis_visible && !mic_tools.open {
                 draw_live_analysis(
                     &mut d,
                     18.0,
@@ -1559,6 +1746,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                     (canvas_width / ui - 36.0).min(390.0),
                     &live_analysis,
                     &rhythm_analysis,
+                );
+            }
+            if mic_tools.open {
+                mic_tools.draw(
+                    &mut d,
+                    &samples,
+                    if samples.is_empty() {
+                        None
+                    } else {
+                        voice_pitch
+                    },
+                    mic.as_ref().map(|input| {
+                        (
+                            input.device_name.as_str(),
+                            input.sample_rate,
+                            input.has_failed(),
+                        )
+                    }),
                 );
             }
             if let Some(message) = &error {
@@ -1618,6 +1823,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn voice_gain_slider_reaches_its_full_range() {
+        let bounds = frequency_slider_rect(100.0, 306.0);
+        assert_eq!(slider_amount(bounds, bounds.x), 0.0);
+        assert_eq!(slider_amount(bounds, bounds.x + bounds.width / 2.0), 0.5);
+        assert_eq!(slider_amount(bounds, bounds.x + bounds.width), 1.0);
+        let global = control_rect(100.0, 246.0);
+        assert_eq!(slider_amount(global, global.x + global.width), 1.0);
+    }
+
+    #[test]
+    fn expanded_threshold_controls_and_calibration_reach_both_ends() {
+        for (min, max) in [
+            (studio::GATE_MIN_DB, studio::GATE_MAX_DB),
+            (studio::LOUD_OFFSET_MIN_DB, studio::LOUD_OFFSET_MAX_DB),
+        ] {
+            assert_eq!(range_value(0.0, min, max), min);
+            assert_eq!(range_value(1.0, min, max), max);
+            assert_eq!(range_amount(min, min, max), 0.0);
+            assert_eq!(range_amount(max, min, max), 1.0);
+        }
+        assert_eq!(calibrated_gate(-150.0), -120.0);
+        assert_eq!(calibrated_gate(-110.0), -104.0);
+        assert_eq!(calibrated_gate(-3.0), 0.0);
+    }
+
+    #[test]
+    fn applying_microphone_calibration_restores_neutral_band_gains() {
+        let mut settings = Settings {
+            low_voice_gain_db: -18.0,
+            mid_voice_gain_db: 9.0,
+            high_voice_gain_db: 18.0,
+            ..Default::default()
+        };
+        apply_microphone_recommendation(
+            &mut settings,
+            mic_freq::mic_tools::Recommendation {
+                gate_db: -48.0,
+                loud_delta_db: 26.0,
+            },
+        );
+        assert_eq!(settings.gate_db, -48.0);
+        assert_eq!(settings.loud_delta_db, 26.0);
+        assert_eq!(settings.low_voice_gain_db, 0.0);
+        assert_eq!(settings.mid_voice_gain_db, 0.0);
+        assert_eq!(settings.high_voice_gain_db, 0.0);
+    }
+
+    #[test]
+    fn live_voice_switches_bands_and_returns_to_global_when_quiet() {
+        let sample_rate = 96_000.0;
+        let mut tracker = VoiceBandTracker::default();
+        let mut voice = VoiceState::default();
+        for (frequency, expected) in [
+            (100.0, VoiceBand::Low),
+            (220.0, VoiceBand::Mid),
+            (400.0, VoiceBand::High),
+        ] {
+            let samples: Vec<f32> = (0..(sample_rate * VOICE_WINDOW_SECONDS) as usize)
+                .map(|index| {
+                    let phase = std::f32::consts::TAU * frequency * index as f32 / sample_rate;
+                    0.25 * phase.sin() + 0.15 * (phase * 2.0).sin()
+                })
+                .collect();
+            let pitch = analysis::try_voice_pitch(&samples, sample_rate).unwrap();
+            for _ in 0..10 {
+                let band = tracker.update(pitch, 0.05);
+                let state = voice.update(
+                    voice::amplitude_to_db(voice::rms(&samples)) + band.gain_db(3.0, -2.0, 5.0),
+                    0.05,
+                );
+                assert_eq!(tracker.active_for_state(state, false), expected);
+            }
+        }
+        for _ in 0..20 {
+            tracker.update(None, 0.05);
+            let state = voice.update(-90.0, 0.05);
+            tracker.active_for_state(state, false);
+        }
+        assert_eq!(
+            tracker.active_for_state(AvatarState::Idle, false),
+            VoiceBand::Unknown
+        );
+    }
+
+    #[test]
     fn launch_options_validate_arguments() {
         let parsed =
             options(["/tmp/avatar", "--device", "USB mic", "--capture"].map(Into::into)).unwrap();
@@ -1647,6 +1937,19 @@ mod tests {
         );
         assert!(options(["--frequency", "noise"].map(Into::into)).is_err());
         assert!(options(["--device"].map(Into::into)).is_err());
+        assert_eq!(
+            options(["--script", "voice.rhai"].map(Into::into))
+                .unwrap()
+                .script,
+            Some(PathBuf::from("voice.rhai"))
+        );
+        assert_eq!(
+            options(["--check-script", "voice.rhai"].map(Into::into))
+                .unwrap()
+                .check_script,
+            Some(PathBuf::from("voice.rhai"))
+        );
+        assert!(options(["--script"].map(Into::into)).is_err());
         assert!(options(["--unknown"].map(Into::into)).is_err());
         assert!(options(["one", "two"].map(Into::into)).is_err());
     }

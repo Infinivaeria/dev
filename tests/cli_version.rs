@@ -35,9 +35,11 @@ fn desktop_shortcuts_quote_paths_preserve_commands_and_protect_user_entries() {
     );
     let shortcut = data.join("applications/selenite-consolegpu.desktop");
     let original = std::fs::read_to_string(&shortcut).unwrap();
-    assert!(original
-        .lines()
-        .any(|line| line == "Name=Selenite Terminal"));
+    assert!(
+        original
+            .lines()
+            .any(|line| line == "Name=Selenite Terminal")
+    );
     assert!(original.contains("suite with spaces %%/run.sh\" \"--terminal-window\""));
     assert!(original.contains("Actions=SetAsDefaultTerminal;RestoreDefaultTerminal;"));
     assert!(original.contains("Name=Use Selenite as Default Terminal"));
@@ -45,9 +47,11 @@ fn desktop_shortcuts_quote_paths_preserve_commands_and_protect_user_entries() {
     assert!(original.contains("--restore-gnome-terminal"));
     let assets =
         std::fs::read_to_string(data.join("applications/selenite-assets.desktop")).unwrap();
-    assert!(assets
-        .lines()
-        .any(|line| line == "Name=Selenite Asset Manager"));
+    assert!(
+        assets
+            .lines()
+            .any(|line| line == "Name=Selenite Asset Manager")
+    );
     assert!(assets.contains("\"--inventory\""));
     assert!(desktop.join("selenite.desktop").is_file());
     let icon = directory.join("custom icon.png");
@@ -66,15 +70,19 @@ fn desktop_shortcuts_quote_paths_preserve_commands_and_protect_user_entries() {
     assert!(updated.contains("selenite-custom.png"));
     assert!(data.join("icons/selenite-custom.png").is_file());
     assert!(command(&[]).status.success());
-    assert!(std::fs::read_to_string(&shortcut)
-        .unwrap()
-        .contains("selenite-custom.png"));
+    assert!(
+        std::fs::read_to_string(&shortcut)
+            .unwrap()
+            .contains("selenite-custom.png")
+    );
     let protected = data.join("applications/selenite.desktop");
     std::fs::write(&protected, "[Desktop Entry]\nName=Personal launcher\n").unwrap();
     assert!(!command(&[]).status.success());
-    assert!(std::fs::read_to_string(protected)
-        .unwrap()
-        .contains("Personal launcher"));
+    assert!(
+        std::fs::read_to_string(protected)
+            .unwrap()
+            .contains("Personal launcher")
+    );
     std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -151,9 +159,11 @@ fn gnome_default_terminal_can_be_enabled_and_restored() {
         String::from_utf8_lossy(&enabled.stderr)
     );
     assert!(read_setting("exec").unwrap().contains("selenite"));
-    assert!(read_setting("exec-arg")
-        .unwrap()
-        .contains("--terminal-window"));
+    assert!(
+        read_setting("exec-arg")
+            .unwrap()
+            .contains("--terminal-window")
+    );
     assert_eq!(
         std::fs::read_to_string(config.join("gnome-xdg-terminals.list")).unwrap(),
         format!("selenite-consolegpu.desktop\n{previous_terminals}")
@@ -234,28 +244,35 @@ fn desktop_shortcuts_work_with_native_executables_and_no_shell_launchers() {
         .unwrap()
         .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 8);
+    assert_eq!(entries.len(), 9);
     for name in [
         "Selenite",
         "Selenite IDE",
         "Selenite Terminal",
-        "Selenite Audio Studio",
+        "Selenite Microphone Suite",
+        "Selenite Music Composer",
         "Selenite Graphics Studio",
         "Selenite CAS Notebook",
         "Selenite Asset Manager",
         "Selenite Game",
     ] {
-        assert!(entries
-            .iter()
-            .any(|entry| entry.lines().any(|line| line == format!("Name={name}"))));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.lines().any(|line| line == format!("Name={name}")))
+        );
     }
-    assert!(entries.iter().all(|entry| !entry
-        .lines()
-        .any(|line| line.starts_with("Exec=") && line.contains(".sh"))));
+    assert!(entries.iter().all(|entry| {
+        !entry
+            .lines()
+            .any(|line| line.starts_with("Exec=") && line.contains(".sh"))
+    }));
     assert!(entries.iter().any(|entry| entry.contains("\"--ide\"")));
-    assert!(entries
-        .iter()
-        .any(|entry| entry.contains("mic_freq/mic_freq\"")));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.contains("mic_freq/mic_freq\""))
+    );
     std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -661,6 +678,13 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
     ] {
         std::fs::write(fixture.join(name), "bundled\n").unwrap();
     }
+    std::fs::create_dir_all(fixture.join("mic_freq/examples")).unwrap();
+    std::fs::write(fixture.join("mic_freq/examples/README.md"), "examples\n").unwrap();
+    std::fs::write(
+        fixture.join("mic_freq/examples/minimal.rhai"),
+        "fn update(input) { #{} }",
+    )
+    .unwrap();
     let mic_freq_manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/mic_freq/Cargo.toml");
     let mic_freq_version = Command::new("python3").args(["-c", "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['package']['version'])", mic_freq_manifest]).output().unwrap();
     assert!(mic_freq_version.status.success());
@@ -671,6 +695,9 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
     let capabilities = serde_json::json!({
         "mic_freq":true, "audio_composer":true, "pitch_analysis":true,
         "harmonic_analysis":true, "rhythm_analysis":true, "graphics_studio":true,
+        "live_audio_analysis":true, "microphone_tools":true, "pitch_tuner":true,
+        "frequency_spectrum":true, "input_diagnostics":true, "guided_mic_calibration":true,
+        "microphone_scripting":true, "mic_freq_turing_complete":true,
         "image_layers":true, "image_filters":true, "animated_gif":true,
         "video_tools":true, "portable_ffmpeg":true, "pngtuber_graphics":true, "direct_suite_launch":true,
         "computer_algebra":true, "symbolic_math":true, "numerical_linear_algebra":true,
@@ -690,6 +717,7 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
             "launcher":"mic_freq/mic_freq",
             "shell_shim":"run-mic-freq.sh",
             "assets":"mic_freq/assets",
+            "examples":"mic_freq/examples",
             "manuals":["mic_freq/README.md","mic_freq/MANUAL.md"]
         }},
         "capabilities":capabilities
@@ -701,15 +729,17 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
     .unwrap();
     let archive = directory.join("suite.tar.gz");
     let pack = |archive: &std::path::Path| {
-        assert!(Command::new("tar")
-            .arg("-czf")
-            .arg(archive)
-            .arg("-C")
-            .arg(&fixture)
-            .arg(".")
-            .status()
-            .unwrap()
-            .success());
+        assert!(
+            Command::new("tar")
+                .arg("-czf")
+                .arg(archive)
+                .arg("-C")
+                .arg(&fixture)
+                .arg(".")
+                .status()
+                .unwrap()
+                .success()
+        );
     };
     pack(&archive);
     let destination = home.join("Selenite installation");
@@ -765,10 +795,14 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
         "{}",
         String::from_utf8_lossy(&default_dry.stderr)
     );
-    assert!(String::from_utf8_lossy(&default_dry.stdout)
-        .contains(&format!("Extract to: {}", home.join("selenite").display())));
-    assert!(String::from_utf8_lossy(&default_dry.stdout)
-        .contains(&format!("Copy to: {}", home.join("suite.tar.gz").display())));
+    assert!(
+        String::from_utf8_lossy(&default_dry.stdout)
+            .contains(&format!("Extract to: {}", home.join("selenite").display()))
+    );
+    assert!(
+        String::from_utf8_lossy(&default_dry.stdout)
+            .contains(&format!("Copy to: {}", home.join("suite.tar.gz").display()))
+    );
     let installed = distribute(&archive, &destination, false);
     assert!(
         installed.status.success(),
@@ -779,13 +813,15 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
     assert!(destination.join("mic_freq/assets").is_dir());
     assert!(destination.join("distribution-info.json").is_file());
     assert!(home.join("suite.tar.gz").is_file());
-    assert!(Command::new("sha256sum")
-        .arg("-c")
-        .arg("suite.tar.gz.sha256")
-        .current_dir(&home)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        Command::new("sha256sum")
+            .arg("-c")
+            .arg("suite.tar.gz.sha256")
+            .current_dir(&home)
+            .status()
+            .unwrap()
+            .success()
+    );
     std::fs::write(destination.join("personal.txt"), "keep me").unwrap();
     std::fs::write(destination.join("run.sh"), "old launcher\n").unwrap();
     std::fs::create_dir_all(destination.join("user-project/nested")).unwrap();
@@ -852,13 +888,15 @@ fn distributor_installs_the_full_suite_and_rejects_unsafe_archives() {
         std::fs::read_to_string(default_destination.join("docs/update.md")).unwrap(),
         "new archive\n"
     );
-    assert!(Command::new("sha256sum")
-        .arg("-c")
-        .arg("suite.tar.gz.sha256")
-        .current_dir(&home)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        Command::new("sha256sum")
+            .arg("-c")
+            .arg("suite.tar.gz.sha256")
+            .current_dir(&home)
+            .status()
+            .unwrap()
+            .success()
+    );
     assert_eq!(
         std::fs::read_to_string(default_destination.join("personal.txt")).unwrap(),
         "preserve default install"

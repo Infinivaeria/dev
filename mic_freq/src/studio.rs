@@ -4,6 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::voice::VoiceBand;
 
+pub const GATE_MIN_DB: f32 = -120.0;
+pub const GATE_MAX_DB: f32 = 0.0;
+pub const LOUD_OFFSET_MIN_DB: f32 = 4.0;
+pub const LOUD_OFFSET_MAX_DB: f32 = 120.0;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FrequencyProfile {
@@ -75,8 +80,13 @@ impl Settings {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
             Err(error) => return Err(error.into()),
         };
-        settings.gate_db = finite_clamp(settings.gate_db, -90.0, -26.0, -45.0);
-        settings.loud_delta_db = finite_clamp(settings.loud_delta_db, 8.0, 36.0, 24.0);
+        settings.gate_db = finite_clamp(settings.gate_db, GATE_MIN_DB, GATE_MAX_DB, -45.0);
+        settings.loud_delta_db = finite_clamp(
+            settings.loud_delta_db,
+            LOUD_OFFSET_MIN_DB,
+            LOUD_OFFSET_MAX_DB,
+            24.0,
+        );
         settings.low_voice_gain_db = finite_clamp(settings.low_voice_gain_db, -18.0, 18.0, 0.0);
         settings.mid_voice_gain_db = finite_clamp(settings.mid_voice_gain_db, -18.0, 18.0, 0.0);
         settings.high_voice_gain_db = finite_clamp(settings.high_voice_gain_db, -18.0, 18.0, 0.0);
@@ -300,6 +310,7 @@ mod tests {
         let path = dir.join("settings.json");
         let settings = Settings {
             gate_db: 20.0,
+            loud_delta_db: 150.0,
             low_voice_gain_db: 100.0,
             mid_voice_gain_db: 9.0,
             high_voice_gain_db: -100.0,
@@ -317,7 +328,8 @@ mod tests {
         };
         settings.save(&path).unwrap();
         let loaded = Settings::load(&path).unwrap();
-        assert_eq!(loaded.gate_db, -26.0);
+        assert_eq!(loaded.gate_db, 0.0);
+        assert_eq!(loaded.loud_delta_db, 120.0);
         assert_eq!(loaded.low_voice_gain_db, 18.0);
         assert_eq!(loaded.mid_voice_gain_db, 9.0);
         assert_eq!(loaded.high_voice_gain_db, -18.0);
@@ -328,6 +340,41 @@ mod tests {
         assert!(loaded.mid_profile.mirror);
         assert!(!loaded.mid_profile.blink);
         assert_eq!(loaded.device, settings.device);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn expanded_thresholds_survive_settings_and_preset_roundtrips() {
+        let dir = std::env::temp_dir().join(format!("mic-freq-thresholds-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        for (gate, loud) in [
+            (-120.0, 4.0),
+            (0.0, 120.0),
+            (-105.0, 70.0),
+            (-90.0, 8.0),
+            (-26.0, 36.0),
+        ] {
+            let settings = Settings {
+                gate_db: gate,
+                loud_delta_db: loud,
+                ..Default::default()
+            };
+            settings.save(&path).unwrap();
+            settings.save_preset(&path, "Thresholds").unwrap();
+            let loaded = Settings::load(&path).unwrap();
+            assert_eq!((loaded.gate_db, loaded.loud_delta_db), (gate, loud));
+            let mut preset = Settings::default();
+            preset.load_preset(&path, "Thresholds").unwrap();
+            assert_eq!((preset.gate_db, preset.loud_delta_db), (gate, loud));
+        }
+        let settings = Settings {
+            gate_db: -150.0,
+            loud_delta_db: 1.0,
+            ..Default::default()
+        };
+        settings.save(&path).unwrap();
+        let loaded = Settings::load(&path).unwrap();
+        assert_eq!((loaded.gate_db, loaded.loud_delta_db), (-120.0, 4.0));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
