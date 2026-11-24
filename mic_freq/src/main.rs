@@ -1,6 +1,5 @@
 use mic_freq::analysis::{self, Analysis, RhythmAnalysis, RhythmTracker};
 use mic_freq::audio::MicCapture;
-use mic_freq::mic_tools::MicTools;
 use mic_freq::scripting::{ScriptInput, ScriptRuntime};
 #[path = "../../src/portable.rs"]
 #[allow(dead_code)]
@@ -424,7 +423,7 @@ struct HelpTab {
 }
 
 impl HelpTab {
-    const LINES: [&'static str; 23] = [
+    const LINES: [&'static str; 22] = [
         "Selenite Audio Studio / mic_freq Microphone Suite",
         "",
         "The microphone chooses Idle, Talking, or Loud artwork. Pitch also selects",
@@ -437,7 +436,6 @@ impl HelpTab {
         "",
         "Controls",
         "C: PNGTuber box / studio controls. M: mute. R: reload artwork.",
-        "F3: microphone tools and pitch tuner.",
         "Up/Down: gate. B: bounce. X: mirror. 0: auto. 1/2/3: force pose.",
         "Esc: close the open Help/Presets panel, or quit from the main studio.",
         "",
@@ -720,17 +718,6 @@ fn calibrated_gate(peak_db: f32) -> f32 {
     (peak_db + 6.0).clamp(studio::GATE_MIN_DB, studio::GATE_MAX_DB)
 }
 
-fn apply_microphone_recommendation(
-    settings: &mut Settings,
-    recommendation: mic_freq::mic_tools::Recommendation,
-) {
-    settings.gate_db = recommendation.gate_db;
-    settings.loud_delta_db = recommendation.loud_delta_db;
-    settings.low_voice_gain_db = 0.0;
-    settings.mid_voice_gain_db = 0.0;
-    settings.high_voice_gain_db = 0.0;
-}
-
 fn frequency_button_rect(panel: f32, top: f32) -> Rectangle {
     Rectangle::new(panel + 246.0, top, 52.0, 34.0)
 }
@@ -943,7 +930,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!(
             "mic_freq [avatar-folder] [--device NAME] [--capture] [--list-devices]\n\
             C: PNGTuber box  M: mute  0/1/2/3: auto/idle/talking/loud\n\
-            F3: microphone tools and pitch tuner\n\
             Up/Down: gate  B: bounce  X: mirror  R: reload  F1: help  F2: presets  Esc: quit\n\
             --artwork opens the browsable global pose editor\n\
             --frequency low|mid|high opens that pitch-animation editor\n\
@@ -1058,7 +1044,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut pitch_delay = 0.0;
     let mut voice_pitch = None;
     let mut analysis_visible = true;
-    let mut mic_tools = MicTools::default();
     let mut presets = PresetMenu::default();
     let mut help = HelpTab::default();
     let mut frequency_children = Vec::<std::process::Child>::new();
@@ -1085,9 +1070,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let preset_button = Rectangle::new(panel, 56.0, 94.0, 28.0);
         let artwork_button = Rectangle::new(panel + 100.0, 56.0, 132.0, 28.0);
         let help_button = Rectangle::new(panel + 238.0, 56.0, 60.0, 28.0);
-        let analysis_button = Rectangle::new(panel, 916.0, 94.0, 34.0);
-        let tools_button = Rectangle::new(panel + 98.0, 916.0, 96.0, 34.0);
-        let capture_button = Rectangle::new(panel + 198.0, 916.0, 100.0, 34.0);
+        let analysis_button = Rectangle::new(panel, 916.0, 145.0, 34.0);
+        let capture_button = Rectangle::new(panel + 153.0, 916.0, 145.0, 34.0);
         let mut frequency_editor_finished = false;
         frequency_children.retain_mut(|child| match child.try_wait() {
             Ok(Some(_)) => {
@@ -1174,24 +1158,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 capture = !capture;
             }
             if !capture && clicked && analysis_button.check_collision_point_rec(mouse) {
-                if mic_tools.open {
-                    mic_tools.open = false;
-                    analysis_visible = true;
-                } else {
-                    analysis_visible = !analysis_visible;
-                }
-            }
-            if !capture
-                && (rl.is_key_pressed(KeyboardKey::KEY_F3)
-                    || (clicked && tools_button.check_collision_point_rec(mouse)))
-            {
-                mic_tools.open = !mic_tools.open;
-            }
-            if !capture && mic_tools.open && clicked {
-                if let Some(recommendation) = mic_tools.click(mouse) {
-                    apply_microphone_recommendation(&mut settings, recommendation);
-                    changed = true;
-                }
+                analysis_visible = !analysis_visible;
             }
             if rl.is_key_pressed(KeyboardKey::KEY_M) || hit(605.0) {
                 muted = !muted;
@@ -1472,17 +1439,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(settings.loud_delta_db);
         let effective_gain = script_controls.gain_db.unwrap_or(voice_gain);
         let voice_db = db + effective_gain;
-        if !capture {
-            if let Err(failure) = mic_tools.update(
-                dt,
-                &samples,
-                &rhythm_samples,
-                mic.as_ref().map_or(44_100.0, |input| input.sample_rate),
-                0.0,
-            ) {
-                error = Some(format!("Microphone tools: {failure}"));
-            }
-        }
         let detected = voice.update(if muted { -180.0 } else { voice_db }, dt);
         let tracked_voice_band = voice_band_tracker.active_for_state(detected, muted);
         let active_voice_band = if muted {
@@ -1736,9 +1692,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 mouse,
             );
             button(&mut d, analysis_button, "Analyzer", analysis_visible, mouse);
-            button(&mut d, tools_button, "Mic tools", mic_tools.open, mouse);
             button(&mut d, capture_button, "PNGTuber", false, mouse);
-            if analysis_visible && !mic_tools.open {
+            if analysis_visible {
                 draw_live_analysis(
                     &mut d,
                     18.0,
@@ -1746,24 +1701,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     (canvas_width / ui - 36.0).min(390.0),
                     &live_analysis,
                     &rhythm_analysis,
-                );
-            }
-            if mic_tools.open {
-                mic_tools.draw(
-                    &mut d,
-                    &samples,
-                    if samples.is_empty() {
-                        None
-                    } else {
-                        voice_pitch
-                    },
-                    mic.as_ref().map(|input| {
-                        (
-                            input.device_name.as_str(),
-                            input.sample_rate,
-                            input.has_failed(),
-                        )
-                    }),
                 );
             }
             if let Some(message) = &error {
@@ -1846,28 +1783,6 @@ mod tests {
         assert_eq!(calibrated_gate(-150.0), -120.0);
         assert_eq!(calibrated_gate(-110.0), -104.0);
         assert_eq!(calibrated_gate(-3.0), 0.0);
-    }
-
-    #[test]
-    fn applying_microphone_calibration_restores_neutral_band_gains() {
-        let mut settings = Settings {
-            low_voice_gain_db: -18.0,
-            mid_voice_gain_db: 9.0,
-            high_voice_gain_db: 18.0,
-            ..Default::default()
-        };
-        apply_microphone_recommendation(
-            &mut settings,
-            mic_freq::mic_tools::Recommendation {
-                gate_db: -48.0,
-                loud_delta_db: 26.0,
-            },
-        );
-        assert_eq!(settings.gate_db, -48.0);
-        assert_eq!(settings.loud_delta_db, 26.0);
-        assert_eq!(settings.low_voice_gain_db, 0.0);
-        assert_eq!(settings.mid_voice_gain_db, 0.0);
-        assert_eq!(settings.high_voice_gain_db, 0.0);
     }
 
     #[test]

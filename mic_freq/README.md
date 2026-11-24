@@ -17,8 +17,8 @@ studio settings in a `presets` directory.
 # Selenite Audio Studio
 
 mic_freq is the **Selenite Microphone Suite**: an offline voice-reactive
-PNGTuber studio plus input diagnostics, spectrum analysis, pitch tuning and
-guided microphone calibration. It also includes a sandboxed, Turing-complete
+PNGTuber studio with live signal analysis and noise gate calibration.
+It also includes a sandboxed, Turing-complete
 Rhai scripting runtime for live presentation automation. It is built with
 raylib and cpal. Microphone volume selects idle,
 talking, or loud talking artwork, and detected low/mid/high pitch can select a
@@ -99,25 +99,6 @@ display-window overlap does not inflate its tempo estimate. In Composer,
 **Analyze Mix** examines the exact deterministic render used by Play and WAV
 export. Polyphonic/noisy material can legitimately have no stable single pitch
 or tempo; Selenite reports that uncertainty instead of inventing a result.
-
-## Microphone tools
-
-Click **Mic tools** or press **F3** to open the live microphone suite. It shows
-the input device and sample rate, level and clipping warning, an eight-band
-spectrum, and a pitch tuner with note, frequency and cents relative to A4 =
-440 Hz. The tuner detects pitched signals from 50 to 2,000 Hz; silence or
-unpitched sound shows no stable pitch. The panel is hidden in PNGTuber capture.
-
-For guided calibration, select **Noise 3s** and stay quiet, then select
-**Voice 3s** and speak normally. Review the recommended gate and loud offset,
-then select **Apply** to use them. Noise uses a high percentile to ignore
-typical quiet moments; voice uses a robust upper percentile so brief pauses do
-not lower the recommendation. Apply restores Low/Mid/High gains to 0 dB so a
-previously negative band override cannot suppress the calibrated talking pose.
-Insufficient input, inadequate separation between voice and noise, and clipping
-are reported instead of applied.
-Calibration does not change system microphone gain; reduce that gain in system
-audio settings if the clipping warning appears.
 
 ## Run
 

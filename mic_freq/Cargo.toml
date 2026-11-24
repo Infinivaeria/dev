@@ -3,7 +3,7 @@ name = "mic_freq"
 version = "6.0.0-rc.1"
 edition = "2024"
 rust-version = "1.88"
-description = "Selenite microphone suite with voice-reactive PNGTuber artwork, pitch tuning, spectrum analysis and guided calibration"
+description = "Selenite microphone suite with voice-reactive PNGTuber artwork and signal analysis"
 license = "MIT"
 
 [dependencies]

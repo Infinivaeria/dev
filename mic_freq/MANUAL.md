@@ -76,7 +76,6 @@ Audio Studio focused on microphone-driven PNGTuber presentation.
 | C | Toggle PNGTuber-only box / studio controls; click the avatar box to return |
 | F1 | Open/close the in-app mic_freq Help tab |
 | M | Mute microphone animation (forces idle) |
-| F3 | Toggle the microphone tools panel |
 | 0 | Automatic microphone-driven pose |
 | 1 / 2 / 3 | Force idle / talking / loud pose |
 | B | Toggle bounce off / normal strength |
@@ -157,25 +156,6 @@ without requiring a microphone, output device or display.
 Playback uses the selected output device explicitly. If no device is available
 or project/sample data is invalid, the status bar reports the host or format
 error without changing the current project.
-
-## Microphone tools
-
-Click **Mic tools** or press **F3** to open the microphone suite over the avatar.
-It shows the selected input and sample rate, input level, clipping warning,
-eight-band spectrum and a pitch tuner. The tuner displays the nearest note,
-frequency and cents from A4 = 440 Hz, with a centered indicator for in-tune
-signals. It uses the voice-pitch detector (50–2,000 Hz); silence and unpitched
-sound display no stable pitch. Capture mode hides the panel.
-
-Select **Noise 3s** and remain quiet, then select **Voice 3s** and speak
-normally. The panel recommends a gate and loud offset based on the measurements.
-Noise uses a high percentile and voice uses an upper-middle percentile so
-individual pauses and peaks do not dominate. Select **Apply** to save those
-settings and reset Low/Mid/High gains to neutral 0 dB; nothing is changed
-automatically.
-Clipped input, missing samples, or voice too close to the noise floor prevent a
-recommendation. Lower system microphone gain if clipping is reported, then
-measure again. The suite does not adjust the system gain.
 
 ## Signal analyzer
 
