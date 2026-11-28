@@ -167,6 +167,51 @@ pub fn wrap(text: &str, size: f32, max_width: f32) -> Vec<String> {
     wrap_with(text, max_width, |candidate| measure(candidate, size))
 }
 
+/// Word-wraps text without shortening or adding ellipses. Over-long words
+/// are split by character so every character remains visible.
+pub fn wrap_full(text: &str, size: f32, max_width: f32) -> Vec<String> {
+    wrap_full_with(text, max_width, |candidate| measure(candidate, size))
+}
+
+fn wrap_full_with(
+    text: &str,
+    max_width: f32,
+    measure: impl Fn(&str) -> f32,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut line = String::new();
+        for word in paragraph.split_whitespace() {
+            let candidate = if line.is_empty() {
+                word.to_owned()
+            } else {
+                format!("{line} {word}")
+            };
+            if measure(&candidate) <= max_width {
+                line = candidate;
+                continue;
+            }
+
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            let mut piece = String::new();
+            for character in word.chars() {
+                let candidate = format!("{piece}{character}");
+                if !piece.is_empty() && measure(&candidate) > max_width {
+                    lines.push(std::mem::take(&mut piece));
+                }
+                piece.push(character);
+            }
+            line = piece;
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
 fn wrap_with(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {

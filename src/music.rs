@@ -8,7 +8,10 @@
 //! Call [`Player::shutdown`] before the window closes.
 
 use std::{
+    collections::BTreeMap,
     ffi::{c_uint, c_void, CString},
+    fs::File,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
@@ -698,11 +701,331 @@ pub fn format_time(seconds: f32) -> String {
 }
 
 pub fn track_name(path: &Path) -> String {
+    if let Some(title) = id3_tags(path)
+        .into_iter()
+        .find_map(|(name, value)| (name == "Title").then_some(value))
+    {
+        return title;
+    }
     path.file_stem()
         .or_else(|| path.file_name())
         .and_then(|name| name.to_str())
         .unwrap_or("track")
         .to_owned()
+}
+
+/// Every textual ID3 metadata field, in a stable display order.
+pub fn id3_tags(path: &Path) -> Vec<(String, String)> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => return Vec::new(),
+    };
+    let mut tags = BTreeMap::<String, Vec<String>>::new();
+
+    let mut header = [0; 10];
+    if file.read_exact(&mut header).is_err() {
+        return tags_to_vec(tags);
+    }
+    if &header[..3] == b"ID3" {
+        let major = header[3];
+        let unsync = header[5] & 0x80 != 0;
+        let Some(tag_size) = synchsafe_u32([header[6], header[7], header[8], header[9]]) else {
+            return tags_to_vec(tags);
+        };
+        let tag_size = tag_size as usize;
+        let mut tag = vec![0; tag_size.min(16 * 1024 * 1024)];
+        if file.seek(SeekFrom::Start(10)).is_err() || file.read_exact(&mut tag).is_err() {
+            return tags_to_vec(tags);
+        }
+        read_id3v2_frames(major, unsync, &tag, &mut tags);
+    }
+
+    let Ok(len) = file.seek(SeekFrom::End(0)) else {
+        return tags_to_vec(tags);
+    };
+    if len >= 128 {
+        if file.seek(SeekFrom::Start(len - 128)).is_err() {
+            return tags_to_vec(tags);
+        }
+        let mut tail = [0; 128];
+        if file.read_exact(&mut tail).is_ok() && &tail[..3] == b"TAG" {
+            add_id3v1_field(&mut tags, "Title", &tail[3..33]);
+            add_id3v1_field(&mut tags, "Artist", &tail[33..63]);
+            add_id3v1_field(&mut tags, "Album", &tail[63..93]);
+            add_id3v1_field(&mut tags, "Year", &tail[93..97]);
+            if tail[125] == 0 && tail[126] != 0 {
+                add_id3v1_field(&mut tags, "Track", &tail[126..127]);
+            } else {
+                add_id3v1_field(&mut tags, "Comment", &tail[97..127]);
+            }
+        }
+    }
+
+    tags
+        .into_iter()
+        .flat_map(|(name, values)| {
+            values
+                .into_iter()
+                .map(move |value| (name.clone(), value))
+        })
+        .collect()
+}
+
+fn synchsafe_u32(bytes: [u8; 4]) -> Option<u32> {
+    if bytes.iter().any(|byte| byte & 0x80 != 0) {
+        return None;
+    }
+    Some(
+        (u32::from(bytes[0]) << 21)
+            | (u32::from(bytes[1]) << 14)
+            | (u32::from(bytes[2]) << 7)
+            | u32::from(bytes[3]),
+    )
+}
+
+fn tags_to_vec(tags: BTreeMap<String, Vec<String>>) -> Vec<(String, String)> {
+    tags.into_iter()
+        .flat_map(|(name, values)| {
+            values
+                .into_iter()
+                .map(move |value| (name.clone(), value))
+        })
+        .collect()
+}
+
+fn add_id3v1_field(tags: &mut BTreeMap<String, Vec<String>>, name: &str, data: &[u8]) {
+    if let Some(value) = clean_text(data, 0) {
+        tags.entry(name.to_owned()).or_default().push(value);
+    }
+}
+
+fn read_id3v2_frames(
+    major: u8,
+    unsync: bool,
+    tag: &[u8],
+    tags: &mut BTreeMap<String, Vec<String>>,
+) {
+    let mut offset = 0usize;
+
+    while offset < tag.len() {
+        if tag[offset] == 0 {
+            break;
+        }
+
+        let (frame_id_len, header_len) = match major {
+            2 => (3usize, 6usize),
+            3 => (4usize, 10usize),
+            4 => (4usize, 10usize),
+            _ => break,
+        };
+        if offset + header_len > tag.len() {
+            break;
+        }
+
+        let Ok(id) = std::str::from_utf8(&tag[offset..offset + frame_id_len]) else {
+            break;
+        };
+        let frame_size = match major {
+            2 => u32::from_be_bytes([0, tag[offset + 3], tag[offset + 4], tag[offset + 5]]) as usize,
+            3 => u32::from_be_bytes([
+                tag[offset + 4],
+                tag[offset + 5],
+                tag[offset + 6],
+                tag[offset + 7],
+            ]) as usize,
+            4 => match synchsafe_u32([
+                tag[offset + 4],
+                tag[offset + 5],
+                tag[offset + 6],
+                tag[offset + 7],
+            ]) {
+                Some(size) => size as usize,
+                None => break,
+            },
+            _ => 0,
+        };
+
+        let data_start = offset + header_len;
+        if data_start + frame_size > tag.len() {
+            break;
+        }
+        offset = data_start + frame_size;
+
+        let data = &tag[data_start..offset];
+        let data = if unsync {
+            let mut restored = Vec::with_capacity(data.len());
+            let mut index = 0;
+            while index < data.len() {
+                if data[index] == 0xff
+                    && index + 1 < data.len()
+                    && data[index + 1] == 0x00
+                {
+                    restored.push(0xff);
+                    index += 2;
+                } else {
+                    restored.push(data[index]);
+                    index += 1;
+                }
+            }
+            restored
+        } else {
+            data.to_vec()
+        };
+
+        let name = id3_frame_name(id);
+        if name.is_empty() {
+            continue;
+        }
+
+        if id.starts_with('T') {
+            if let Some(mut value) = decode_id3_text(&data) {
+                if id == "TXXX" || id == "TXX" {
+                    if let Some(separator) = value.find('\0') {
+                        let description = value[..separator].trim();
+                        let text = value[separator + 1..].trim();
+                        if !description.is_empty() && !text.is_empty() {
+                            value = format!("{description}: {text}");
+                        }
+                    }
+                }
+                tags.entry(name).or_default().push(value);
+            }
+        } else if matches!(id, "COMM" | "COM" | "USLT" | "ULT") {
+            if let Some(value) = decode_id3_comment(&data) {
+                tags.entry(name).or_default().push(value);
+            }
+        } else if id.starts_with('W') && data.len() >= 1 {
+            let value = String::from_utf8_lossy(&data)
+                .trim_matches('\0')
+                .trim()
+                .to_owned();
+            if !value.is_empty() {
+                tags.entry(name).or_default().push(value);
+            }
+        }
+    }
+}
+
+fn decode_id3_text(data: &[u8]) -> Option<String> {
+    if data.is_empty() {
+        return None;
+    }
+    let encoding = data[0];
+    let text = &data[1..];
+    clean_text(text, encoding).filter(|title| !title.is_empty())
+}
+
+fn decode_id3_comment(data: &[u8]) -> Option<String> {
+    if data.len() < 4 {
+        return None;
+    }
+    let encoding = data[0];
+    let language_and_text = &data[4..];
+    let mut parts = language_and_text;
+    if encoding == 1 || encoding == 2 {
+        let separator = if encoding == 1 { 2 } else { 2 };
+        if parts.len() >= separator {
+            let description_size = if parts[..separator].windows(2).any(|pair| pair == [0, 0]) {
+                separator
+            } else {
+                0
+            };
+            let start = description_size;
+            parts = &parts[start..];
+        }
+    } else if let Some(separator) = parts.iter().position(|&byte| byte == 0) {
+        parts = &parts[separator + 1..];
+    }
+    clean_text(parts, encoding).filter(|value| !value.is_empty())
+}
+
+fn id3_frame_name(id: &str) -> String {
+    let name = match id {
+        "TIT2" | "TT2" => "Title",
+        "TPE1" | "TP1" => "Artist",
+        "TPE2" | "TP2" => "Album Artist",
+        "TPE3" | "TP3" => "Conductor",
+        "TPE4" | "TP4" => "Remixer",
+        "TALB" | "TAL" => "Album",
+        "TCOM" | "TCM" => "Composer",
+        "TEXT" | "TXT" => "Lyricist",
+        "TENC" | "TEN" => "Encoded By",
+        "TPOS" | "TPA" => "Disc",
+        "TRCK" | "TRK" => "Track",
+        "TYER" | "TYE" => "Year",
+        "TDAT" | "TDA" => "Date",
+        "TIME" | "TIM" => "Time",
+        "TCON" | "TCO" => "Genre",
+        "TCOP" | "TCR" => "Copyright",
+        "TBPM" | "TBP" => "BPM",
+        "TKEY" | "TKE" => "Key",
+        "TLAN" | "TLA" => "Language",
+        "TMED" | "TMT" => "Media",
+        "TIT1" | "TT1" => "Group",
+        "TIT3" | "TT3" => "Subtitle",
+        "TLEN" | "TLE" => "Length",
+        "TSRC" | "TRC" => "ISRC",
+        "TOPE" | "TOA" => "Original Artist",
+        "TOLY" | "TOL" => "Original Lyricist",
+        "TOAL" | "TOT" => "Original Album",
+        "TOWN" => "Owner",
+        "TXXX" | "TXX" => "User Text",
+        "COMM" | "COM" => "Comment",
+        "USLT" | "ULT" => "Lyrics",
+        "WCOM" | "WCM" => "Commercial",
+        "WCOP" | "WCP" => "Copyright URL",
+        "WOAR" | "WAR" => "Artist URL",
+        "WOAF" | "WAF" => "Audio File URL",
+        "WOAS" | "WAS" => "Audio Source URL",
+        "WORS" | "WRS" => "Internet Radio URL",
+        "WPAY" | "WPY" => "Payment URL",
+        "WPUB" | "WPB" => "Publisher URL",
+        _ => return String::new(),
+    };
+    name.to_owned()
+}
+
+fn clean_text(data: &[u8], encoding: u8) -> Option<String> {
+    let decoded = match encoding {
+        0 => data.iter().map(|&byte| byte as char).collect::<String>(),
+        1 => decode_utf16(data, true),
+        2 => decode_utf16(data, false),
+        3 => String::from_utf8(data.to_vec()).ok()?,
+        _ => String::from_utf8_lossy(data).into_owned(),
+    };
+    let result = decoded
+        .trim_matches(|character: char| character == '\0' || character.is_whitespace())
+        .to_owned();
+    (!result.is_empty()).then_some(result)
+}
+
+fn decode_utf16(data: &[u8], allow_bom: bool) -> String {
+    if data.len() < 2 {
+        return String::new();
+    }
+    let bom = u16::from_le_bytes([data[0], data[1]]);
+    let (units, big_endian) = if allow_bom && bom == 0xfeff {
+        (data[2..].to_vec(), true)
+    } else if allow_bom && bom == 0xfffe {
+        (data[2..].to_vec(), false)
+    } else if allow_bom {
+        (data.to_vec(), false)
+    } else {
+        (data.to_vec(), true)
+    };
+
+    let mut decoded = Vec::with_capacity(units.len() / 2);
+    let mut index = 0;
+    while index + 1 < units.len() {
+        let unit = if big_endian {
+            u16::from_be_bytes([units[index], units[index + 1]])
+        } else {
+            u16::from_le_bytes([units[index], units[index + 1]])
+        };
+        decoded.push(unit);
+        index += 2;
+    }
+    String::from_utf16_lossy(&decoded)
 }
 
 // ---------------------------------------------------------------- UI ----
@@ -746,12 +1069,37 @@ pub struct BarLayout {
 
 pub fn bar_height(screen_width: i32, screen_height: i32) -> f32 {
     let scale = ui::scale(screen_width, screen_height);
-    72.0 * scale
+    104.0 * scale
+}
+
+pub fn bar_height_for_player(
+    player: &Player,
+    screen_width: i32,
+    screen_height: i32,
+) -> f32 {
+    let scale = ui::scale(screen_width, screen_height);
+    let base = bar_height(screen_width, screen_height);
+    let Some(path) = player.playlist.current_path() else {
+        return base;
+    };
+    let tags = id3_tags(path);
+    if tags.is_empty() {
+        return base;
+    }
+    let metadata = tags
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect::<Vec<_>>()
+        .join("  •  ");
+    let font = 16.0 * scale;
+    let title_width = (screen_width as f32 * 0.62).max(180.0 * scale);
+    let line_count = ui::wrap_full(&metadata, font, title_width).len();
+    (base + ((line_count.saturating_sub(3)) as f32 * font)).max(base)
 }
 
 pub fn bar_layout(player: &Player, screen_width: i32, screen_height: i32) -> BarLayout {
     let scale = ui::scale(screen_width, screen_height);
-    let height = bar_height(screen_width, screen_height);
+    let height = bar_height_for_player(player, screen_width, screen_height);
     let width = screen_width as f32;
     let frame = Rectangle::new(0.0, screen_height as f32 - height, width, height);
     let font = 16.0 * scale;
@@ -942,7 +1290,21 @@ pub fn draw_bar<D: RaylibDraw>(
     let title = match player.playlist.current_path() {
         Some(path) => {
             let index = player.playlist.current().unwrap_or(0) + 1;
-            format!("{index}/{}  {}", player.playlist.len(), track_name(path))
+            let tags = id3_tags(path);
+            if tags.is_empty() {
+                format!(
+                    "{index}/{}  {}",
+                    player.playlist.len(),
+                    track_name(path)
+                )
+            } else {
+                let metadata = tags
+                    .iter()
+                    .map(|(name, value)| format!("{name}: {value}"))
+                    .collect::<Vec<_>>()
+                    .join("  •  ");
+                format!("{index}/{}  {}", player.playlist.len(), metadata)
+            }
         }
         None => "No track — open an audio cell or drop music on the grid".to_owned(),
     };
@@ -961,14 +1323,18 @@ pub fn draw_bar<D: RaylibDraw>(
     );
     let time_width = ui::measure(&time, layout.font);
     let title_width = (info.width - time_width - 12.0 * scale).max(0.0);
-    ui::draw_text(
-        d,
-        &ui::fit(&format!("{title}{state}"), layout.font, title_width),
-        info.x,
-        info.y + 4.0 * scale,
-        layout.font,
-        TEXT,
-    );
+    let metadata_lines =
+        ui::wrap_full(&format!("{title}{state}"), layout.font, title_width);
+    for (line_index, line) in metadata_lines.iter().enumerate() {
+        ui::draw_text(
+            d,
+            line,
+            info.x,
+            info.y + 4.0 * scale + line_index as f32 * layout.font,
+            layout.font,
+            TEXT,
+        );
+    }
     ui::draw_text(
         d,
         &time,
@@ -1105,7 +1471,9 @@ pub fn playlist_layout(
     let scale = ui::scale(screen_width, screen_height);
     let font = 16.0 * scale;
     let row_height = font + 10.0 * scale;
-    let bottom = screen_height as f32 - bar_height(screen_width, screen_height) - 6.0 * scale;
+    let bottom =
+        screen_height as f32 - bar_height_for_player(player, screen_width, screen_height)
+            - 6.0 * scale;
     let width = (440.0 * scale).min(screen_width as f32 * 0.5);
     let available = (bottom - top - 10.0 * scale).max(row_height * 2.0);
     let visible_rows = (((available - row_height) / row_height).floor() as usize)
@@ -1191,14 +1559,19 @@ pub fn draw_playlist<D: RaylibDraw>(
             index + 1,
             track_name(&player.playlist.tracks()[*index])
         );
-        ui::draw_text_in(
-            d,
-            &ui::fit(&text, layout.font, rect.width - 16.0),
-            *rect,
-            8.0,
-            layout.font,
-            TEXT,
-        );
+        for (line_index, line) in ui::wrap_full(&text, layout.font, rect.width - 16.0)
+            .iter()
+            .enumerate()
+        {
+            ui::draw_text(
+                d,
+                line,
+                rect.x + 8.0,
+                rect.y + line_index as f32 * layout.font,
+                layout.font,
+                TEXT,
+            );
+        }
     }
 }
 
@@ -1226,6 +1599,44 @@ mod tests {
         assert!(is_playable(Path::new("c.xm")));
         assert!(!is_playable(Path::new("d.m4a")));
         assert!(!is_playable(Path::new("noext")));
+    }
+
+    #[test]
+    fn track_name_reads_id3v1_and_id3v2_titles() {
+        let directory = std::env::temp_dir();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+
+        let v1 = directory.join(format!("selenite-id3v1-{suffix}.mp3"));
+        let mut tail = vec![0; 128];
+        tail[..3].copy_from_slice(b"TAG");
+        tail[3..10].copy_from_slice(b"V1 Song");
+        std::fs::write(&v1, tail).unwrap();
+        assert_eq!(track_name(&v1), "V1 Song");
+
+        let v23 = directory.join(format!("selenite-id3v23-{suffix}.mp3"));
+        let title = b"V2.3 Song";
+        let frame_size = (title.len() + 1) as u32;
+        let mut tag = vec![b'I', b'D', b'3', 3, 0, 0];
+        let size = 10 + frame_size;
+        tag.extend_from_slice(&[
+            ((size >> 21) & 0x7f) as u8,
+            ((size >> 14) & 0x7f) as u8,
+            ((size >> 7) & 0x7f) as u8,
+            (size & 0x7f) as u8,
+        ]);
+        tag.extend_from_slice(b"TIT2");
+        tag.extend_from_slice(&frame_size.to_be_bytes());
+        tag.extend_from_slice(&[0, 0]);
+        tag.push(0);
+        tag.extend_from_slice(title);
+        std::fs::write(&v23, tag).unwrap();
+        assert_eq!(track_name(&v23), "V2.3 Song");
+
+        let _ = std::fs::remove_file(v1);
+        let _ = std::fs::remove_file(v23);
     }
 
     #[test]

@@ -103,6 +103,30 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 ];
 const RUBY_EXTENSIONS: &[&str] = &[".rb", ".rbc", ".rake", ".gemspec"];
 
+fn has_id3_signature(path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0; 10];
+    if file.read_exact(&mut head).is_ok() && &head[..3] == b"ID3" {
+        return true;
+    }
+
+    let Ok(len) = file.seek(SeekFrom::End(0)) else {
+        return false;
+    };
+    if len < 128 {
+        return false;
+    }
+    let Ok(_) = file.seek(SeekFrom::Start(len - 128)) else {
+        return false;
+    };
+    let mut tail = [0; 128];
+    file.read_exact(&mut tail).is_ok() && &tail[..3] == b"TAG"
+}
+
 /// What a single grid cell holds. Cloning is shallow: a cloned `Grid`
 /// shares the same nested grid.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -420,6 +444,8 @@ impl SavedGrid {
             CellKind::Audio
         } else if Self::extension_matches(path, VIDEO_EXTENSIONS) {
             CellKind::Video
+        } else if has_id3_signature(path) {
+            CellKind::Audio
         } else if Self::extension_matches(path, RUBY_EXTENSIONS) {
             CellKind::RubyScript
         } else {

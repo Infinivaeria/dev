@@ -5231,7 +5231,7 @@ impl App {
     /// Height reserved at the bottom of the window by the player bar.
     fn bottom_inset(&self, screen_width: i32, screen_height: i32) -> f32 {
         if self.player.visible {
-            music::bar_height(screen_width, screen_height)
+            music::bar_height_for_player(&self.player, screen_width, screen_height)
         } else {
             0.0
         }

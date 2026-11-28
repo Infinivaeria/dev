@@ -845,28 +845,34 @@ impl UiState {
         }
 
         let metadata = self.video_metadata.as_ref();
-        d.draw_text(
-            &metadata
-                .map(|m| {
-                    format!(
-                        "Video: {}x{}  {:.2}s  {:.2} fps",
-                        m.width.unwrap_or(0),
-                        m.height.unwrap_or(0),
-                        m.duration_seconds.unwrap_or(0.0),
-                        m.fps.unwrap_or(0.0)
-                    )
-                })
-                .unwrap_or_else(|| {
-                    self.video_path
-                        .as_ref()
-                        .map(|p| format!("Video: {}", p.display()))
-                        .unwrap_or_else(|| "Video: drop MP4/MOV/MKV/WEBM/AVI".into())
-                }),
-            780,
-            700 - 27,
-            13,
-            Color::LIGHTGRAY,
-        );
+        let mut metadata_lines = Vec::new();
+        if let Some(metadata) = metadata {
+            metadata_lines.push(format!(
+                "{}x{}  {:.2}s  {:.2} fps",
+                metadata.width.unwrap_or(0),
+                metadata.height.unwrap_or(0),
+                metadata.duration_seconds.unwrap_or(0.0),
+                metadata.fps.unwrap_or(0.0)
+            ));
+            let mut tags = metadata.tags.iter().collect::<Vec<_>>();
+            tags.sort_by(|(left, _), (right, _)| left.cmp(right));
+            metadata_lines.extend(
+                tags.into_iter()
+                    .filter(|(_, value)| !value.trim().is_empty())
+                    .map(|(name, value)| format!("{name}: {value}")),
+            );
+        } else if let Some(path) = &self.video_path {
+            metadata_lines.push(format!("Video: {}", path.display()));
+        } else {
+            metadata_lines.push("Video: drop MP4/MOV/MKV/WEBM/AVI".into());
+        }
+        let mut line_index = 0;
+        for metadata_line in metadata_lines {
+            for line in crate::ui::wrap_full(&metadata_line, 12.0, 286.0) {
+                d.draw_text(&line, 780, 612 + line_index as i32 * 14, 12, Color::LIGHTGRAY);
+                line_index += 1;
+            }
+        }
         button(d, rect(780.0, 670.0, 132.0, 26.0), "Extract Frames", false);
         button(d, rect(918.0, 670.0, 148.0, 26.0), "Transcode MP4", false);
 

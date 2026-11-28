@@ -2,6 +2,7 @@ use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::imageops::FilterType;
 use image::{AnimationDecoder, Delay, DynamicImage, Frame, ImageFormat, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
@@ -439,6 +440,7 @@ pub struct VideoMetadata {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<f64>,
+    pub tags: HashMap<String, String>,
 }
 
 pub fn ffmpeg_available() -> bool {
@@ -501,7 +503,7 @@ pub fn probe_video(path: impl AsRef<Path>) -> GraphicsResult<VideoMetadata> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height,avg_frame_rate:format=duration",
+            "stream=width,height,avg_frame_rate:stream_tags*:format=duration:format_tags*",
             "-of",
             "json",
         ])
@@ -516,6 +518,25 @@ pub fn probe_video(path: impl AsRef<Path>) -> GraphicsResult<VideoMetadata> {
         .and_then(|value| value.as_array())
         .and_then(|streams| streams.first());
     let duration_seconds = document.pointer("/format/duration").and_then(value_as_f64);
+    let mut tags = HashMap::new();
+    if let Some(format_tags) = document.pointer("/format/tags").and_then(|value| value.as_object()) {
+        for (key, value) in format_tags {
+            if let Some(value) = value.as_str() {
+                tags.insert(key.to_ascii_lowercase(), value.trim().to_owned());
+            }
+        }
+    }
+    if let Some(stream_tags) = stream
+        .and_then(|value| value.get("tags"))
+        .and_then(|value| value.as_object())
+    {
+        for (key, value) in stream_tags {
+            if let Some(value) = value.as_str() {
+                tags.entry(key.to_ascii_lowercase())
+                    .or_insert_with(|| value.trim().to_owned());
+            }
+        }
+    }
     Ok(VideoMetadata {
         duration_seconds,
         width: stream
@@ -530,6 +551,7 @@ pub fn probe_video(path: impl AsRef<Path>) -> GraphicsResult<VideoMetadata> {
             .and_then(|s| s.get("avg_frame_rate"))
             .and_then(|v| v.as_str())
             .and_then(parse_fraction),
+        tags,
     })
 }
 
@@ -691,6 +713,7 @@ fn probe_video_native(path: &Path) -> GraphicsResult<VideoMetadata> {
         width: Some(width),
         height: Some(height),
         fps: Some(f64::from(decoder.frame_rate())),
+        tags: HashMap::new(),
     })
 }
 
